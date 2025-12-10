@@ -1,127 +1,104 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
-from datetime import datetime
 from enum import Enum
+from typing import Dict, Any
 import logging
-
-logger = logging.getLogger(__name__)
 
 class AgentType(str, Enum):
     """Types of agents in the system"""
     KNOWLEDGE_EXTRACTION = "knowledge_extraction"
     PROFILER = "profiler"
-    PLANNER = "planner"
+    PATH_PLANNER = "path_planner"
     TUTOR = "tutor"
     EVALUATOR = "evaluator"
-    KAG = "kag"  # Knowledge Artifact Generation
-
-class AgentMessage:
-    """Message structure for inter-agent communication"""
-    def __init__(
-        self,
-        sender: str,
-        receiver: str,
-        message_type: str,
-        payload: Dict[str, Any],
-        timestamp: Optional[datetime] = None
-    ):
-        self.sender = sender
-        self.receiver = receiver
-        self.message_type = message_type
-        self.payload = payload
-        self.timestamp = timestamp or datetime.now()
-    
-    def to_dict(self) -> Dict:
-        return {
-            "sender": self.sender,
-            "receiver": self.receiver,
-            "message_type": self.message_type,
-            "payload": self.payload,
-            "timestamp": self.timestamp.isoformat()
-        }
+    KAG = "kag"
 
 class BaseAgent(ABC):
     """
     Base class for all agents in the system.
     
-    Architecture:
-    - Each agent is responsible for ONE task
-    - Agents communicate via Event Bus
-    - Agents manage their own state
-    - Agents use LLM via LlamaIndex
+    Responsibilities:
+    - Execute agent-specific tasks
+    - Manage agent state
+    - Communicate with other agents via event bus
+    - Log activities
     """
     
-    def __init__(
-        self,
-        agent_id: str,
-        agent_type: AgentType,
-        state_manager: Any,  # Central State Manager
-        event_bus: Any       # Event Bus
-    ):
+    def __init__(self, agent_id: str, agent_type: AgentType, state_manager, event_bus):
+        """
+        Initialize base agent.
+        
+        Args:
+            agent_id: Unique identifier for this agent instance
+            agent_type: Type of agent (from AgentType enum)
+            state_manager: CentralStateManager instance for shared state
+            event_bus: EventBus instance for inter-agent communication
+        """
         self.agent_id = agent_id
         self.agent_type = agent_type
         self.state_manager = state_manager
         self.event_bus = event_bus
-        self.logger = logging.getLogger(f"Agent.{agent_id}")
-        
-        self.logger.info(f"🤖 Initializing {agent_type.value} agent: {agent_id}")
+        self.logger = logging.getLogger(f"{agent_type.value}.{agent_id}")
+        self.logger.info(f"Initialized {agent_type.value} agent: {agent_id}")
     
     @abstractmethod
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """
-        Main execution method that subclasses must implement.
+        Execute agent's main task.
+        
+        This must be implemented by each agent subclass.
         
         Args:
             **kwargs: Agent-specific parameters
-        
+            
         Returns:
-            Dict containing execution results
+            Dict with execution results (must include 'success' key)
         """
         pass
     
-    async def send_message(self, receiver: str, message_type: str, payload: Dict):
-        """Send message to another agent via Event Bus"""
-        message = AgentMessage(
+    async def save_state(self, key: str, value: Any) -> None:
+        """
+        Save state to central state manager.
+        
+        Args:
+            key: State key
+            value: State value
+        """
+        await self.state_manager.set(key, value)
+    
+    async def get_state(self, key: str) -> Any:
+        """
+        Get state from central state manager.
+        
+        Args:
+            key: State key
+            
+        Returns:
+            State value or None if not found
+        """
+        return await self.state_manager.get(key)
+    
+    async def send_message(self, receiver: str, message_type: str, payload: Dict[str, Any]) -> None:
+        """
+        Send message to another agent via event bus.
+        
+        Args:
+            receiver: Receiver agent ID or type
+            message_type: Type of message
+            payload: Message payload
+        """
+        await self.event_bus.publish(
             sender=self.agent_id,
             receiver=receiver,
             message_type=message_type,
             payload=payload
         )
-        await self.event_bus.publish(message)
-        self.logger.debug(f"📤 Sent message to {receiver}: {message_type}")
     
-    async def receive_message(self, message: AgentMessage) -> None:
+    async def subscribe(self, message_type: str, handler) -> None:
         """
-        Receive and handle message from another agent.
-        Subclasses can override for custom handling.
+        Subscribe to messages of a specific type.
+        
+        Args:
+            message_type: Type of message to subscribe to
+            handler: Async function to handle message
         """
-        self.logger.debug(f"📥 Received message from {message.sender}: {message.message_type}")
-    
-    async def save_state(self, key: str, value: Any) -> None:
-        """Save agent state to Central State Manager"""
-        await self.state_manager.set(f"{self.agent_id}:{key}", value)
-    
-    async def load_state(self, key: str) -> Optional[Any]:
-        """Load agent state from Central State Manager"""
-        return await self.state_manager.get(f"{self.agent_id}:{key}")
-    
-    async def health_check(self) -> bool:
-        """Check if agent is healthy"""
-        try:
-            self.logger.info(f"✅ Health check passed for {self.agent_id}")
-            return True
-        except Exception as e:
-            self.logger.error(f"❌ Health check failed: {e}")
-            return False
-
-# Example usage in subclass:
-# 
-# class KnowledgeExtractionAgent(BaseAgent):
-#     def __init__(self, agent_id, state_manager, event_bus, llm):
-#         super().__init__(agent_id, AgentType.KNOWLEDGE_EXTRACTION, 
-#                         state_manager, event_bus)
-#         self.llm = llm
-#     
-#     async def execute(self, document_path: str, **kwargs):
-#         # Custom implementation
-#         return {"status": "success", "nodes": [...], "relationships": [...]}
+        await self.event_bus.subscribe(message_type, handler)

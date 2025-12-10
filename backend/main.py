@@ -9,9 +9,14 @@ from backend.database.database_factory import (
     shutdown_databases,
     get_factory
 )
-from backend.agents import KnowledgeExtractionAgent, ProfilerAgent
+from backend.agents import (
+    KnowledgeExtractionAgent,
+    ProfilerAgent,
+    PathPlannerAgent
+)
 from backend.core import CentralStateManager, EventBus
 from backend.api.agent_routes import router as agents_router, set_agents
+from backend.api.path_routes import router as paths_router, set_path_planner_agent
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +60,21 @@ async def lifespan(app: FastAPI):
             event_bus=_event_bus
         )
         
+        path_planner_agent = PathPlannerAgent(
+            agent_id="path_planner_1",
+            state_manager=_state_manager,
+            event_bus=_event_bus
+        )
+        
         _agents["knowledge_extraction"] = ke_agent
         _agents["profiler"] = profiler_agent
+        _agents["path_planner"] = path_planner_agent
         
         # Set agents in routes
         set_agents(ke_agent, profiler_agent)
+        set_path_planner_agent(path_planner_agent)
         
-        logger.info("✅ Agents initialized (KE, Profiler)")
+        logger.info("✅ Agents initialized (KE, Profiler, PathPlanner)")
     except Exception as e:
         logger.error(f"❌ Agent initialization failed: {e}")
         raise RuntimeError("Agent initialization failed")
@@ -75,7 +88,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Agentic Learning Path API",
     description="Multi-Agent AI system for personalized learning paths",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan
 )
 
@@ -91,6 +104,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(agents_router)
+app.include_router(paths_router)
 
 # ============= HEALTH ENDPOINTS =============
 
@@ -108,7 +122,8 @@ async def health_check():
         "databases": db_health,
         "agents": {
             "knowledge_extraction": "knowledge_extraction" in _agents,
-            "profiler": "profiler" in _agents
+            "profiler": "profiler" in _agents,
+            "path_planner": "path_planner" in _agents
         },
         "message": "✅ All systems operational" if all_healthy else "⚠️ Some systems degraded"
     }
@@ -148,7 +163,8 @@ async def system_status():
         },
         "agents": {
             "knowledge_extraction": "knowledge_extraction" in _agents,
-            "profiler": "profiler" in _agents
+            "profiler": "profiler" in _agents,
+            "path_planner": "path_planner" in _agents
         }
     }
 
