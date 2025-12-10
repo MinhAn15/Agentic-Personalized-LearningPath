@@ -1,305 +1,276 @@
-"""
-Knowledge Extraction Agent
-
-Responsible for:
-- Extracting concepts, topics, and entities from educational content
-- Building knowledge graph nodes and relationships
-- Identifying prerequisites and dependencies between concepts
-- Working with LlamaIndex for document processing
-"""
-
-from typing import Any, Dict, List, Optional
+import json
+from typing import Dict, Any, List
 from datetime import datetime
 import logging
 
-from backend.core.base_agent import BaseAgent, AgentType, AgentMessage
-from backend.core.event_bus import EventType, Event
+from backend.core.base_agent import BaseAgent, AgentType
+from backend.models import DocumentInput, KnowledgeExtractionOutput, ConceptNode, ConceptRelationship
+from backend.prompts import KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT
+from llama_index.llms.openai import OpenAI
+from backend.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-
-class KnowledgeNode:
-    """Represents a knowledge concept/node in the graph"""
-    
-    def __init__(
-        self,
-        node_id: str,
-        name: str,
-        node_type: str,  # concept, topic, skill, prerequisite
-        description: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ):
-        self.node_id = node_id
-        self.name = name
-        self.node_type = node_type
-        self.description = description
-        self.metadata = metadata or {}
-        self.created_at = datetime.now()
-    
-    def to_dict(self) -> Dict:
-        return {
-            "node_id": self.node_id,
-            "name": self.name,
-            "node_type": self.node_type,
-            "description": self.description,
-            "metadata": self.metadata,
-            "created_at": self.created_at.isoformat()
-        }
-
-
-class KnowledgeRelationship:
-    """Represents a relationship between two knowledge nodes"""
-    
-    def __init__(
-        self,
-        source_id: str,
-        target_id: str,
-        relationship_type: str,  # prerequisite, related_to, part_of, leads_to
-        weight: float = 1.0,
-        metadata: Optional[Dict[str, Any]] = None
-    ):
-        self.source_id = source_id
-        self.target_id = target_id
-        self.relationship_type = relationship_type
-        self.weight = weight
-        self.metadata = metadata or {}
-    
-    def to_dict(self) -> Dict:
-        return {
-            "source_id": self.source_id,
-            "target_id": self.target_id,
-            "relationship_type": self.relationship_type,
-            "weight": self.weight,
-            "metadata": self.metadata
-        }
-
-
 class KnowledgeExtractionAgent(BaseAgent):
     """
-    Agent responsible for extracting knowledge from educational content.
+    Knowledge Extraction Agent - Automatically build Course Knowledge Graph from documents.
     
-    Uses LlamaIndex for:
-    - Document loading and parsing
-    - Text chunking and embedding
-    - Entity and concept extraction via LLM
+    Responsibility:
+    - Parse educational documents
+    - Extract key learning concepts
+    - Identify prerequisite relationships
+    - Create nodes + relationships in Neo4j Course KG
     
-    Outputs:
-    - Knowledge nodes (concepts, topics, skills)
-    - Relationships (prerequisites, dependencies)
-    - Metadata (difficulty, time estimates)
+    Process Flow:
+    1. Receive document content
+    2. Call LLM to extract structured concepts
+    3. Validate and parse LLM output
+    4. Create concept nodes in Neo4j
+    5. Create relationships in Neo4j
+    6. Return extraction results
+    7. Emit event for other agents
+    
+    Example:
+        agent = KnowledgeExtractionAgent(...)
+        result = await agent.execute(
+            document_content="SQL tutorial...",
+            document_title="SQL Basics"
+        )
+        # Returns: {
+        #   "success": True,
+        #   "concepts_created": 8,
+        #   "relationships_created": 5,
+        #   "document_id": "doc_123"
+        # }
     """
     
-    def __init__(
-        self,
-        agent_id: str,
-        state_manager: Any,
-        event_bus: Any,
-        llm: Optional[Any] = None,  # LlamaIndex LLM
-        embed_model: Optional[Any] = None  # Embedding model
-    ):
-        super().__init__(
-            agent_id=agent_id,
-            agent_type=AgentType.KNOWLEDGE_EXTRACTION,
-            state_manager=state_manager,
-            event_bus=event_bus
-        )
-        self.llm = llm
-        self.embed_model = embed_model
-        
-        # Subscribe to relevant events
-        self.event_bus.subscribe(
-            EventType.KNOWLEDGE_EXTRACTED,
-            self._on_knowledge_event
-        )
-    
-    async def execute(
-        self,
-        content: str,
-        content_type: str = "text",
-        source_id: Optional[str] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
+    def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
         """
-        Extract knowledge from content.
+        Initialize Knowledge Extraction Agent.
         
         Args:
-            content: The text content to analyze
-            content_type: Type of content (text, pdf, url)
-            source_id: Optional identifier for the source
+            agent_id: Unique agent identifier
+            state_manager: Central state manager
+            event_bus: Event bus for inter-agent communication
+            llm: LLM instance (OpenAI by default)
+        """
+        super().__init__(agent_id, AgentType.KNOWLEDGE_EXTRACTION, state_manager, event_bus)
+        
+        self.settings = get_settings()
+        self.llm = llm or OpenAI(
+            model=self.settings.OPENAI_MODEL,
+            api_key=self.settings.OPENAI_API_KEY
+        )
+        self.logger = logging.getLogger(f"KnowledgeExtractionAgent.{agent_id}")
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """
+        Main execution method.
+        
+        Args:
+            document_content: str - Content of educational document
+            document_title: str - Title of document
+            document_type: str - Type of document (lecture, tutorial, etc.)
             
         Returns:
-            Dict containing extracted nodes and relationships
+            Dict with execution results
         """
-        self.logger.info(f"🔍 Starting knowledge extraction from {content_type}")
-        
         try:
-            # Step 1: Preprocess content
-            processed_content = await self._preprocess_content(content, content_type)
+            document_content = kwargs.get("document_content")
+            document_title = kwargs.get("document_title", "Untitled")
+            document_type = kwargs.get("document_type", "LECTURE")
             
-            # Step 2: Extract concepts
-            nodes = await self._extract_concepts(processed_content)
-            
-            # Step 3: Identify relationships
-            relationships = await self._identify_relationships(nodes, processed_content)
-            
-            # Step 4: Enrich with metadata
-            enriched_nodes = await self._enrich_nodes(nodes)
-            
-            # Step 5: Save to state
-            result = {
-                "status": "success",
-                "source_id": source_id,
-                "nodes": [node.to_dict() for node in enriched_nodes],
-                "relationships": [rel.to_dict() for rel in relationships],
-                "metadata": {
-                    "extracted_at": datetime.now().isoformat(),
-                    "node_count": len(enriched_nodes),
-                    "relationship_count": len(relationships)
+            if not document_content:
+                return {
+                    "success": False,
+                    "error": "document_content is required",
+                    "agent_id": self.agent_id
                 }
-            }
             
-            await self.save_state("last_extraction", result)
+            self.logger.info(f"🔍 Extracting knowledge from: {document_title}")
             
-            # Step 6: Publish event
-            await self.event_bus.publish(Event(
-                event_type=EventType.KNOWLEDGE_EXTRACTED,
-                source=self.agent_id,
-                payload=result
-            ))
-            
-            self.logger.info(
-                f"✅ Extracted {len(nodes)} concepts, "
-                f"{len(relationships)} relationships"
+            # Step 1: Extract concepts using LLM
+            extraction_result = await self._extract_concepts_from_llm(
+                document_content,
+                document_title
             )
             
-            return result
+            if not extraction_result["success"]:
+                return extraction_result
             
+            extraction_output = extraction_result["extraction_output"]
+            
+            # Step 2: Create concept nodes in Neo4j
+            neo4j = self.state_manager.neo4j
+            created_concepts = 0
+            for concept in extraction_output.concepts:
+                success = await neo4j.create_course_concept(
+                    concept_id=concept.concept_id,
+                    name=concept.name,
+                    difficulty=concept.difficulty.value,
+                    description=concept.description
+                )
+                if success:
+                    created_concepts += 1
+            
+            # Step 3: Create relationships in Neo4j
+            created_relationships = 0
+            for rel in extraction_output.relationships:
+                success = await neo4j.add_prerequisite(
+                    concept_id=rel.source_concept_id,
+                    prerequisite_id=rel.target_concept_id
+                )
+                if success:
+                    created_relationships += 1
+            
+            # Step 4: Save extraction metadata
+            await self.save_state(
+                f"extraction_{extraction_output.document_id}",
+                {
+                    "title": document_title,
+                    "type": document_type,
+                    "concepts_count": len(extraction_output.concepts),
+                    "relationships_count": len(extraction_output.relationships),
+                    "timestamp": extraction_output.extraction_timestamp.isoformat()
+                }
+            )
+            
+            result = {
+                "success": True,
+                "agent_id": self.agent_id,
+                "document_id": extraction_output.document_id,
+                "document_title": document_title,
+                "concepts_extracted": len(extraction_output.concepts),
+                "concepts_created": created_concepts,
+                "relationships_created": created_relationships,
+                "concepts": [
+                    {
+                        "concept_id": c.concept_id,
+                        "name": c.name,
+                        "difficulty": c.difficulty.value
+                    }
+                    for c in extraction_output.concepts
+                ]
+            }
+            
+            # Step 5: Emit event for other agents
+            await self.send_message(
+                receiver="planner",
+                message_type="knowledge_extracted",
+                payload={
+                    "document_id": extraction_output.document_id,
+                    "concepts_count": len(extraction_output.concepts)
+                }
+            )
+            
+            self.logger.info(f"✅ Knowledge extraction complete: {created_concepts} concepts, {created_relationships} relationships")
+            
+            return result
+        
         except Exception as e:
             self.logger.error(f"❌ Extraction failed: {e}")
             return {
-                "status": "error",
+                "success": False,
                 "error": str(e),
-                "nodes": [],
-                "relationships": []
+                "agent_id": self.agent_id
             }
     
-    async def _preprocess_content(
-        self, 
-        content: str, 
-        content_type: str
-    ) -> str:
-        """Preprocess and clean content"""
-        # For now, basic cleaning
-        # TODO: Add LlamaIndex document loaders for PDF, HTML, etc.
-        processed = content.strip()
-        self.logger.debug(f"📄 Preprocessed content: {len(processed)} chars")
-        return processed
-    
-    async def _extract_concepts(self, content: str) -> List[KnowledgeNode]:
-        """Extract concepts from content using LLM"""
-        nodes = []
-        
-        if self.llm is None:
-            # Mock extraction for testing without LLM
-            self.logger.warning("⚠️ No LLM configured, using mock extraction")
-            nodes = self._mock_extract_concepts(content)
-        else:
-            # TODO: Real LLM extraction
-            # Use LlamaIndex to extract entities and concepts
-            pass
-        
-        return nodes
-    
-    def _mock_extract_concepts(self, content: str) -> List[KnowledgeNode]:
-        """Mock concept extraction for testing"""
-        # Simple keyword-based mock extraction
-        import hashlib
-        
-        mock_concepts = [
-            ("Machine Learning", "concept", "Core AI/ML concept"),
-            ("Neural Networks", "topic", "Deep learning architecture"),
-            ("Python Programming", "skill", "Programming language for ML"),
-        ]
-        
-        nodes = []
-        for name, node_type, desc in mock_concepts:
-            node_id = hashlib.md5(name.encode()).hexdigest()[:8]
-            nodes.append(KnowledgeNode(
-                node_id=node_id,
-                name=name,
-                node_type=node_type,
-                description=desc
-            ))
-        
-        return nodes
-    
-    async def _identify_relationships(
-        self, 
-        nodes: List[KnowledgeNode],
-        content: str
-    ) -> List[KnowledgeRelationship]:
-        """Identify relationships between concepts"""
-        relationships = []
-        
-        if len(nodes) < 2:
-            return relationships
-        
-        # Mock: Create prerequisite chain
-        for i in range(len(nodes) - 1):
-            relationships.append(KnowledgeRelationship(
-                source_id=nodes[i].node_id,
-                target_id=nodes[i + 1].node_id,
-                relationship_type="prerequisite",
-                weight=0.8
-            ))
-        
-        return relationships
-    
-    async def _enrich_nodes(
-        self, 
-        nodes: List[KnowledgeNode]
-    ) -> List[KnowledgeNode]:
-        """Enrich nodes with additional metadata"""
-        for node in nodes:
-            # Add difficulty estimation
-            node.metadata["difficulty"] = "intermediate"
-            # Add estimated learning time
-            node.metadata["estimated_hours"] = 2.0
-            # Add bloom's taxonomy level
-            node.metadata["bloom_level"] = "understand"
-        
-        return nodes
-    
-    async def _on_knowledge_event(self, event: Event) -> None:
-        """Handle knowledge-related events"""
-        if event.source != self.agent_id:
-            self.logger.debug(f"📥 Received knowledge event from {event.source}")
-    
-    async def extract_from_document(
-        self, 
-        document_path: str
+    async def _extract_concepts_from_llm(
+        self,
+        document_content: str,
+        document_title: str
     ) -> Dict[str, Any]:
-        """Extract knowledge from a document file"""
-        # TODO: Implement with LlamaIndex document loaders
-        self.logger.info(f"📁 Loading document: {document_path}")
+        """
+        Call LLM to extract concepts from document.
         
-        # Placeholder - would use:
-        # from llama_index.core import SimpleDirectoryReader
-        # documents = SimpleDirectoryReader(input_files=[document_path]).load_data()
+        Args:
+            document_content: The document text
+            document_title: Title of document
+            
+        Returns:
+            Dict with success flag and extraction output
+        """
+        try:
+            # Prepare prompt for LLM
+            user_prompt = f"""
+            Document Title: {document_title}
+            
+            Document Content:
+            {document_content}
+            
+            Extract all key learning concepts from this document.
+            Return ONLY valid JSON, no markdown formatting.
+            """
+            
+            # Call LLM
+            response = await self.llm.acomplete(
+                KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT + "\n\n" + user_prompt
+            )
+            
+            # Parse LLM response
+            response_text = response.text
+            
+            # Extract JSON from response
+            try:
+                # Try to find JSON in response
+                json_start = response_text.find("{")
+                json_end = response_text.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    json_str = response_text[json_start:json_end]
+                    extracted_data = json.loads(json_str)
+                else:
+                    return {
+                        "success": False,
+                        "error": "Could not find JSON in LLM response"
+                    }
+            except json.JSONDecodeError as e:
+                self.logger.error(f"JSON parsing error: {e}")
+                return {
+                    "success": False,
+                    "error": f"Invalid JSON from LLM: {e}"
+                }
+            
+            # Build extraction output
+            concepts = [
+                ConceptNode(
+                    concept_id=c["concept_id"],
+                    name=c["name"],
+                    description=c["description"],
+                    difficulty=c["difficulty"],
+                    document_source=document_title,
+                    tags=c.get("tags", [])
+                )
+                for c in extracted_data.get("concepts", [])
+            ]
+            
+            relationships = [
+                ConceptRelationship(
+                    source_concept_id=r["source_concept_id"],
+                    target_concept_id=r["target_concept_id"],
+                    relation_type=r["relation_type"],
+                    confidence=r.get("confidence", 0.8)
+                )
+                for r in extracted_data.get("relationships", [])
+            ]
+            
+            document_id = f"doc_{int(datetime.now().timestamp())}"
+            
+            extraction_output = KnowledgeExtractionOutput(
+                concepts=concepts,
+                relationships=relationships,
+                document_id=document_id,
+                total_concepts=len(concepts),
+                total_relationships=len(relationships)
+            )
+            
+            return {
+                "success": True,
+                "extraction_output": extraction_output
+            }
         
-        return await self.execute(
-            content="[Document content would be loaded here]",
-            content_type="document",
-            source_id=document_path
-        )
-    
-    async def extract_from_url(self, url: str) -> Dict[str, Any]:
-        """Extract knowledge from a URL"""
-        self.logger.info(f"🌐 Loading URL: {url}")
-        
-        # TODO: Implement with LlamaIndex web reader
-        return await self.execute(
-            content="[URL content would be loaded here]",
-            content_type="url",
-            source_id=url
-        )
+        except Exception as e:
+            self.logger.error(f"LLM call failed: {e}")
+            return {
+                "success": False,
+                "error": f"LLM error: {e}"
+            }

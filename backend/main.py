@@ -9,8 +9,16 @@ from backend.database.database_factory import (
     shutdown_databases,
     get_factory
 )
+from backend.agents import KnowledgeExtractionAgent, ProfilerAgent
+from backend.core import CentralStateManager, EventBus
+from backend.api.agent_routes import router as agents_router, set_agents
 
 logger = logging.getLogger(__name__)
+
+# Global variables
+_state_manager = None
+_event_bus = None
+_agents = {}
 
 # Initialization on startup
 @asynccontextmanager
@@ -24,6 +32,39 @@ async def lifespan(app: FastAPI):
     else:
         logger.error("❌ Failed to initialize databases")
         raise RuntimeError("Database initialization failed")
+    
+    # Initialize infrastructure
+    factory = get_factory()
+    global _state_manager, _event_bus
+    _state_manager = CentralStateManager(factory.redis, factory.postgres)
+    _event_bus = EventBus()
+    
+    logger.info("✅ Infrastructure initialized")
+    
+    # Initialize agents
+    try:
+        ke_agent = KnowledgeExtractionAgent(
+            agent_id="knowledge_extraction_1",
+            state_manager=_state_manager,
+            event_bus=_event_bus
+        )
+        
+        profiler_agent = ProfilerAgent(
+            agent_id="profiler_1",
+            state_manager=_state_manager,
+            event_bus=_event_bus
+        )
+        
+        _agents["knowledge_extraction"] = ke_agent
+        _agents["profiler"] = profiler_agent
+        
+        # Set agents in routes
+        set_agents(ke_agent, profiler_agent)
+        
+        logger.info("✅ Agents initialized (KE, Profiler)")
+    except Exception as e:
+        logger.error(f"❌ Agent initialization failed: {e}")
+        raise RuntimeError("Agent initialization failed")
     
     yield
     
@@ -48,6 +89,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include routers
+app.include_router(agents_router)
+
 # ============= HEALTH ENDPOINTS =============
 
 @app.get("/health")
@@ -62,6 +106,10 @@ async def health_check():
         "status": "healthy" if all_healthy else "degraded",
         "version": settings.API_VERSION,
         "databases": db_health,
+        "agents": {
+            "knowledge_extraction": "knowledge_extraction" in _agents,
+            "profiler": "profiler" in _agents
+        },
         "message": "✅ All systems operational" if all_healthy else "⚠️ Some systems degraded"
     }
 
@@ -97,6 +145,10 @@ async def system_status():
                 "status": "healthy" if db_health["redis"] else "unhealthy",
                 "url": settings.REDIS_URL
             }
+        },
+        "agents": {
+            "knowledge_extraction": "knowledge_extraction" in _agents,
+            "profiler": "profiler" in _agents
         }
     }
 
