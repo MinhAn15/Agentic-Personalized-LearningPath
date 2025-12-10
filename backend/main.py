@@ -12,11 +12,17 @@ from backend.database.database_factory import (
 from backend.agents import (
     KnowledgeExtractionAgent,
     ProfilerAgent,
-    PathPlannerAgent
+    PathPlannerAgent,
+    TutorAgent,
+    EvaluatorAgent,
+    KAGAgent
 )
 from backend.core import CentralStateManager, EventBus
 from backend.api.agent_routes import router as agents_router, set_agents
 from backend.api.path_routes import router as paths_router, set_path_planner_agent
+from backend.api.tutor_routes import router as tutor_router, set_tutor_agent
+from backend.api.evaluator_routes import router as evaluator_router, set_evaluator_agent
+from backend.api.kag_routes import router as kag_router, set_kag_agent
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +72,39 @@ async def lifespan(app: FastAPI):
             event_bus=_event_bus
         )
         
+        tutor_agent = TutorAgent(
+            agent_id="tutor_1",
+            state_manager=_state_manager,
+            event_bus=_event_bus
+        )
+        
+        evaluator_agent = EvaluatorAgent(
+            agent_id="evaluator_1",
+            state_manager=_state_manager,
+            event_bus=_event_bus
+        )
+        
+        kag_agent = KAGAgent(
+            agent_id="kag_1",
+            state_manager=_state_manager,
+            event_bus=_event_bus
+        )
+        
         _agents["knowledge_extraction"] = ke_agent
         _agents["profiler"] = profiler_agent
         _agents["path_planner"] = path_planner_agent
+        _agents["tutor"] = tutor_agent
+        _agents["evaluator"] = evaluator_agent
+        _agents["kag"] = kag_agent
         
         # Set agents in routes
         set_agents(ke_agent, profiler_agent)
         set_path_planner_agent(path_planner_agent)
+        set_tutor_agent(tutor_agent)
+        set_evaluator_agent(evaluator_agent)
+        set_kag_agent(kag_agent)
         
-        logger.info("✅ Agents initialized (KE, Profiler, PathPlanner)")
+        logger.info("✅ Agents initialized (KE, Profiler, PathPlanner, Tutor, Evaluator, KAG)")
     except Exception as e:
         logger.error(f"❌ Agent initialization failed: {e}")
         raise RuntimeError("Agent initialization failed")
@@ -105,6 +135,9 @@ app.add_middleware(
 # Include routers
 app.include_router(agents_router)
 app.include_router(paths_router)
+app.include_router(tutor_router)
+app.include_router(evaluator_router)
+app.include_router(kag_router)
 
 # ============= HEALTH ENDPOINTS =============
 
@@ -123,7 +156,10 @@ async def health_check():
         "agents": {
             "knowledge_extraction": "knowledge_extraction" in _agents,
             "profiler": "profiler" in _agents,
-            "path_planner": "path_planner" in _agents
+            "path_planner": "path_planner" in _agents,
+            "tutor": "tutor" in _agents,
+            "evaluator": "evaluator" in _agents,
+            "kag": "kag" in _agents
         },
         "message": "✅ All systems operational" if all_healthy else "⚠️ Some systems degraded"
     }
@@ -164,7 +200,10 @@ async def system_status():
         "agents": {
             "knowledge_extraction": "knowledge_extraction" in _agents,
             "profiler": "profiler" in _agents,
-            "path_planner": "path_planner" in _agents
+            "path_planner": "path_planner" in _agents,
+            "tutor": "tutor" in _agents,
+            "evaluator": "evaluator" in _agents,
+            "kag": "kag" in _agents
         }
     }
 

@@ -1,549 +1,379 @@
-"""
-Tutor Agent (Harvard Principles)
-
-Responsible for:
-- Delivering personalized learning content
-- Applying Harvard learning principles
-- Adaptive teaching strategies
-- Socratic questioning method
-"""
-
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-from enum import Enum
-from dataclasses import dataclass
 import logging
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 
 from backend.core.base_agent import BaseAgent, AgentType
-from backend.core.event_bus import EventType, Event
+from backend.config import get_settings
+from llama_index.llms.openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-
-class TeachingStrategy(str, Enum):
-    """Teaching strategies based on Harvard principles"""
-    DIRECT_INSTRUCTION = "direct_instruction"
-    SOCRATIC = "socratic"
-    SCAFFOLDED = "scaffolded"
-    DISCOVERY = "discovery"
-    WORKED_EXAMPLES = "worked_examples"
-    INTERLEAVED = "interleaved"
-
-
-class ContentType(str, Enum):
-    """Types of learning content"""
-    EXPLANATION = "explanation"
-    EXAMPLE = "example"
-    PRACTICE = "practice"
-    QUIZ = "quiz"
-    SUMMARY = "summary"
-    MISCONCEPTION = "misconception"
-
-
-@dataclass
-class LearningContent:
-    """A piece of learning content"""
-    content_id: str
-    concept_id: str
-    content_type: ContentType
-    title: str
-    body: str
-    difficulty: float
-    estimated_time: int  # minutes
-    metadata: Dict[str, Any] = None
-    
-    def to_dict(self) -> Dict:
-        return {
-            "content_id": self.content_id,
-            "concept_id": self.concept_id,
-            "content_type": self.content_type.value,
-            "title": self.title,
-            "body": self.body,
-            "difficulty": self.difficulty,
-            "estimated_time": self.estimated_time,
-            "metadata": self.metadata or {}
-        }
-
-
-@dataclass
-class TutoringSession:
-    """A tutoring session state"""
-    session_id: str
-    user_id: str
-    concept_id: str
-    strategy: TeachingStrategy
-    contents_delivered: List[str]
-    interactions: List[Dict]
-    started_at: datetime
-    current_state: str = "active"
-    
-    def to_dict(self) -> Dict:
-        return {
-            "session_id": self.session_id,
-            "user_id": self.user_id,
-            "concept_id": self.concept_id,
-            "strategy": self.strategy.value,
-            "contents_delivered": self.contents_delivered,
-            "interactions": self.interactions,
-            "started_at": self.started_at.isoformat(),
-            "current_state": self.current_state
-        }
-
-
 class TutorAgent(BaseAgent):
     """
-    Agent responsible for delivering personalized tutoring.
+    Tutor Agent - Teach using Socratic method (Harvard 7 Principles).
     
-    Harvard Learning Principles Applied:
-    1. Active learning over passive consumption
-    2. Spaced repetition for retention
-    3. Interleaved practice
-    4. Immediate feedback
-    5. Metacognitive awareness
+    Responsibility:
+    - Answer learner questions about concepts
+    - Guide thinking without giving direct answers
+    - Detect misconceptions
+    - Adapt teaching to learner level
+    - Enforce Harvard 7 Pedagogical Principles
     
-    Teaching Strategies:
-    - Socratic questioning
-    - Scaffolded learning
-    - Worked examples with fading
-    - Discovery-based learning
+    Process Flow:
+    1. Receive learner question + concept context
+    2. Retrieve concept details from KG (difficulty, prerequisites)
+    3. Retrieve relevant course materials via RAG
+    4. Determine appropriate hint level
+    5. Generate Socratic response (guide, don't tell)
+    6. Enforce all 7 Harvard Principles
+    7. Return guidance to learner
+    8. Send to Evaluator for assessment
+    
+    Harvard 7 Principles (ENFORCE ALL):
+    1. ❌ NEVER give direct answers - guide with questions
+    2. ✅ Keep responses SHORT (2-4 sentences max)
+    3. ✅ Reveal ONE STEP AT A TIME
+    4. ✅ Ask "What do YOU think?" before helping
+    5. ✅ Praise EFFORT, not intelligence
+    6. ✅ Personalized feedback (address THEIR specific error)
+    7. ✅ Ground ONLY in verified sources (RAG + KG)
+    
+    Example Flow:
+        Learner: "What's a WHERE clause?"
+            ↓
+        Tutor: "Great question! Think about it this way:
+        Imagine you have a list of 1000 people. You only want 
+        to work with people over 21. What would you do first?"
+            ↓
+        Learner: "Filter them?"
+            ↓
+        Tutor: "Exactly! WHERE does the same thing with data.
+        Can you think of how you might write a WHERE condition?"
     """
     
-    def __init__(
-        self,
-        agent_id: str,
-        state_manager: Any,
-        event_bus: Any,
-        llm: Optional[Any] = None
-    ):
-        super().__init__(
-            agent_id=agent_id,
-            agent_type=AgentType.TUTOR,
-            state_manager=state_manager,
-            event_bus=event_bus
-        )
-        self.llm = llm
-        self.sessions: Dict[str, TutoringSession] = {}
-        self.content_cache: Dict[str, LearningContent] = {}
-    
-    async def execute(
-        self,
-        user_id: str,
-        action: str = "start_session",
-        **kwargs
-    ) -> Dict[str, Any]:
+    def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
         """
-        Execute tutor actions.
+        Initialize Tutor Agent.
         
         Args:
-            user_id: The learner's ID
-            action: Action to perform (start_session, get_content,
-                   ask_question, provide_feedback, end_session)
-            **kwargs: Additional parameters
+            agent_id: Unique agent identifier
+            state_manager: Central state manager
+            event_bus: Event bus for inter-agent communication
+            llm: LLM instance (OpenAI by default)
+        """
+        super().__init__(agent_id, AgentType.TUTOR, state_manager, event_bus)
+        
+        self.settings = get_settings()
+        self.llm = llm or OpenAI(
+            model=self.settings.OPENAI_MODEL,
+            api_key=self.settings.OPENAI_API_KEY
+        )
+        self.logger = logging.getLogger(f"TutorAgent.{agent_id}")
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """
+        Main execution method - answer learner question with Socratic guidance.
+        
+        Args:
+            learner_id: str - Learner ID
+            question: str - Learner's question
+            concept_id: str - Concept being learned
+            hint_level: int - Current hint level (0-5, default 1)
+            conversation_history: List - Previous Q&A
             
         Returns:
-            Dict containing action results
+            Dict with Socratic guidance
         """
-        self.logger.info(f"📚 Tutor action: {action} for user {user_id}")
-        
         try:
-            if action == "start_session":
-                return await self._start_session(user_id, **kwargs)
+            learner_id = kwargs.get("learner_id")
+            question = kwargs.get("question")
+            concept_id = kwargs.get("concept_id")
+            hint_level = kwargs.get("hint_level", 1)
+            conversation_history = kwargs.get("conversation_history", [])
             
-            elif action == "get_content":
-                return await self._get_content(user_id, **kwargs)
+            if not all([learner_id, question, concept_id]):
+                return {
+                    "success": False,
+                    "error": "learner_id, question, and concept_id required",
+                    "agent_id": self.agent_id
+                }
             
-            elif action == "ask_question":
-                return await self._handle_question(user_id, **kwargs)
+            self.logger.info(f"👨‍🏫 Tutoring {learner_id} on {concept_id}")
             
-            elif action == "provide_hint":
-                return await self._provide_hint(user_id, **kwargs)
+            # Step 1: Get concept details from KG
+            neo4j = self.state_manager.neo4j
+            concept_result = await neo4j.run_query(
+                "MATCH (c:CourseConcept {concept_id: $concept_id}) RETURN c",
+                concept_id=concept_id
+            )
             
-            elif action == "explain_concept":
-                return await self._explain_concept(user_id, **kwargs)
+            if not concept_result:
+                return {
+                    "success": False,
+                    "error": f"Concept not found: {concept_id}",
+                    "agent_id": self.agent_id
+                }
             
-            elif action == "socratic_dialogue":
-                return await self._socratic_dialogue(user_id, **kwargs)
+            concept = concept_result[0].get("c", {})
             
-            elif action == "end_session":
-                return await self._end_session(user_id, **kwargs)
+            # Step 2: Get learner's current mastery
+            learner_profile = await self.state_manager.get_learner_profile(learner_id)
+            current_mastery = 0.0
+            if learner_profile:
+                for mastery in learner_profile.get("current_mastery", []):
+                    if mastery.get("concept_id") == concept_id:
+                        current_mastery = mastery.get("mastery_level", 0.0)
+                        break
             
-            else:
-                return {"status": "error", "error": f"Unknown action: {action}"}
-                
+            # Step 3: Retrieve context (RAG)
+            context = await self._retrieve_context(concept_id, question)
+            
+            # Step 4: Determine hint level based on learner progress
+            adjusted_hint = await self._determine_hint_level(
+                current_mastery,
+                concept.get("difficulty", 2),
+                hint_level
+            )
+            
+            # Step 5: Generate Socratic response
+            response = await self._generate_socratic_response(
+                question=question,
+                concept=concept,
+                context=context,
+                learner_mastery=current_mastery,
+                hint_level=adjusted_hint,
+                conversation_history=conversation_history
+            )
+            
+            if not response.get("success"):
+                return response
+            
+            # Step 6: Prepare result
+            result = {
+                "success": True,
+                "agent_id": self.agent_id,
+                "learner_id": learner_id,
+                "concept_id": concept_id,
+                "guidance": response["guidance"],
+                "hint_level": adjusted_hint,
+                "follow_up_question": response.get("follow_up_question"),
+                "source": response.get("source"),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Step 7: Save to conversation history
+            await self.save_state(
+                f"tutor_session:{learner_id}:{concept_id}",
+                {
+                    "last_guidance": result,
+                    "conversation_turns": len(conversation_history) + 1
+                }
+            )
+            
+            # Step 8: Emit event for evaluator (when learner responds)
+            await self.send_message(
+                receiver="evaluator",
+                message_type="tutor_guidance_provided",
+                payload={
+                    "learner_id": learner_id,
+                    "concept_id": concept_id,
+                    "hint_level": adjusted_hint
+                }
+            )
+            
+            self.logger.info(f"✅ Guidance provided (hint level {adjusted_hint})")
+            
+            return result
+        
         except Exception as e:
-            self.logger.error(f"❌ Tutor action failed: {e}")
-            return {"status": "error", "error": str(e)}
-    
-    async def _start_session(
-        self,
-        user_id: str,
-        concept_id: str,
-        concept_name: str,
-        learner_profile: Optional[Dict] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Start a new tutoring session"""
-        
-        import hashlib
-        session_id = hashlib.md5(
-            f"{user_id}:{concept_id}:{datetime.now().isoformat()}".encode()
-        ).hexdigest()[:12]
-        
-        # Select teaching strategy based on learner profile
-        strategy = self._select_strategy(learner_profile)
-        
-        session = TutoringSession(
-            session_id=session_id,
-            user_id=user_id,
-            concept_id=concept_id,
-            strategy=strategy,
-            contents_delivered=[],
-            interactions=[],
-            started_at=datetime.now()
-        )
-        
-        self.sessions[session_id] = session
-        await self.save_state(f"session:{session_id}", session.to_dict())
-        
-        # Generate initial content
-        initial_content = await self._generate_initial_content(
-            concept_id, concept_name, strategy
-        )
-        
-        self.logger.info(
-            f"✅ Started session {session_id} with {strategy.value} strategy"
-        )
-        
-        return {
-            "status": "success",
-            "session_id": session_id,
-            "strategy": strategy.value,
-            "initial_content": initial_content
-        }
-    
-    def _select_strategy(
-        self, 
-        learner_profile: Optional[Dict]
-    ) -> TeachingStrategy:
-        """Select teaching strategy based on learner profile"""
-        
-        if not learner_profile:
-            return TeachingStrategy.SCAFFOLDED
-        
-        # Get learner preferences
-        styles = learner_profile.get("learning_styles", [])
-        knowledge_level = learner_profile.get("knowledge_level", "beginner")
-        
-        # Strategy selection logic
-        if knowledge_level == "beginner":
-            return TeachingStrategy.WORKED_EXAMPLES
-        elif knowledge_level == "intermediate":
-            return TeachingStrategy.SCAFFOLDED
-        elif knowledge_level == "advanced":
-            return TeachingStrategy.SOCRATIC
-        
-        return TeachingStrategy.SCAFFOLDED
-    
-    async def _generate_initial_content(
-        self,
-        concept_id: str,
-        concept_name: str,
-        strategy: TeachingStrategy
-    ) -> Dict[str, Any]:
-        """Generate initial content based on strategy"""
-        
-        if strategy == TeachingStrategy.WORKED_EXAMPLES:
+            self.logger.error(f"❌ Tutoring failed: {e}")
             return {
-                "type": "worked_example",
-                "title": f"Introduction to {concept_name}",
-                "content": self._mock_worked_example(concept_name),
-                "next_steps": ["Try a similar example", "Ask a question"]
+                "success": False,
+                "error": str(e),
+                "agent_id": self.agent_id
             }
+    
+    async def _retrieve_context(self, concept_id: str, question: str) -> Dict[str, Any]:
+        """
+        Retrieve relevant course materials using RAG.
         
-        elif strategy == TeachingStrategy.SOCRATIC:
+        Args:
+            concept_id: Concept being taught
+            question: Learner's specific question
+            
+        Returns:
+            Dict with relevant materials + examples
+        """
+        try:
+            # In production, query Chroma vector DB for relevant passages
+            # For now, return structured context
+            
             return {
-                "type": "socratic_question",
-                "title": f"Let's explore {concept_name}",
-                "content": self._mock_socratic_question(concept_name),
-                "next_steps": ["Answer the question", "Get a hint"]
+                "concept_id": concept_id,
+                "relevant_materials": [],  # Would be populated from Chroma
+                "examples": [],  # Would be examples from documents
+                "common_misconceptions": [],  # Known misconceptions
+                "prerequisite_topics": []  # Related prerequisites
             }
-        
-        elif strategy == TeachingStrategy.SCAFFOLDED:
-            return {
-                "type": "scaffolded_intro",
-                "title": f"Learning {concept_name} step by step",
-                "content": self._mock_scaffolded_content(concept_name),
-                "next_steps": ["Continue to next step", "Review prerequisites"]
-            }
-        
-        return {
-            "type": "explanation",
-            "title": concept_name,
-            "content": f"Let's learn about {concept_name}..."
-        }
+        except Exception as e:
+            self.logger.error(f"Context retrieval error: {e}")
+            return {}
     
-    def _mock_worked_example(self, concept: str) -> str:
-        """Mock worked example content"""
-        return f"""
-## Worked Example: {concept}
-
-### Problem
-Let's solve a practical problem involving {concept}.
-
-### Step 1: Understand
-First, let's identify what we need to know...
-
-### Step 2: Plan
-Now, let's plan our approach...
-
-### Step 3: Execute
-Following our plan...
-
-### Step 4: Verify
-Let's check our work...
-
-### Key Takeaways
-- Point 1 about {concept}
-- Point 2 about {concept}
-- Point 3 about {concept}
-"""
-    
-    def _mock_socratic_question(self, concept: str) -> str:
-        """Mock Socratic questioning content"""
-        return f"""
-🤔 **Let's think together about {concept}**
-
-Before I explain {concept} to you, I'd like you to consider:
-
-**Question:** What do you think {concept} means, and why might it be important?
-
-Take a moment to think about this. Even if you're not sure, making a guess helps your brain prepare to learn!
-
-*When you're ready, share your thoughts and I'll help guide your understanding.*
-"""
-    
-    def _mock_scaffolded_content(self, concept: str) -> str:
-        """Mock scaffolded content"""
-        return f"""
-## {concept}: A Step-by-Step Guide
-
-We'll learn {concept} in 4 progressive steps:
-
-### 🟢 Step 1: Foundation (You are here)
-Understanding the basics...
-
-### 🔵 Step 2: Core Concepts
-Building on the foundation...
-
-### 🟡 Step 3: Application
-Putting it into practice...
-
-### 🔴 Step 4: Mastery
-Advanced understanding...
-
----
-
-*Let's start with Step 1...*
-"""
-    
-    async def _get_content(
+    async def _determine_hint_level(
         self,
-        user_id: str,
-        session_id: str,
-        content_type: str = "next",
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Get learning content for session"""
+        current_mastery: float,
+        concept_difficulty: int,
+        requested_hint: int
+    ) -> int:
+        """
+        Determine appropriate hint level based on learner progress.
         
-        if session_id not in self.sessions:
-            return {"status": "error", "error": "Session not found"}
+        Hint levels:
+        - 0: No hints (let them struggle - productive struggle)
+        - 1: Gentle guidance (What do you think...?)
+        - 2: Clarifying questions
+        - 3: Partial example
+        - 4: Full explanation
+        - 5: Direct answer (last resort)
         
-        session = self.sessions[session_id]
+        Args:
+            current_mastery: Learner's current mastery (0-1)
+            concept_difficulty: Concept difficulty (1-5)
+            requested_hint: Requested hint level
+            
+        Returns:
+            Adjusted hint level (0-5)
+        """
+        # Start with requested level
+        hint = requested_hint
         
-        # Generate appropriate content
-        content = {
-            "content_id": f"{session_id}_{len(session.contents_delivered)}",
-            "type": content_type,
-            "body": f"Content for {session.concept_id}...",
-            "timestamp": datetime.now().isoformat()
-        }
+        # Adjust based on mastery
+        if current_mastery < 0.3:
+            # Low mastery - provide more guidance
+            hint = min(hint + 1, 5)
+        elif current_mastery > 0.7:
+            # High mastery - less guidance, more struggle
+            hint = max(hint - 1, 0)
         
-        session.contents_delivered.append(content["content_id"])
-        
-        return {
-            "status": "success",
-            "content": content
-        }
+        return hint
     
-    async def _handle_question(
+    async def _generate_socratic_response(
         self,
-        user_id: str,
-        session_id: str,
         question: str,
-        **kwargs
+        concept: Dict[str, Any],
+        context: Dict[str, Any],
+        learner_mastery: float,
+        hint_level: int,
+        conversation_history: List
     ) -> Dict[str, Any]:
-        """Handle learner question"""
+        """
+        Generate Socratic response following Harvard 7 Principles.
         
-        if session_id not in self.sessions:
-            return {"status": "error", "error": "Session not found"}
+        Args:
+            question: Learner's question
+            concept: Concept details from KG
+            context: Retrieved context from RAG
+            learner_mastery: Learner's current mastery
+            hint_level: Appropriate hint level
+            conversation_history: Previous Q&A
+            
+        Returns:
+            Dict with guidance response
+        """
+        try:
+            # Build system prompt enforcing Harvard 7 Principles
+            system_prompt = self._build_system_prompt(
+                concept=concept,
+                hint_level=hint_level,
+                learner_mastery=learner_mastery
+            )
+            
+            # Build user message with context
+            user_message = f"""
+            Concept: {concept.get('name', 'Unknown')}
+            Learner's Question: {question}
+            Learner's Current Mastery: {learner_mastery:.1%}
+            Context: {context.get('relevant_materials', [])}
+            
+            Provide Socratic guidance following the Harvard 7 Principles.
+            """
+            
+            # Call LLM
+            response = await self.llm.acomplete(
+                system_prompt + "\n\n" + user_message
+            )
+            
+            response_text = response.text
+            
+            # Parse response (in production, would be structured JSON)
+            return {
+                "success": True,
+                "guidance": response_text,
+                "follow_up_question": "What do you think happens next?",  # TODO: extract from LLM
+                "source": concept.get('name', 'Course Material')
+            }
         
-        session = self.sessions[session_id]
-        
-        # Record interaction
-        session.interactions.append({
-            "type": "question",
-            "content": question,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # Generate response (would use LLM)
-        response = f"Great question! Let me explain more about that..."
-        
-        session.interactions.append({
-            "type": "response",
-            "content": response,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        return {
-            "status": "success",
-            "response": response
-        }
+        except Exception as e:
+            self.logger.error(f"Response generation error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
-    async def _provide_hint(
+    def _build_system_prompt(
         self,
-        user_id: str,
-        session_id: str,
-        context: Optional[str] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Provide a hint without giving away the answer"""
+        concept: Dict[str, Any],
+        hint_level: int,
+        learner_mastery: float
+    ) -> str:
+        """
+        Build system prompt enforcing Harvard 7 Pedagogical Principles.
         
-        if session_id not in self.sessions:
-            return {"status": "error", "error": "Session not found"}
-        
-        # Progressive hints (Harvard principle: scaffolded support)
-        hints = [
-            "Think about the relationship between the concepts...",
-            "Consider what you already know about similar problems...",
-            "Let me break this down: first, consider..."
-        ]
-        
-        session = self.sessions[session_id]
-        hint_index = min(
-            len([i for i in session.interactions if i["type"] == "hint"]),
-            len(hints) - 1
-        )
-        
-        session.interactions.append({
-            "type": "hint",
-            "content": hints[hint_index],
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        return {
-            "status": "success",
-            "hint": hints[hint_index],
-            "hints_remaining": len(hints) - hint_index - 1
+        Args:
+            concept: Concept being taught
+            hint_level: Appropriate hint level
+            learner_mastery: Learner's current mastery
+            
+        Returns:
+            System prompt
+        """
+        hint_instructions = {
+            0: "Encourage them to struggle with the problem. Ask guiding questions.",
+            1: "Gently guide their thinking with questions. Don't give answers.",
+            2: "Ask clarifying questions to help them think through it.",
+            3: "Show a partial example. Let them complete it.",
+            4: "Provide fuller explanation but still ask them to apply it.",
+            5: "Give direct explanation (last resort - only if absolutely stuck)"
         }
-    
-    async def _explain_concept(
-        self,
-        user_id: str,
-        concept_id: str,
-        concept_name: str,
-        depth: str = "standard",
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Explain a concept at specified depth"""
         
-        if depth == "simple":
-            explanation = f"{concept_name} in simple terms: ..."
-        elif depth == "detailed":
-            explanation = f"Detailed explanation of {concept_name}: ..."
-        else:
-            explanation = f"Understanding {concept_name}: ..."
-        
-        return {
-            "status": "success",
-            "concept_id": concept_id,
-            "explanation": explanation,
-            "depth": depth
-        }
-    
-    async def _socratic_dialogue(
-        self,
-        user_id: str,
-        session_id: str,
-        learner_response: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Continue Socratic dialogue based on learner response"""
-        
-        if session_id not in self.sessions:
-            return {"status": "error", "error": "Session not found"}
-        
-        session = self.sessions[session_id]
-        
-        # Record learner response
-        session.interactions.append({
-            "type": "learner_response",
-            "content": learner_response,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # Generate follow-up question (would use LLM)
-        follow_up = """
-Interesting perspective! Let me ask you this:
+        prompt = f"""
+You are an expert educator using the Socratic Method and Harvard 7 Pedagogical Principles.
 
-🤔 How does that relate to what happens when...?
+HARVARD 7 PRINCIPLES (ENFORCE ALL):
+1. ❌ NEVER give direct answers - guide with questions instead
+2. ✅ Keep responses SHORT (2-4 sentences max) - prevent cognitive overload
+3. ✅ Reveal ONE STEP AT A TIME - build understanding progressively
+4. ✅ Ask "What do YOU think?" BEFORE helping - encourage productive struggle
+5. ✅ Praise EFFORT, not intelligence - build growth mindset
+6. ✅ Personalized feedback - address THEIR specific error/thinking
+7. ✅ Ground ONLY in verified sources - use course materials, not speculation
 
-*This follow-up question helps deepen understanding through guided discovery.*
+CURRENT CONTEXT:
+- Concept: {concept.get('name', 'Unknown')} (Difficulty: {concept.get('difficulty', 2)}/5)
+- Learner's Current Understanding: {learner_mastery:.0%}
+- Hint Level: {hint_level}/5 - {hint_instructions[hint_level]}
+
+RESPONSE GUIDELINES:
+- KEEP IT SHORT: 2-4 sentences maximum
+- NEVER give the answer directly - guide them to think
+- Use questions, not statements
+- Ask "What do you think...?" or "Can you explain...?"
+- Reference the course materials (RAG context provided)
+- Praise their effort and thinking process
+- If they're struggling, give them a hint (level {hint_level})
+
+Remember: Your goal is NOT to transfer knowledge from you to them,
+but to guide THEM to discover understanding themselves.
 """
         
-        session.interactions.append({
-            "type": "socratic_follow_up",
-            "content": follow_up,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        return {
-            "status": "success",
-            "follow_up": follow_up,
-            "interaction_count": len(session.interactions)
-        }
-    
-    async def _end_session(
-        self,
-        user_id: str,
-        session_id: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """End tutoring session"""
-        
-        if session_id not in self.sessions:
-            return {"status": "error", "error": "Session not found"}
-        
-        session = self.sessions[session_id]
-        session.current_state = "completed"
-        
-        # Generate session summary
-        summary = {
-            "session_id": session_id,
-            "concept_id": session.concept_id,
-            "duration_minutes": (
-                datetime.now() - session.started_at
-            ).total_seconds() / 60,
-            "contents_viewed": len(session.contents_delivered),
-            "interactions": len(session.interactions),
-            "completed_at": datetime.now().isoformat()
-        }
-        
-        await self.save_state(f"session:{session_id}", session.to_dict())
-        
-        self.logger.info(f"✅ Ended session {session_id}")
-        
-        return {
-            "status": "success",
-            "summary": summary
-        }
+        return prompt

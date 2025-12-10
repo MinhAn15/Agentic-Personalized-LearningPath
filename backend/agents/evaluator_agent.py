@@ -1,615 +1,436 @@
-"""
-Evaluator Agent
-
-Responsible for:
-- Assessing learner knowledge and skills
-- Generating adaptive assessments
-- Providing detailed feedback
-- Tracking mastery levels
-"""
-
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
-from dataclasses import dataclass, field
-import logging
-import random
+import json
 
 from backend.core.base_agent import BaseAgent, AgentType
-from backend.core.event_bus import EventType, Event
+from backend.config import get_settings
+from llama_index.llms.openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
+class ErrorType(str, Enum):
+    """Classification of error types"""
+    CORRECT = "CORRECT"
+    CARELESS = "CARELESS"
+    INCOMPLETE = "INCOMPLETE"
+    PROCEDURAL = "PROCEDURAL"
+    CONCEPTUAL = "CONCEPTUAL"
 
-class QuestionType(str, Enum):
-    """Types of assessment questions"""
-    MULTIPLE_CHOICE = "multiple_choice"
-    TRUE_FALSE = "true_false"
-    SHORT_ANSWER = "short_answer"
-    CODE = "code"
-    ESSAY = "essay"
-    MATCHING = "matching"
-
-
-class BloomLevel(str, Enum):
-    """Bloom's Taxonomy levels for questions"""
-    REMEMBER = "remember"
-    UNDERSTAND = "understand"
-    APPLY = "apply"
-    ANALYZE = "analyze"
-    EVALUATE = "evaluate"
-    CREATE = "create"
-
-
-@dataclass
-class Question:
-    """Assessment question"""
-    question_id: str
-    concept_id: str
-    question_type: QuestionType
-    bloom_level: BloomLevel
-    text: str
-    options: Optional[List[str]] = None
-    correct_answer: Optional[Any] = None
-    explanation: str = ""
-    difficulty: float = 0.5
-    points: int = 1
-    
-    def to_dict(self) -> Dict:
-        return {
-            "question_id": self.question_id,
-            "concept_id": self.concept_id,
-            "question_type": self.question_type.value,
-            "bloom_level": self.bloom_level.value,
-            "text": self.text,
-            "options": self.options,
-            "difficulty": self.difficulty,
-            "points": self.points
-        }
-    
-    def to_dict_with_answer(self) -> Dict:
-        data = self.to_dict()
-        data["correct_answer"] = self.correct_answer
-        data["explanation"] = self.explanation
-        return data
-
-
-@dataclass
-class Assessment:
-    """Complete assessment"""
-    assessment_id: str
-    user_id: str
-    concept_ids: List[str]
-    questions: List[Question]
-    time_limit: int  # minutes
-    created_at: datetime = field(default_factory=datetime.now)
-    status: str = "pending"
-    
-    def to_dict(self) -> Dict:
-        return {
-            "assessment_id": self.assessment_id,
-            "user_id": self.user_id,
-            "concept_ids": self.concept_ids,
-            "questions": [q.to_dict() for q in self.questions],
-            "time_limit": self.time_limit,
-            "created_at": self.created_at.isoformat(),
-            "status": self.status
-        }
-
-
-@dataclass
-class AssessmentResult:
-    """Assessment result with detailed feedback"""
-    assessment_id: str
-    user_id: str
-    score: float
-    total_points: int
-    earned_points: int
-    time_taken: int  # seconds
-    question_results: List[Dict]
-    feedback: Dict[str, Any]
-    completed_at: datetime = field(default_factory=datetime.now)
-    
-    def to_dict(self) -> Dict:
-        return {
-            "assessment_id": self.assessment_id,
-            "user_id": self.user_id,
-            "score": self.score,
-            "total_points": self.total_points,
-            "earned_points": self.earned_points,
-            "time_taken": self.time_taken,
-            "question_results": self.question_results,
-            "feedback": self.feedback,
-            "completed_at": self.completed_at.isoformat()
-        }
-
+class PathDecision(str, Enum):
+    """Decisions for next learning action"""
+    PROCEED = "PROCEED"  # Ready for next concept
+    REMEDIATE = "REMEDIATE"  # Review prerequisite
+    ALTERNATE = "ALTERNATE"  # Try different example
+    MASTERED = "MASTERED"  # Fully understands, move on
 
 class EvaluatorAgent(BaseAgent):
     """
-    Agent responsible for learner assessment and evaluation.
+    Evaluator Agent - Assess learner understanding and provide feedback.
     
-    Features:
-    - Adaptive question selection (IRT-based)
-    - Bloom's Taxonomy alignment
-    - Detailed feedback generation
-    - Mastery-based progression
+    Responsibility:
+    - Score learner responses (0-1)
+    - Classify error types (CORRECT, CARELESS, INCOMPLETE, PROCEDURAL, CONCEPTUAL)
+    - Detect misconceptions
+    - Generate personalized feedback (address THEIR specific error)
+    - Make path decisions (PROCEED/REMEDIATE/ALTERNATE/MASTERED)
+    - Update learner progress in database
     
-    Assessment Types:
-    - Diagnostic (pre-learning)
-    - Formative (during learning)
-    - Summative (post-learning)
+    Process Flow:
+    1. Receive learner response + concept + expected answer
+    2. Score response using LLM (0-1 scale)
+    3. Classify error type (if incorrect)
+    4. Detect misconceptions (what's wrong with their thinking?)
+    5. Generate personalized feedback (not generic "wrong")
+    6. Make path decision (what's next?)
+    7. Update learner mastery in database
+    8. Emit event to Path Planner (may need to adjust path)
+    
+    Example:
+        Learner response: "WHERE combines two tables"
+        Expected: "WHERE filters rows"
+            ↓
+        Score: 0.2 (very wrong)
+        Error type: CONCEPTUAL (fundamental misunderstanding)
+        Misconception: "Confuses WHERE with JOIN"
+        Feedback: "I see the confusion - WHERE filters, JOIN combines.
+                   Let me clarify the difference..."
+        Decision: REMEDIATE (review JOIN concept first)
+            ↓
+        Update: Set WHERE mastery to 0.2, flag for remediation
     """
     
-    def __init__(
-        self,
-        agent_id: str,
-        state_manager: Any,
-        event_bus: Any,
-        llm: Optional[Any] = None
-    ):
-        super().__init__(
-            agent_id=agent_id,
-            agent_type=AgentType.EVALUATOR,
-            state_manager=state_manager,
-            event_bus=event_bus
-        )
-        self.llm = llm
-        self.assessments: Dict[str, Assessment] = {}
-        self.question_bank: Dict[str, List[Question]] = {}
-        
-        # Initialize mock question bank
-        self._init_question_bank()
-    
-    def _init_question_bank(self):
-        """Initialize mock question bank"""
-        # Would be loaded from database in production
-        pass
-    
-    async def execute(
-        self,
-        user_id: str,
-        action: str = "create_assessment",
-        **kwargs
-    ) -> Dict[str, Any]:
+    def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
         """
-        Execute evaluator actions.
+        Initialize Evaluator Agent.
         
         Args:
-            user_id: The learner's ID
-            action: Action to perform (create_assessment, submit_answer,
-                   grade_assessment, get_feedback)
-            **kwargs: Additional parameters
+            agent_id: Unique agent identifier
+            state_manager: Central state manager
+            event_bus: Event bus for inter-agent communication
+            llm: LLM instance (OpenAI by default)
+        """
+        super().__init__(agent_id, AgentType.EVALUATOR, state_manager, event_bus)
+        
+        self.settings = get_settings()
+        self.llm = llm or OpenAI(
+            model=self.settings.OPENAI_MODEL,
+            api_key=self.settings.OPENAI_API_KEY
+        )
+        self.logger = logging.getLogger(f"EvaluatorAgent.{agent_id}")
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """
+        Main execution method - evaluate learner response.
+        
+        Args:
+            learner_id: str - Learner ID
+            concept_id: str - Concept being evaluated
+            learner_response: str - Learner's answer
+            expected_answer: str - What they should answer
+            correct_answer_explanation: str - Why it's right
             
         Returns:
-            Dict containing action results
+            Dict with evaluation results
         """
-        self.logger.info(f"📝 Evaluator action: {action} for user {user_id}")
-        
         try:
-            if action == "create_assessment":
-                return await self._create_assessment(user_id, **kwargs)
+            learner_id = kwargs.get("learner_id")
+            concept_id = kwargs.get("concept_id")
+            learner_response = kwargs.get("learner_response")
+            expected_answer = kwargs.get("expected_answer")
+            correct_answer_explanation = kwargs.get("correct_answer_explanation", "")
             
-            elif action == "get_question":
-                return await self._get_question(user_id, **kwargs)
+            if not all([learner_id, concept_id, learner_response]):
+                return {
+                    "success": False,
+                    "error": "learner_id, concept_id, learner_response required",
+                    "agent_id": self.agent_id
+                }
             
-            elif action == "submit_answer":
-                return await self._submit_answer(user_id, **kwargs)
+            self.logger.info(f"📊 Evaluating {learner_id} on {concept_id}")
             
-            elif action == "grade_assessment":
-                return await self._grade_assessment(user_id, **kwargs)
+            # Step 1: Get concept details
+            neo4j = self.state_manager.neo4j
+            concept_result = await neo4j.run_query(
+                "MATCH (c:CourseConcept {concept_id: $concept_id}) RETURN c",
+                concept_id=concept_id
+            )
             
-            elif action == "get_feedback":
-                return await self._get_feedback(user_id, **kwargs)
+            if not concept_result:
+                return {
+                    "success": False,
+                    "error": f"Concept not found: {concept_id}",
+                    "agent_id": self.agent_id
+                }
             
-            elif action == "adaptive_question":
-                return await self._get_adaptive_question(user_id, **kwargs)
+            concept = concept_result[0].get("c", {})
             
-            else:
-                return {"status": "error", "error": f"Unknown action: {action}"}
+            # Step 2: Score response
+            score_result = await self._score_response(
+                learner_response=learner_response,
+                expected_answer=expected_answer,
+                explanation=correct_answer_explanation
+            )
+            
+            score = score_result["score"]  # 0-1
+            
+            # Step 3-5: If incorrect, classify error + detect misconception + feedback
+            error_type = ErrorType.CORRECT
+            misconception = None
+            feedback = None
+            
+            if score < 0.8:
+                # Step 3: Classify error
+                error_result = await self._classify_error(
+                    learner_response=learner_response,
+                    expected_answer=expected_answer
+                )
+                error_type = ErrorType(error_result["error_type"])
                 
-        except Exception as e:
-            self.logger.error(f"❌ Evaluator action failed: {e}")
-            return {"status": "error", "error": str(e)}
-    
-    async def _create_assessment(
-        self,
-        user_id: str,
-        concept_ids: List[str],
-        assessment_type: str = "formative",
-        num_questions: int = 5,
-        time_limit: int = 15,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Create a new assessment"""
-        
-        import hashlib
-        assessment_id = hashlib.md5(
-            f"{user_id}:{datetime.now().isoformat()}".encode()
-        ).hexdigest()[:12]
-        
-        # Generate questions
-        questions = self._generate_questions(
-            concept_ids, 
-            num_questions,
-            assessment_type
-        )
-        
-        assessment = Assessment(
-            assessment_id=assessment_id,
-            user_id=user_id,
-            concept_ids=concept_ids,
-            questions=questions,
-            time_limit=time_limit,
-            status="active"
-        )
-        
-        self.assessments[assessment_id] = assessment
-        await self.save_state(f"assessment:{assessment_id}", assessment.to_dict())
-        
-        self.logger.info(
-            f"✅ Created assessment {assessment_id} with {len(questions)} questions"
-        )
-        
-        return {
-            "status": "success",
-            "assessment_id": assessment_id,
-            "questions": [q.to_dict() for q in questions],
-            "time_limit": time_limit
-        }
-    
-    def _generate_questions(
-        self,
-        concept_ids: List[str],
-        num_questions: int,
-        assessment_type: str
-    ) -> List[Question]:
-        """Generate questions for assessment"""
-        
-        questions = []
-        
-        for i in range(num_questions):
-            concept_id = concept_ids[i % len(concept_ids)]
-            
-            # Vary question types and bloom levels
-            q_type = random.choice(list(QuestionType)[:3])  # MC, T/F, Short
-            bloom = self._select_bloom_level(assessment_type, i, num_questions)
-            
-            question = self._create_mock_question(
-                question_id=f"q_{i}",
-                concept_id=concept_id,
-                q_type=q_type,
-                bloom=bloom
-            )
-            questions.append(question)
-        
-        return questions
-    
-    def _select_bloom_level(
-        self, 
-        assessment_type: str,
-        question_index: int,
-        total_questions: int
-    ) -> BloomLevel:
-        """Select Bloom's level based on assessment type and position"""
-        
-        levels = list(BloomLevel)
-        
-        if assessment_type == "diagnostic":
-            # Focus on lower levels
-            return random.choice(levels[:3])
-        elif assessment_type == "formative":
-            # Mix of levels
-            return random.choice(levels[:4])
-        else:  # summative
-            # Include higher levels
-            progress = question_index / total_questions
-            if progress < 0.3:
-                return random.choice(levels[:2])
-            elif progress < 0.7:
-                return random.choice(levels[1:4])
+                # Step 4: Detect misconception
+                misconception_result = await self._detect_misconception(
+                    learner_response=learner_response,
+                    concept=concept,
+                    error_type=error_type
+                )
+                misconception = misconception_result.get("misconception")
+                
+                # Step 5: Generate feedback
+                feedback_result = await self._generate_feedback(
+                    learner_response=learner_response,
+                    expected_answer=expected_answer,
+                    error_type=error_type,
+                    misconception=misconception,
+                    explanation=correct_answer_explanation
+                )
+                feedback = feedback_result["feedback"]
             else:
-                return random.choice(levels[2:])
-    
-    def _create_mock_question(
-        self,
-        question_id: str,
-        concept_id: str,
-        q_type: QuestionType,
-        bloom: BloomLevel
-    ) -> Question:
-        """Create a mock question"""
-        
-        if q_type == QuestionType.MULTIPLE_CHOICE:
-            return Question(
-                question_id=question_id,
-                concept_id=concept_id,
-                question_type=q_type,
-                bloom_level=bloom,
-                text=f"Which of the following best describes {concept_id}?",
-                options=["Option A", "Option B", "Option C", "Option D"],
-                correct_answer="Option A",
-                explanation=f"Option A is correct because...",
-                difficulty=0.5
-            )
-        
-        elif q_type == QuestionType.TRUE_FALSE:
-            return Question(
-                question_id=question_id,
-                concept_id=concept_id,
-                question_type=q_type,
-                bloom_level=bloom,
-                text=f"Statement about {concept_id}: True or False?",
-                options=["True", "False"],
-                correct_answer="True",
-                explanation="This is true because...",
-                difficulty=0.3
-            )
-        
-        else:  # SHORT_ANSWER
-            return Question(
-                question_id=question_id,
-                concept_id=concept_id,
-                question_type=q_type,
-                bloom_level=bloom,
-                text=f"Explain the concept of {concept_id} in your own words.",
-                correct_answer=None,  # Requires LLM grading
-                explanation="A good answer should include...",
-                difficulty=0.7
-            )
-    
-    async def _get_question(
-        self,
-        user_id: str,
-        assessment_id: str,
-        question_index: int = 0,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Get a specific question from assessment"""
-        
-        if assessment_id not in self.assessments:
-            return {"status": "error", "error": "Assessment not found"}
-        
-        assessment = self.assessments[assessment_id]
-        
-        if question_index >= len(assessment.questions):
-            return {"status": "completed", "message": "All questions answered"}
-        
-        question = assessment.questions[question_index]
-        
-        return {
-            "status": "success",
-            "question": question.to_dict(),
-            "question_number": question_index + 1,
-            "total_questions": len(assessment.questions)
-        }
-    
-    async def _submit_answer(
-        self,
-        user_id: str,
-        assessment_id: str,
-        question_id: str,
-        answer: Any,
-        time_spent: int = 0,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Submit answer for a question"""
-        
-        if assessment_id not in self.assessments:
-            return {"status": "error", "error": "Assessment not found"}
-        
-        assessment = self.assessments[assessment_id]
-        
-        # Find question
-        question = None
-        for q in assessment.questions:
-            if q.question_id == question_id:
-                question = q
-                break
-        
-        if not question:
-            return {"status": "error", "error": "Question not found"}
-        
-        # Grade answer
-        is_correct = self._grade_answer(question, answer)
-        
-        # Store result
-        result_key = f"answer:{assessment_id}:{question_id}"
-        await self.save_state(result_key, {
-            "answer": answer,
-            "is_correct": is_correct,
-            "time_spent": time_spent,
-            "submitted_at": datetime.now().isoformat()
-        })
-        
-        return {
-            "status": "success",
-            "is_correct": is_correct,
-            "explanation": question.explanation if not is_correct else "Correct!",
-            "correct_answer": question.correct_answer if not is_correct else None
-        }
-    
-    def _grade_answer(self, question: Question, answer: Any) -> bool:
-        """Grade a single answer"""
-        
-        if question.question_type in [
-            QuestionType.MULTIPLE_CHOICE, 
-            QuestionType.TRUE_FALSE
-        ]:
-            return answer == question.correct_answer
-        
-        elif question.question_type == QuestionType.SHORT_ANSWER:
-            # Would use LLM for grading
-            # For now, simple keyword check
-            return len(str(answer)) > 10
-        
-        return False
-    
-    async def _grade_assessment(
-        self,
-        user_id: str,
-        assessment_id: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Grade complete assessment"""
-        
-        if assessment_id not in self.assessments:
-            return {"status": "error", "error": "Assessment not found"}
-        
-        assessment = self.assessments[assessment_id]
-        
-        # Collect all answers
-        question_results = []
-        earned_points = 0
-        total_points = 0
-        
-        for question in assessment.questions:
-            result_key = f"answer:{assessment_id}:{question.question_id}"
-            answer_data = await self.load_state(result_key)
+                # Correct answer - generate praise
+                feedback = f"Excellent! Your answer '{learner_response}' is correct. "
+                feedback += f"You understand that {expected_answer}. Well done!"
             
-            if answer_data:
-                is_correct = answer_data.get("is_correct", False)
-                points = question.points if is_correct else 0
-            else:
-                is_correct = False
-                points = 0
+            # Step 6: Make path decision
+            learner_profile = await self.state_manager.get_learner_profile(learner_id)
+            current_mastery = 0.0
+            if learner_profile:
+                for mastery in learner_profile.get("current_mastery", []):
+                    if mastery.get("concept_id") == concept_id:
+                        current_mastery = mastery.get("mastery_level", 0.0)
+                        break
             
-            earned_points += points
-            total_points += question.points
+            decision = await self._make_path_decision(
+                score=score,
+                current_mastery=current_mastery,
+                error_type=error_type,
+                concept_difficulty=concept.get("difficulty", 2)
+            )
             
-            question_results.append({
-                "question_id": question.question_id,
-                "concept_id": question.concept_id,
-                "bloom_level": question.bloom_level.value,
-                "is_correct": is_correct,
-                "points_earned": points,
-                "points_possible": question.points
-            })
-        
-        score = earned_points / total_points if total_points > 0 else 0
-        
-        # Generate feedback
-        feedback = self._generate_feedback(question_results, score)
-        
-        # Create result
-        result = AssessmentResult(
-            assessment_id=assessment_id,
-            user_id=user_id,
-            score=score,
-            total_points=total_points,
-            earned_points=earned_points,
-            time_taken=0,
-            question_results=question_results,
-            feedback=feedback
-        )
-        
-        # Update assessment status
-        assessment.status = "graded"
-        await self.save_state(f"result:{assessment_id}", result.to_dict())
-        
-        # Publish event
-        await self.event_bus.publish(Event(
-            event_type=EventType.USER_ASSESSMENT,
-            source=self.agent_id,
-            payload={
-                "user_id": user_id,
-                "assessment_id": assessment_id,
-                "score": score
+            # Step 7: Update learner progress
+            new_mastery = await self._update_learner_mastery(
+                learner_id=learner_id,
+                concept_id=concept_id,
+                score=score,
+                current_mastery=current_mastery
+            )
+            
+            # Prepare result
+            result = {
+                "success": True,
+                "agent_id": self.agent_id,
+                "learner_id": learner_id,
+                "concept_id": concept_id,
+                "score": score,
+                "error_type": error_type.value,
+                "misconception": misconception,
+                "feedback": feedback,
+                "decision": decision.value,
+                "new_mastery": new_mastery,
+                "timestamp": datetime.now().isoformat()
             }
-        ))
+            
+            # Step 8: Emit events
+            await self.send_message(
+                receiver="path_planner",
+                message_type="evaluation_complete",
+                payload={
+                    "learner_id": learner_id,
+                    "concept_id": concept_id,
+                    "score": score,
+                    "decision": decision.value,
+                    "new_mastery": new_mastery
+                }
+            )
+            
+            self.logger.info(f"✅ Evaluation complete: {error_type.value} ({score:.1%})")
+            
+            return result
         
-        self.logger.info(
-            f"✅ Graded assessment {assessment_id}: {score:.1%}"
-        )
-        
-        return {
-            "status": "success",
-            "result": result.to_dict()
-        }
+        except Exception as e:
+            self.logger.error(f"❌ Evaluation failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "agent_id": self.agent_id
+            }
     
-    def _generate_feedback(
-        self, 
-        question_results: List[Dict],
-        score: float
+    async def _score_response(
+        self,
+        learner_response: str,
+        expected_answer: str,
+        explanation: str
     ) -> Dict[str, Any]:
-        """Generate detailed feedback"""
+        """Score learner response (0-1)"""
+        try:
+            prompt = f"""
+            Score this learner response.
+            
+            Question: (learner is answering about a concept)
+            Learner response: {learner_response}
+            Expected answer: {expected_answer}
+            Correct explanation: {explanation}
+            
+            Return ONLY a JSON with "score" (0-1 float).
+            0 = completely wrong
+            0.5 = partially correct
+            1 = completely correct
+            
+            Example: {{"score": 0.8}}
+            """
+            
+            response = await self.llm.acomplete(prompt)
+            score_text = response.text
+            
+            # Parse score from JSON
+            try:
+                # Try to extract JSON
+                import re
+                match = re.search(r'"score"\s*:\s*([\d.]+)', score_text)
+                if match:
+                    score = float(match.group(1))
+                else:
+                    # Fallback: simple comparison
+                    score = 0.8 if learner_response.lower() in expected_answer.lower() else 0.2
+                score = max(0.0, min(1.0, score))  # Clamp to 0-1
+            except:
+                score = 0.0 if learner_response.lower() != expected_answer.lower() else 1.0
+            
+            return {"success": True, "score": score}
         
-        # Analyze by concept
-        concept_performance = {}
-        for result in question_results:
-            concept = result["concept_id"]
-            if concept not in concept_performance:
-                concept_performance[concept] = {"correct": 0, "total": 0}
-            concept_performance[concept]["total"] += 1
-            if result["is_correct"]:
-                concept_performance[concept]["correct"] += 1
+        except Exception as e:
+            self.logger.error(f"Scoring error: {e}")
+            return {"success": False, "score": 0.0}
+    
+    async def _classify_error(
+        self,
+        learner_response: str,
+        expected_answer: str
+    ) -> Dict[str, Any]:
+        """Classify error type"""
+        try:
+            prompt = f"""
+            Classify this error:
+            
+            Learner response: {learner_response}
+            Expected: {expected_answer}
+            
+            Classification options:
+            - CARELESS: Simple typo or arithmetic mistake
+            - INCOMPLETE: Partially correct, missing parts
+            - PROCEDURAL: Wrong approach or steps
+            - CONCEPTUAL: Fundamental misunderstanding
+            
+            Return ONLY the classification name.
+            Example: CONCEPTUAL
+            """
+            
+            response = await self.llm.acomplete(prompt)
+            error_type = response.text.strip().upper()
+            
+            # Validate
+            valid_types = ["CARELESS", "INCOMPLETE", "PROCEDURAL", "CONCEPTUAL"]
+            if error_type not in valid_types:
+                error_type = "CONCEPTUAL"  # Default to worst case
+            
+            return {"success": True, "error_type": error_type}
         
-        # Identify weak areas
-        weak_areas = [
-            concept for concept, perf in concept_performance.items()
-            if perf["correct"] / perf["total"] < 0.5
-        ]
+        except Exception as e:
+            self.logger.error(f"Error classification error: {e}")
+            return {"success": False, "error_type": "CONCEPTUAL"}
+    
+    async def _detect_misconception(
+        self,
+        learner_response: str,
+        concept: Dict[str, Any],
+        error_type: ErrorType
+    ) -> Dict[str, Any]:
+        """Detect learner's misconception"""
+        try:
+            if error_type == ErrorType.CORRECT:
+                return {"success": True, "misconception": None}
+            
+            concept_name = concept.get("name", "Unknown")
+            
+            prompt = f"""
+            What misconception does this learner have?
+            
+            Concept: {concept_name}
+            Learner response: {learner_response}
+            
+            Identify the mistaken belief or mental model.
+            Return ONLY a short sentence describing the misconception.
+            
+            Example: "Thinks WHERE joins tables (confuses with JOIN)"
+            """
+            
+            response = await self.llm.acomplete(prompt)
+            misconception = response.text.strip()
+            
+            return {"success": True, "misconception": misconception}
         
-        # Generate recommendations
-        if score >= 0.8:
-            message = "Excellent work! You've demonstrated strong mastery."
-            recommendation = "Ready to advance to the next level."
-        elif score >= 0.6:
-            message = "Good progress! Some areas need more practice."
-            recommendation = "Review the concepts you missed before continuing."
+        except Exception as e:
+            self.logger.error(f"Misconception detection error: {e}")
+            return {"success": False, "misconception": None}
+    
+    async def _generate_feedback(
+        self,
+        learner_response: str,
+        expected_answer: str,
+        error_type: ErrorType,
+        misconception: Optional[str],
+        explanation: str
+    ) -> Dict[str, Any]:
+        """Generate personalized feedback"""
+        try:
+            prompt = f"""
+            Generate personalized feedback addressing THEIR specific error.
+            NOT generic "that's wrong" - address THEIR misconception.
+            
+            Learner response: {learner_response}
+            Expected: {expected_answer}
+            Error type: {error_type.value}
+            Misconception: {misconception}
+            Correct explanation: {explanation}
+            
+            Return personalized, encouraging feedback (2-3 sentences).
+            Address the misconception, not just the wrong answer.
+            
+            Example: "I see where the confusion comes from - you're thinking
+            WHERE joins tables, which is actually what JOIN does. Let me
+            clarify the difference..."
+            """
+            
+            response = await self.llm.acomplete(prompt)
+            feedback = response.text.strip()
+            
+            return {"success": True, "feedback": feedback}
+        
+        except Exception as e:
+            self.logger.error(f"Feedback generation error: {e}")
+            return {"success": False, "feedback": "Let's review this concept together."}
+    
+    async def _make_path_decision(
+        self,
+        score: float,
+        current_mastery: float,
+        error_type: ErrorType,
+        concept_difficulty: int
+    ) -> PathDecision:
+        """Make decision for next learning action"""
+        
+        # Simple heuristic (in production, more sophisticated)
+        if score >= 0.9:
+            return PathDecision.MASTERED
+        elif score >= 0.7 and current_mastery >= 0.6:
+            return PathDecision.PROCEED
+        elif error_type == ErrorType.CONCEPTUAL:
+            return PathDecision.REMEDIATE
+        elif score < 0.5:
+            return PathDecision.ALTERNATE
         else:
-            message = "Keep learning! Review the material and try again."
-            recommendation = "Focus on the fundamentals before advancing."
-        
-        return {
-            "overall_message": message,
-            "recommendation": recommendation,
-            "concept_performance": concept_performance,
-            "weak_areas": weak_areas,
-            "mastery_achieved": score >= 0.8
-        }
+            return PathDecision.REMEDIATE
     
-    async def _get_feedback(
+    async def _update_learner_mastery(
         self,
-        user_id: str,
-        assessment_id: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Get feedback for assessment"""
-        
-        result = await self.load_state(f"result:{assessment_id}")
-        
-        if not result:
-            return {"status": "error", "error": "Result not found"}
-        
-        return {
-            "status": "success",
-            "feedback": result.get("feedback", {})
-        }
-    
-    async def _get_adaptive_question(
-        self,
-        user_id: str,
+        learner_id: str,
         concept_id: str,
-        current_ability: float = 0.5,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Get adaptive question based on learner ability (IRT-based)"""
+        score: float,
+        current_mastery: float
+    ) -> float:
+        """Update learner's mastery level"""
+        try:
+            # Weighted average of current mastery and new score
+            weight = 0.6  # New score is 60% of update
+            new_mastery = (current_mastery * (1 - weight)) + (score * weight)
+            
+            # Save to database
+            await self.save_state(
+                f"learner_mastery:{learner_id}:{concept_id}",
+                {"mastery": new_mastery, "updated": datetime.now().isoformat()}
+            )
+            
+            return new_mastery
         
-        # Select difficulty near learner ability
-        target_difficulty = current_ability + random.uniform(-0.1, 0.1)
-        target_difficulty = max(0.1, min(0.9, target_difficulty))
-        
-        # Create question at target difficulty
-        question = self._create_mock_question(
-            question_id=f"adaptive_{datetime.now().timestamp()}",
-            concept_id=concept_id,
-            q_type=QuestionType.MULTIPLE_CHOICE,
-            bloom=BloomLevel.UNDERSTAND
-        )
-        question.difficulty = target_difficulty
-        
-        return {
-            "status": "success",
-            "question": question.to_dict(),
-            "target_difficulty": target_difficulty
-        }
+        except Exception as e:
+            self.logger.error(f"Mastery update error: {e}")
+            return current_mastery
