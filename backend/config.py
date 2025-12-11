@@ -16,9 +16,9 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str = "testpassword"
     REDIS_URL: str = "redis://localhost:6379"
     
-    # LLM
-    OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4o"
+    # LLM (Google Gemini via LlamaIndex)
+    GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
     
     # Chroma
     CHROMA_HOST: str = "localhost"

@@ -6,7 +6,7 @@ import json
 
 from backend.core.base_agent import BaseAgent, AgentType
 from backend.config import get_settings
-from llama_index.llms.openai import OpenAI
+from llama_index.llms.gemini import Gemini
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +19,12 @@ class ErrorType(str, Enum):
     CONCEPTUAL = "CONCEPTUAL"
 
 class PathDecision(str, Enum):
-    """Decisions for next learning action"""
-    PROCEED = "PROCEED"  # Ready for next concept
+    """Decisions for next learning action (per Thesis)"""
+    PROCEED = "PROCEED"      # Ready for next concept
     REMEDIATE = "REMEDIATE"  # Review prerequisite
-    ALTERNATE = "ALTERNATE"  # Try different example
-    MASTERED = "MASTERED"  # Fully understands, move on
+    ALTERNATE = "ALTERNATE"  # Try different example/angle
+    RETRY = "RETRY"          # Same concept, new question
+    MASTERED = "MASTERED"    # Fully understands, move on
 
 class EvaluatorAgent(BaseAgent):
     """
@@ -69,14 +70,14 @@ class EvaluatorAgent(BaseAgent):
             agent_id: Unique agent identifier
             state_manager: Central state manager
             event_bus: Event bus for inter-agent communication
-            llm: LLM instance (OpenAI by default)
+            llm: LLM instance (Gemini by default)
         """
         super().__init__(agent_id, AgentType.EVALUATOR, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.llm = llm or OpenAI(
-            model=self.settings.OPENAI_MODEL,
-            api_key=self.settings.OPENAI_API_KEY
+        self.llm = llm or Gemini(
+            model=self.settings.GEMINI_MODEL,
+            api_key=self.settings.GOOGLE_API_KEY
         )
         self.logger = logging.getLogger(f"EvaluatorAgent.{agent_id}")
     
@@ -396,19 +397,31 @@ class EvaluatorAgent(BaseAgent):
         error_type: ErrorType,
         concept_difficulty: int
     ) -> PathDecision:
-        """Make decision for next learning action"""
+        """
+        Make decision for next learning action (per Thesis).
         
-        # Simple heuristic (in production, more sophisticated)
+        Decision Logic:
+        - score > 0.85 -> MASTERED or PROCEED
+        - score > 0.6 -> ALTERNATE (try different example)
+        - score < 0.6 + CONCEPTUAL error -> REMEDIATE (go to prerequisites)
+        - else -> RETRY (same concept, new question)
+        """
+        
         if score >= 0.9:
             return PathDecision.MASTERED
-        elif score >= 0.7 and current_mastery >= 0.6:
+        elif score >= 0.85:
             return PathDecision.PROCEED
-        elif error_type == ErrorType.CONCEPTUAL:
-            return PathDecision.REMEDIATE
-        elif score < 0.5:
+        elif score >= 0.6:
+            # Good enough but not perfect - try different angle
             return PathDecision.ALTERNATE
         else:
-            return PathDecision.REMEDIATE
+            # Low score - check error type
+            if error_type == ErrorType.CONCEPTUAL:
+                # Fundamental misunderstanding - need prerequisites
+                return PathDecision.REMEDIATE
+            else:
+                # Careless/Incomplete/Procedural - retry with new question
+                return PathDecision.RETRY
     
     async def _update_learner_mastery(
         self,
