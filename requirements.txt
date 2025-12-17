@@ -1,77 +1,67 @@
 # ============================================
 # Personalized Learning Path - Requirements
-# Python 3.11+
+# Python 3.12 REQUIRED (run: py -3.12 -m venv venv)
 # ============================================
 
 # Core
-python-dotenv==1.0.0
+python-dotenv>=1.0.0
 
 # ============================================
 # FastAPI & Web
 # ============================================
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-multipart==0.0.9
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.9
 
 # ============================================
-# LLM & Agents (LlamaIndex + Google Gemini)
+# LLM & Agents (LlamaIndex Core + Google Gemini)
 # ============================================
-llama-index==0.10.12
-llama-index-core==0.10.12
-llama-index-llms-gemini==0.1.6
-google-generativeai==0.3.2
+llama-index-core>=0.12.0
+llama-index-llms-gemini>=0.4.0
+google-generativeai>=0.8.0
 
 # ============================================
-# Knowledge Graph (Neo4j)
+# Knowledge Graph (Neo4j Aura - Cloud)
 # ============================================
-neo4j==5.15.0
+neo4j>=5.15.0
 
 # ============================================
 # Vector Database (Chroma)
 # ============================================
-chromadb==0.4.24
+chromadb>=0.4.24
 
 # ============================================
-# Relational Database (PostgreSQL)
+# Relational Database (SQL Server)
 # ============================================
-sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
-alembic==1.13.1
+sqlalchemy>=2.0.0
+pyodbc>=5.0.0
+alembic>=1.13.0
 
 # ============================================
 # Caching (Redis)
 # ============================================
-redis==5.0.1
+redis>=5.0.0
 
 # ============================================
 # Data Processing
 # ============================================
-pandas==2.1.4
-numpy==1.26.3
+pandas>=2.0.0
+numpy>=1.26.0
 
 # ============================================
 # Testing
 # ============================================
-pytest==7.4.4
-pytest-asyncio==0.23.2
-pytest-cov==4.1.0
-httpx==0.25.2
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+httpx>=0.25.0
 
 # ============================================
 # Utilities
 # ============================================
-requests==2.31.0
-aiohttp==3.9.1
-tenacity==8.2.3
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-
-# ============================================
-# Development (Optional)
-# ============================================
-# black==23.12.1
-# isort==5.13.2
-# mypy==1.8.0
-# ruff==0.1.9
+requests>=2.31.0
+aiohttp>=3.9.0
+tenacity>=8.2.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
