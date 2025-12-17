@@ -27,6 +27,15 @@ class ScaffoldingLevel(str, Enum):
     LOW = "LOW"         # Minimal support
 
 
+class UserIntent(str, Enum):
+    """
+    User Intent Classification (Proactive vs Reactive)
+    """
+    HELP_SEEKING = "HELP_SEEKING" # Stuck, error, specific problem -> Needs Scaffolding
+    SENSE_MAKING = "SENSE_MAKING" # Curious, deep understanding, "Why?" -> Needs Probing
+    GENERAL = "GENERAL"           # Fallback
+
+
 class DialogueState:
     """
     Stateful dialogue tracking for Socratic tutoring.
@@ -53,6 +62,7 @@ class DialogueState:
         
         # Content tracking
         self.last_user_response = ""
+        self.last_intent = UserIntent.GENERAL
         self.interaction_log: List[Dict] = []
         self.suspected_misconceptions: List[Dict] = []
         self.hints_given: List[str] = []
@@ -145,6 +155,7 @@ class DialogueState:
             'interaction_log': self.interaction_log,
             'suspected_misconceptions': self.suspected_misconceptions,
             'hints_given': self.hints_given,
+            'last_intent': self.last_intent.value,
             'created_at': self.created_at.isoformat(),
             'last_updated': self.last_updated.isoformat()
         }
@@ -165,4 +176,5 @@ class DialogueState:
         state.interaction_log = data.get('interaction_log', [])
         state.suspected_misconceptions = data.get('suspected_misconceptions', [])
         state.hints_given = data.get('hints_given', [])
+        state.last_intent = UserIntent(data.get('last_intent', 'GENERAL'))
         return state

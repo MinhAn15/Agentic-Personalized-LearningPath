@@ -17,12 +17,21 @@ Teaches using Harvard 7 Principles and Reverse Socratic Method with 3-layer grou
 ## Socratic States
 
 ```python
-SocraticState:  # 5-state progression
+SocraticState:  # Adaptive Cognitive Loop
     PROBING     # State 0: Open-ended question
     SCAFFOLDING # State 1: Hint level 1 (conceptual)
     GUIDING     # State 2: Hint level 2 (structural)
     EXPLAINING  # State 3: Direct explanation
     CONCLUSION  # State 4: Synthesize answer + insight
+
+    # Adaptive States
+    REFUTATION  # Address Misconception (Cognitive Dissonance)
+    ELABORATION # Expand on near-correct answer
+    TEACH_BACK  # Reversed Socratic (Protégé Effect)
+
+UserIntent:
+    HELP_SEEKING # Stuck, error -> Bias towards SCAFFOLDING
+    SENSE_MAKING # Curious, why? -> Bias towards PROBING
 ```
 
 ## Main Methods
@@ -41,7 +50,7 @@ SocraticState:  # 5-state progression
 ## 3-Layer Grounding
 
 ```
-Layer 1: RAG (Chroma Vector Store)
+Layer 1: RAG (Local LlamaIndex Vector)
     → Document chunks semantically similar to query
 
 Layer 2: Course KG (Neo4j)
@@ -56,10 +65,14 @@ Layer 3: Personal KG (Neo4j)
 
 ## State Transitions
 
+## State Transitions (Adaptive)
+
 ```
-High mastery + Low turns → PROBING (challenge)
-Increasing hints → SCAFFOLDING → GUIDING → EXPLAINING
-After explanation → CONCLUSION
+- Help Seeking + Low Turns → SCAFFOLDING (Reduce frustration)
+- Sense Making + Low Turns → PROBING (Deepen inquiry)
+- High mastery + Low turns → TEACH_BACK (Reversed Socratic)
+- Misconception → REFUTATION
+- Near correct → ELABORATION
 ```
 
 ## Event Flow
@@ -74,5 +87,5 @@ PATH_PLANNED (from Agent 3) → Start tutoring session
 
 - `GroundingManager` - 3-layer retrieval
 - `Harvard7Enforcer` - Apply teaching principles
-- `DialogueState` - Conversation tracking
-- Chroma - Vector store for RAG
+- `DialogueState` & `UserIntent` - Conversation, state, and intent tracking
+- LlamaIndex - Local vector store for RAG

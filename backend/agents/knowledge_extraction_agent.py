@@ -12,6 +12,7 @@ Production-grade Knowledge Extraction Agent with:
 import json
 import uuid
 import logging
+import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
@@ -32,6 +33,9 @@ from backend.utils.neo4j_batch_upsert import Neo4jBatchUpserter
 from backend.utils.provenance_manager import ProvenanceManager
 
 from llama_index.llms.gemini import Gemini
+from llama_index.embeddings.gemini import GeminiEmbedding
+from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage, Document, Settings
+from backend.utils.file_lock import file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +115,14 @@ class KnowledgeExtractionAgentV2(BaseAgent):
         
         # Extraction version for provenance
         self.extraction_version = ExtractionVersion.V3_ENTITY_RESOLUTION
+        
+        # Configure LlamaIndex Global Settings
+        # This ensures VectorStoreIndex uses Gemini instead of OpenAI
+        Settings.llm = self.llm
+        Settings.embed_model = GeminiEmbedding(
+            model_name="models/embedding-001",
+            api_key=get_settings().GOOGLE_API_KEY
+        )
     
     def _get_batch_upserter(self) -> Neo4jBatchUpserter:
         """Get or create batch upserter (lazy initialization)"""
@@ -297,6 +309,9 @@ class KnowledgeExtractionAgentV2(BaseAgent):
             # STEP 8: Cleanup Staging + Emit Event
             # ========================================
             await self._cleanup_staging(document_id)
+            
+            # Persist to Local Vector Store (RAG)
+            await self._persist_vector_index(chunks, document_id)
             
             # Emit COURSEKG_UPDATED event
             await self.send_message(
@@ -856,4 +871,51 @@ Return JSON object mapping concept_id to metadata:
         except Exception as e:
             self.logger.error(f"❌ [V2+Provenance] Failed: {e}")
             return self._error_response(str(e))
+
+    async def _persist_vector_index(self, chunks: List[SemanticChunk], document_id: str):
+        """Persist chunks to local vector store"""
+        try:
+            # Safe path resolution: assume cwd is storage root
+            storage_dir = os.path.join(os.getcwd(), "backend", "storage", "vector_store")
+            
+            if not os.path.exists(storage_dir):
+                os.makedirs(storage_dir)
+                
+            lock_file = os.path.join(storage_dir, "write.lock")
+            
+            # Convert chunks to Documents
+            documents = []
+            for chunk in chunks:
+                doc = Document(
+                    text=chunk.content,
+                    metadata={
+                        "document_id": document_id,
+                        "chunk_id": chunk.chunk_id,
+                        "heading": chunk.source_heading
+                    }
+                )
+                documents.append(doc)
+            
+            self.logger.info(f"🔒 [RAG] Acquiring lock for vector store...")
+            with file_lock(lock_file, timeout=60):
+                # Check for existing index
+                if os.path.exists(os.path.join(storage_dir, "docstore.json")):
+                    self.logger.info("loading existing index")
+                    storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
+                    index = load_index_from_storage(storage_context)
+                    # Loop and insert (safest for updates)
+                    for doc in documents:
+                        index.insert(doc)
+                else:
+                    self.logger.info("creating new index")
+                    index = VectorStoreIndex.from_documents(documents)
+                    
+                # Persist
+                index.storage_context.persist(persist_dir=storage_dir)
+                
+            self.logger.info(f"💾 [RAG] Persisted {len(documents)} chunks to local vector store")
+            
+        except Exception as e:
+            self.logger.error(f"❌ [RAG] Vector persistence failed: {e}")
+            # Don't fail the whole pipeline, just log
 

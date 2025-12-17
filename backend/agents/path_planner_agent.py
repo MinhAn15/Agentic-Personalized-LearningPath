@@ -29,6 +29,8 @@ class ChainingMode(str, Enum):
     FORWARD = "FORWARD"    # Success -> NEXT, IS_PREREQUISITE_OF
     BACKWARD = "BACKWARD"  # Remediate -> REQUIRES (go to prerequisites)
     LATERAL = "LATERAL"    # Stuck -> SIMILAR_TO, HAS_ALTERNATIVE_PATH, REMEDIATES
+    ACCELERATE = "ACCELERATE"  # Flow State -> NEXT (harder), IS_SUB_CONCEPT_OF
+    REVIEW = "REVIEW"      # Spaced Repetition -> REQUIRES (review old concepts)
 
 
 class EvaluationDecision(str, Enum):
@@ -73,7 +75,9 @@ class PathPlannerAgent(BaseAgent):
         self.CHAIN_RELATIONSHIPS = {
             ChainingMode.FORWARD: ["NEXT", "IS_PREREQUISITE_OF"],
             ChainingMode.BACKWARD: ["REQUIRES"],
-            ChainingMode.LATERAL: ["SIMILAR_TO", "HAS_ALTERNATIVE_PATH", "REMEDIATES"]
+            ChainingMode.LATERAL: ["SIMILAR_TO", "HAS_ALTERNATIVE_PATH", "REMEDIATES"],
+            ChainingMode.ACCELERATE: ["NEXT", "IS_SUB_CONCEPT_OF"],
+            ChainingMode.REVIEW: ["REQUIRES"]  # Logic uses this to find prior nodes
         }
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
@@ -229,16 +233,28 @@ class PathPlannerAgent(BaseAgent):
         """
         Select chaining mode based on last evaluation result.
         
-        - PROCEED/MASTERED -> Forward chaining
-        - REMEDIATE -> Backward chaining (prerequisites)
-        - ALTERNATE/None -> Lateral chaining
+        - MASTERED -> ACCELERATE (Flow State)
+        - PROCEED -> FORWARD (Normal progression)
+        - REMEDIATE -> BACKWARD (Prerequisites)
+        - ALTERNATE/RETRY -> LATERAL (Different approach)
+        - None (Start of session) -> Check for REVIEW needs
         """
-        if last_result in ["PROCEED", "MASTERED"]:
+        if last_result == "MASTERED":
+            return ChainingMode.ACCELERATE
+        elif last_result == "PROCEED":
             return ChainingMode.FORWARD
         elif last_result == "REMEDIATE":
             return ChainingMode.BACKWARD
-        else:  # ALTERNATE, RETRY, or None
+        elif last_result in ["ALTERNATE", "RETRY"]:
             return ChainingMode.LATERAL
+        else:
+            # Start of session or unknown state
+            # Simple heuristic: 10% chance to trigger REVIEW mode for Spaced Repetition
+            # In production, this would check 'last_reviewed_at' decay
+            import random
+            if random.random() < 0.1:
+                return ChainingMode.REVIEW
+            return ChainingMode.FORWARD
     
     async def _generate_adaptive_path(
         self,
@@ -276,7 +292,8 @@ class PathPlannerAgent(BaseAgent):
                     course_concepts=course_concepts,
                     visited=visited,
                     current_mastery=current_mastery,
-                    prerequisites=prerequisites
+                    prerequisites=prerequisites,
+                    chain_mode=chain_mode
                 )
                 
                 if not candidates:
@@ -289,7 +306,8 @@ class PathPlannerAgent(BaseAgent):
                             course_concepts=course_concepts,
                             visited=visited,
                             current_mastery=current_mastery,
-                            prerequisites=prerequisites
+                            prerequisites=prerequisites,
+                            chain_mode=ChainingMode.LATERAL
                         )
                     
                     if not candidates:
@@ -365,20 +383,47 @@ class PathPlannerAgent(BaseAgent):
         course_concepts: List[Dict],
         visited: set,
         current_mastery: Dict[str, float],
-        prerequisites: Dict[str, List[str]]
+        prerequisites: Dict[str, List[str]],
+        chain_mode: ChainingMode = ChainingMode.FORWARD
     ) -> List[str]:
         """Get candidate concepts based on chaining mode relationships"""
         candidates = []
         
         if current_concept:
-            # Get related concepts via relevant relationship types
-            for rel_type in relevant_rel_types:
-                if rel_type in relationship_map:
-                    related = relationship_map[rel_type].get(current_concept, [])
-                    candidates.extend(related)
+            # Special handling for ACCELERATE: Look ahead 2 steps for NEXT
+            if chain_mode == ChainingMode.ACCELERATE:
+                direct_next = relationship_map.get("NEXT", {}).get(current_concept, [])
+                for next_c in direct_next:
+                    candidates.append(next_c)
+                    # Look one more step ahead
+                    second_step = relationship_map.get("NEXT", {}).get(next_c, [])
+                    candidates.extend(second_step)
+                
+                # Also include IS_SUB_CONCEPT_OF parent/child depending on graph direction
+                # Here assuming drilling down to harder sub-concepts
+                sub_concepts = relationship_map.get("IS_SUB_CONCEPT_OF", {}).get(current_concept, [])
+                candidates.extend(sub_concepts)
+            
+            else:
+                # Normal handling for FORWARD, BACKWARD, LATERAL, REVIEW
+                for rel_type in relevant_rel_types:
+                    if rel_type in relationship_map:
+                        related = relationship_map[rel_type].get(current_concept, [])
+                        candidates.extend(related)
         else:
-            # No current concept - get all concepts
-            candidates = [c["concept_id"] for c in course_concepts]
+            # No current concept
+            if chain_mode == ChainingMode.REVIEW:
+                # REVIEW mode at start: Pick mastered concepts from long ago
+                # Simulating "long ago" by picking concepts with > 0.8 mastery 
+                # but valid candidates logic below will filter visited.
+                # In real prod, this needs last_accessed_at.
+                candidates = [
+                    cid for cid, m in current_mastery.items() 
+                    if m > 0.8
+                ]
+            else:
+                # Get all concepts
+                candidates = [c["concept_id"] for c in course_concepts]
         
         # Filter: not visited, prerequisites met
         valid_candidates = []

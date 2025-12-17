@@ -18,9 +18,11 @@ Generates optimal learning sequences using Multi-Armed Bandit RL with adaptive c
 
 ```python
 ChainingMode:
-    FORWARD   # Normal progression (after PROCEED/MASTERED)
-    BACKWARD  # Review prerequisites (after REMEDIATE)
-    LATERAL   # Try alternative paths (after ALTERNATE)
+    FORWARD     # Progression: Success -> NEXT, IS_PREREQUISITE_OF
+    BACKWARD    # Remediation: Fail -> REQUIRES (go to prerequisites)
+    LATERAL     # Stabilization: Stuck -> SIMILAR_TO (try different approach)
+    ACCELERATE  # Flow State: Mastered -> NEXT (harder), IS_SUB_CONCEPT_OF
+    REVIEW      # Spaced Repetition: Start -> REQUIRES (review old concepts)
 
 EvaluationDecision:  # From Agent 5
     PROCEED, MASTERED, REMEDIATE, ALTERNATE, RETRY
@@ -28,15 +30,15 @@ EvaluationDecision:  # From Agent 5
 
 ## Main Methods
 
-| Method                             | Purpose                              |
-| ---------------------------------- | ------------------------------------ |
-| `execute()`                        | Generate personalized learning path  |
-| `_select_chain_mode()`             | Choose mode based on last evaluation |
-| `_generate_adaptive_path()`        | Build path using chaining strategy   |
-| `_get_chain_candidates()`          | Get concepts based on relationships  |
-| `_determine_pacing()`              | Calculate pacing recommendations     |
-| `_recommend_resources()`           | Suggest content types per concept    |
-| `_calculate_success_probability()` | Predict completion likelihood        |
+| Method                             | Purpose                                                |
+| ---------------------------------- | ------------------------------------------------------ |
+| `execute()`                        | Generate personalized learning path                    |
+| `_select_chain_mode()`             | `MASTERED`→`ACCELERATE`, `REMEDIATE`→`BACKWARD`        |
+| `_generate_adaptive_path()`        | Build path using chaining strategy                     |
+| `_get_chain_candidates()`          | Get concepts (with depth-2 lookahead for `ACCELERATE`) |
+| `_determine_pacing()`              | Calculate pacing recommendations                       |
+| `_recommend_resources()`           | Suggest content types per concept                      |
+| `_calculate_success_probability()` | Predict completion likelihood                          |
 
 ## RL Engine Integration
 
