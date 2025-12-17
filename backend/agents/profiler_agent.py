@@ -1,5 +1,6 @@
 import json
 import uuid
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
@@ -8,13 +9,19 @@ import logging
 from backend.core.base_agent import BaseAgent, AgentType
 from backend.models import (
     LearnerInput, LearnerProfile, LearnerProfileOutput,
-    MasteryMap, SkillLevel, LearningStyle
+    MasteryMap, SkillLevel, LearningStyle,
+    SessionEpisode, ConceptEpisode, ErrorEpisode, ArtifactEpisode, EpisodeType
 )
 from backend.prompts import LEARNER_PROFILER_SYSTEM_PROMPT
 from llama_index.llms.gemini import Gemini
 from backend.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+class VersionConflictError(Exception):
+    """Raised when optimistic locking fails"""
+    pass
 
 
 class DiagnosticState(str, Enum):
@@ -26,21 +33,20 @@ class DiagnosticState(str, Enum):
 
 class ProfilerAgent(BaseAgent):
     """
-    Learner Profiler Agent - Build and update Learner Profile.
+    Learner Profiler Agent - Build and update 17-dimensional Learner Profile.
     
-    Features (per Thesis):
+    Features (per THESIS Section 3.5.1):
     1. Goal Parsing & Intent Extraction (Topic, Purpose, Constraint, Level)
     2. Diagnostic Assessment System (3-5 representative concepts)
-    3. Profile Vectorization [KnowledgeState, LearningStyle, GoalEmbedding]
+    3. Profile Vectorization (10 dimensions including Bloom's)
+    4. Episodic Memory (4 episode types)
+    5. Real-time Updates (event-driven)
+    6. Personal KG Initialization (Dual-KG Layer 3)
     
-    Process Flow:
-    1. Receive learner message
-    2. Parse goal (Topic, Purpose, Timeline, Level)
-    3. If new profile -> Trigger diagnostic assessment
-    4. Assess answers and estimate initial mastery
-    5. Create profile in PostgreSQL + Personal KG in Neo4j
-    6. Cache in Redis
-    7. Emit event for planner
+    Event Subscriptions:
+    - EVALUATION_COMPLETED: Update mastery + Bloom level
+    - PACE_CHECK_TRIGGERED: Update learning velocity
+    - ARTIFACT_CREATED: Track generated notes
     """
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
@@ -52,6 +58,12 @@ class ProfilerAgent(BaseAgent):
             api_key=self.settings.GOOGLE_API_KEY
         )
         self.logger = logging.getLogger(f"ProfilerAgent.{agent_id}")
+        
+        # Per-learner locks for event ordering
+        self._learner_locks: Dict[str, asyncio.Lock] = {}
+        
+        # Subscribe to events for real-time updates
+        self._subscribe_to_events()
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Main execution method."""
@@ -157,19 +169,50 @@ class ProfilerAgent(BaseAgent):
                 learning_style=profile.preferred_learning_style.value
             )
             
-            # Create initial mastery relationships
+            # Create initial MasteryNode for each concept (Change #4: Dual-KG Layer 3)
             for concept_id, mastery in initial_mastery.items():
+                mastery_id = f"MASTERY_{learner_id}_{concept_id}"
                 await neo4j.run_query(
                     """
                     MATCH (l:Learner {learner_id: $learner_id})
                     MATCH (c:CourseConcept {concept_id: $concept_id})
-                    MERGE (l)-[m:HAS_MASTERY]->(c)
-                    SET m.level = $mastery, m.updated_at = datetime()
+                    CREATE (m:MasteryNode {
+                        mastery_id: $mastery_id,
+                        learner_id: $learner_id,
+                        concept_id: $concept_id,
+                        level: $mastery_level,
+                        bloom_level: 'REMEMBER',
+                        created_at: datetime(),
+                        last_updated: datetime()
+                    })
+                    CREATE (l)-[:HAS_MASTERY]->(m)
+                    CREATE (m)-[:MAPS_TO_CONCEPT]->(c)
                     """,
                     learner_id=learner_id,
                     concept_id=concept_id,
-                    mastery=mastery
+                    mastery_id=mastery_id,
+                    mastery_level=mastery
                 )
+            
+            # Create initial SessionEpisode
+            session_id = f"session_{learner_id}_{datetime.now().timestamp()}"
+            await neo4j.run_query(
+                """
+                MATCH (l:Learner {learner_id: $learner_id})
+                CREATE (s:SessionEpisode {
+                    session_id: $session_id,
+                    started_at: datetime(),
+                    status: 'ACTIVE',
+                    concepts_covered: $concepts_covered
+                })
+                CREATE (l)-[:HAS_SESSION]->(s)
+                """,
+                learner_id=learner_id,
+                session_id=session_id,
+                concepts_covered=list(initial_mastery.keys())
+            )
+            
+            self.logger.info(f"Personal KG initialized: {len(initial_mastery)} MasteryNodes + SessionEpisode")
             
             # Step 7: Cache in Redis
             redis = self.state_manager.redis
@@ -454,14 +497,349 @@ Return ONLY valid JSON:
         }
         skill_level = level_map.get(profile.current_skill_level.value, 0.2)
         
-        # Goal embedding (simplified - would use sentence embeddings in production)
-        goal_features = [
-            profile.time_available / 90,  # Normalized time (max 90 days)
-            skill_level,
-            len(profile_data.get("topic", "")) / 50  # Topic length feature
+        # Time normalized
+        time_normalized = profile.time_available / 500  # Normalize to 500 mins max
+        
+        # Change #5: Bloom's average level
+        bloom_map = {
+            "REMEMBER": 0.1, "UNDERSTAND": 0.3, "APPLY": 0.5,
+            "ANALYZE": 0.7, "EVALUATE": 0.85, "CREATE": 1.0
+        }
+        bloom_values = []
+        if hasattr(profile, 'mastery_progression') and profile.mastery_progression:
+            for v in profile.mastery_progression.values():
+                bloom_level = v.get('bloom_level', 'REMEMBER') if isinstance(v, dict) else 'REMEMBER'
+                bloom_values.append(bloom_map.get(bloom_level, 0.1))
+        bloom_avg = sum(bloom_values) / len(bloom_values) if bloom_values else 0.0
+        
+        # Learning velocity
+        learning_velocity = profile.learning_velocity if hasattr(profile, 'learning_velocity') else 0.0
+        
+        # Topic features
+        topic_length = len(profile_data.get("topic", "")) / 50
+        
+        # Combine into 10-dimension profile vector
+        # [knowledge_state, visual, auditory, reading, kinesthetic, 
+        #  skill_level, time_norm, bloom_avg, learning_vel, topic_len]
+        profile_vector = [
+            knowledge_state,       # dim 0: knowledge state
+            *learning_style,       # dim 1-4: learning style one-hot
+            skill_level,           # dim 5: skill level
+            time_normalized,       # dim 6: time
+            bloom_avg,             # dim 7: Bloom's average (NEW)
+            learning_velocity,     # dim 8: learning velocity (NEW)
+            topic_length           # dim 9: topic
         ]
         
-        # Combine into profile vector
-        profile_vector = [knowledge_state] + learning_style + [skill_level] + goal_features
+        return profile_vector  # 10 dimensions
+    
+    # ==========================================
+    # CHANGE #3: REAL-TIME UPDATE HANDLERS
+    # ==========================================
+    
+    def _subscribe_to_events(self):
+        """Subscribe to events for real-time profile updates"""
+        if hasattr(self.event_bus, 'subscribe'):
+            self.event_bus.subscribe("EVALUATION_COMPLETED", self._on_evaluation_completed)
+            self.event_bus.subscribe("PACE_CHECK_TRIGGERED", self._on_pace_check)
+            self.event_bus.subscribe("ARTIFACT_CREATED", self._on_artifact_created)
+            self.logger.info("Subscribed to EVALUATION_COMPLETED, PACE_CHECK_TRIGGERED, ARTIFACT_CREATED")
+    
+    def _get_learner_lock(self, learner_id: str) -> asyncio.Lock:
+        """Get per-learner lock for event ordering"""
+        if learner_id not in self._learner_locks:
+            self._learner_locks[learner_id] = asyncio.Lock()
+        return self._learner_locks[learner_id]
+    
+    async def _on_evaluation_completed(self, event: Dict[str, Any]):
+        """
+        Update profile when Evaluator finishes.
         
-        return profile_vector
+        Updates:
+        - concept_mastery_map (dim 9)
+        - completed_concepts (dim 10) if score >= 0.8
+        - error_patterns (dim 11) if misconceptions
+        - mastery_progression (Bloom's)
+        - avg_mastery_level (dim 15)
+        """
+        learner_id = event.get('learner_id')
+        if not learner_id:
+            return
+        
+        async with self._get_learner_lock(learner_id):
+            try:
+                concept_id = event['concept_id']
+                score = event['score']  # 0-1
+                misconceptions = event.get('misconceptions', [])
+                question_difficulty = event.get('question_difficulty', 2)
+                question_type = event.get('question_type', 'factual')
+                
+                # Get current profile from Redis/PostgreSQL
+                redis = self.state_manager.redis
+                profile_data = await redis.get(f"profile:{learner_id}")
+                
+                if not profile_data:
+                    self.logger.warning(f"Profile not found for {learner_id}")
+                    return
+                
+                version_before = profile_data.get('version', 0)
+                prev_avg_mastery = profile_data.get('avg_mastery_level', 0)
+                
+                # 1. Update concept_mastery_map (dim 9)
+                if 'concept_mastery_map' not in profile_data:
+                    profile_data['concept_mastery_map'] = {}
+                profile_data['concept_mastery_map'][concept_id] = score
+                
+                # 2. If PROCEED (score >= 0.8), add to completed_concepts (dim 10)
+                if score >= 0.8:
+                    if 'completed_concepts' not in profile_data:
+                        profile_data['completed_concepts'] = []
+                    if concept_id not in profile_data['completed_concepts']:
+                        profile_data['completed_concepts'].append(concept_id)
+                
+                # 3. Add error episodes if misconceptions detected (dim 11)
+                if misconceptions:
+                    if 'error_patterns' not in profile_data:
+                        profile_data['error_patterns'] = []
+                    
+                    for misc in misconceptions:
+                        error_episode = {
+                            'error_id': f"err_{uuid.uuid4().hex[:8]}",
+                            'timestamp': datetime.now().isoformat(),
+                            'concept_id': concept_id,
+                            'misconception_type': misc.get('type', 'unknown'),
+                            'severity': misc.get('severity', 3)
+                        }
+                        profile_data['error_patterns'].append(error_episode)
+                        
+                        # Create ErrorEpisode in Neo4j
+                        await self._create_error_episode(learner_id, error_episode)
+                
+                # 4. Estimate & update Bloom's level
+                bloom_level = self._estimate_bloom_level(
+                    score=score,
+                    difficulty=question_difficulty,
+                    question_type=question_type
+                )
+                
+                if 'mastery_progression' not in profile_data:
+                    profile_data['mastery_progression'] = {}
+                profile_data['mastery_progression'][concept_id] = {
+                    'timestamp': datetime.now().isoformat(),
+                    'bloom_level': bloom_level,
+                    'score': score,
+                    'difficulty': question_difficulty
+                }
+                
+                # 5. Recalculate avg_mastery_level (dim 15)
+                mastery_values = list(profile_data['concept_mastery_map'].values())
+                profile_data['avg_mastery_level'] = (
+                    sum(mastery_values) / len(mastery_values)
+                    if mastery_values else 0.0
+                )
+                
+                # 6. Update metadata with optimistic locking
+                profile_data['version'] = version_before + 1
+                profile_data['last_updated'] = datetime.now().isoformat()
+                profile_data['last_updated_by'] = 'profiler'
+                
+                await redis.set(f"profile:{learner_id}", profile_data, ttl=1800)
+                
+                # 7. Selective publish: only if avg_mastery changed > 10%
+                mastery_change = abs(profile_data['avg_mastery_level'] - prev_avg_mastery)
+                if mastery_change > 0.1:
+                    await self.send_message(
+                        receiver="planner",
+                        message_type="PROFILE_ADVANCED",
+                        payload={
+                            'learner_id': learner_id,
+                            'new_avg_mastery': profile_data['avg_mastery_level']
+                        }
+                    )
+                
+                self.logger.info({
+                    'event': 'profile_updated_evaluation',
+                    'learner_id': learner_id,
+                    'concept_id': concept_id,
+                    'new_score': score,
+                    'new_bloom': bloom_level
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error in _on_evaluation_completed: {e}")
+    
+    async def _on_pace_check(self, event: Dict[str, Any]):
+        """Update learning_velocity when pace check triggered"""
+        learner_id = event.get('learner_id')
+        if not learner_id:
+            return
+        
+        async with self._get_learner_lock(learner_id):
+            try:
+                pace_ratio = event.get('pace_ratio', 1.0)
+                hours_spent = event.get('hours_spent', 1.0)
+                
+                redis = self.state_manager.redis
+                profile_data = await redis.get(f"profile:{learner_id}")
+                
+                if not profile_data:
+                    return
+                
+                # 1. Update learning_velocity (dim 16)
+                concepts_done = len(profile_data.get('completed_concepts', []))
+                profile_data['learning_velocity'] = (
+                    concepts_done / hours_spent if hours_spent > 0 else 0.0
+                )
+                
+                # 2. Auto-adjust difficulty preference
+                if 'preferences' not in profile_data:
+                    profile_data['preferences'] = {}
+                
+                if pace_ratio > 1.2:  # Ahead
+                    profile_data['preferences']['difficulty_next'] = "HARD"
+                elif pace_ratio < 0.8:  # Behind
+                    profile_data['preferences']['difficulty_next'] = "EASY"
+                else:
+                    profile_data['preferences']['difficulty_next'] = "MEDIUM"
+                
+                # 3. Save
+                profile_data['version'] = profile_data.get('version', 0) + 1
+                profile_data['last_updated'] = datetime.now().isoformat()
+                await redis.set(f"profile:{learner_id}", profile_data, ttl=1800)
+                
+                # 4. Publish if velocity anomaly
+                if abs(profile_data['learning_velocity'] - 1.0) > 0.3:
+                    event_type = 'LEARNER_ACCELERATING' if profile_data['learning_velocity'] > 1.0 else 'LEARNER_SLOWING'
+                    await self.send_message(
+                        receiver="planner",
+                        message_type=event_type,
+                        payload={'learner_id': learner_id, 'velocity': profile_data['learning_velocity']}
+                    )
+                
+            except Exception as e:
+                self.logger.error(f"Error in _on_pace_check: {e}")
+    
+    async def _on_artifact_created(self, event: Dict[str, Any]):
+        """Track generated notes in profile"""
+        learner_id = event.get('learner_id')
+        if not learner_id:
+            return
+        
+        async with self._get_learner_lock(learner_id):
+            try:
+                artifact_id = event['artifact_id']
+                concept_id = event.get('concept_id', '')
+                
+                redis = self.state_manager.redis
+                profile_data = await redis.get(f"profile:{learner_id}")
+                
+                if not profile_data:
+                    return
+                
+                # 1. Add artifact ID (dim 14)
+                if 'artifact_ids' not in profile_data:
+                    profile_data['artifact_ids'] = []
+                profile_data['artifact_ids'].append(artifact_id)
+                
+                # 2. Create ArtifactEpisode in Neo4j
+                await self._create_artifact_episode(learner_id, {
+                    'artifact_id': artifact_id,
+                    'concept_id': concept_id,
+                    'created_at': datetime.now().isoformat()
+                })
+                
+                # 3. Save
+                profile_data['version'] = profile_data.get('version', 0) + 1
+                await redis.set(f"profile:{learner_id}", profile_data, ttl=1800)
+                
+            except Exception as e:
+                self.logger.error(f"Error in _on_artifact_created: {e}")
+    
+    def _estimate_bloom_level(self, score: float, difficulty: int, question_type: str) -> str:
+        """
+        Estimate Bloom's level from 3 signals (per handoff doc).
+        
+        Weights: score (60%) + difficulty (25%) + question_type (15%)
+        """
+        # Signal 1: Score-based (60% weight)
+        if score < 0.2:
+            bloom_from_score = 1
+        elif score < 0.4:
+            bloom_from_score = 2
+        elif score < 0.6:
+            bloom_from_score = 3
+        elif score < 0.8:
+            bloom_from_score = 4
+        elif score < 0.9:
+            bloom_from_score = 5
+        else:
+            bloom_from_score = 6
+        
+        # Signal 2: Difficulty adjustment (25% weight)
+        difficulty_adjustment = -0.5 if difficulty >= 4 else (0.5 if difficulty <= 2 else 0)
+        
+        # Signal 3: Question type (15% weight)
+        question_boost = {
+            'factual': 0, 
+            'conceptual': 0.3, 
+            'application': 0.7, 
+            'synthesis': 1.0
+        }.get(question_type, 0)
+        
+        # Combine signals
+        combined = (
+            0.60 * bloom_from_score +
+            0.25 * (bloom_from_score + difficulty_adjustment) +
+            0.15 * (bloom_from_score + question_boost)
+        )
+        
+        # Round to Bloom level
+        final_idx = round(min(6, max(1, combined)))
+        bloom_levels = ["", "REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE", "EVALUATE", "CREATE"]
+        return bloom_levels[final_idx]
+    
+    async def _create_error_episode(self, learner_id: str, error_data: Dict):
+        """Create ErrorEpisode node in Neo4j Personal KG"""
+        try:
+            neo4j = self.state_manager.neo4j
+            await neo4j.run_query(
+                """
+                MATCH (l:Learner {learner_id: $learner_id})
+                CREATE (e:ErrorEpisode {
+                    error_id: $error_id,
+                    concept_id: $concept_id,
+                    misconception_type: $misconception_type,
+                    severity: $severity,
+                    timestamp: datetime()
+                })
+                CREATE (l)-[:HAS_ERROR]->(e)
+                """,
+                learner_id=learner_id,
+                error_id=error_data['error_id'],
+                concept_id=error_data['concept_id'],
+                misconception_type=error_data['misconception_type'],
+                severity=error_data['severity']
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to create ErrorEpisode: {e}")
+    
+    async def _create_artifact_episode(self, learner_id: str, artifact_data: Dict):
+        """Create ArtifactEpisode node in Neo4j Personal KG"""
+        try:
+            neo4j = self.state_manager.neo4j
+            await neo4j.run_query(
+                """
+                MATCH (l:Learner {learner_id: $learner_id})
+                CREATE (a:ArtifactEpisode {
+                    artifact_id: $artifact_id,
+                    concept_id: $concept_id,
+                    created_at: datetime()
+                })
+                CREATE (l)-[:HAS_ARTIFACT]->(a)
+                """,
+                learner_id=learner_id,
+                artifact_id=artifact_data['artifact_id'],
+                concept_id=artifact_data['concept_id']
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to create ArtifactEpisode: {e}")

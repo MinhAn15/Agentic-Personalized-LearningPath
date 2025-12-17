@@ -52,20 +52,102 @@ class MasteryMap(BaseModel):
     """Learner's current mastery of concepts"""
     concept_id: str
     mastery_level: float = Field(ge=0, le=1)  # 0-1
+    bloom_level: str = "REMEMBER"  # Bloom's taxonomy level
     last_updated: datetime = Field(default_factory=datetime.now)
 
 class LearnerProfile(BaseModel):
-    """Complete learner profile"""
-    learner_id: str
-    name: str
-    goal: str                           # What they want to learn
-    time_available: int                 # Days until deadline
-    preferred_learning_style: LearningStyle
-    current_skill_level: SkillLevel
-    current_mastery: List[MasteryMap]   # Mastery of each concept
-    prerequisites_met: List[str]        # Concepts they already know
-    created_at: datetime = Field(default_factory=datetime.now)
+    """
+    Complete learner profile with 17 dimensions (per THESIS Bảng 3.8).
     
+    Categories:
+    - Static (1-4): Demographics, learning goal, style
+    - Dynamic (5-8): Updated each session
+    - Episodic (9-14): History tracking
+    - Computed (15-16): Derived metrics
+    - Aggregated (17): Analytics
+    """
+    # ==========================================
+    # STATIC DIMENSIONS (1-4)
+    # ==========================================
+    learner_id: str                                          # dim 1: UUID from registration
+    demographic: Dict[str, Any] = Field(default_factory=dict)  # dim 2: {age, language, timezone, etc}
+    learning_goal: List[str] = Field(default_factory=list)   # dim 3: ["SQL_SELECT", "SQL_JOIN", ...]
+    learning_style: LearningStyle = LearningStyle.VISUAL     # dim 4: VISUAL/AUDITORY/READING/KINESTHETIC
+    
+    # ==========================================
+    # DYNAMIC DIMENSIONS (5-8) - Updated each session
+    # ==========================================
+    skill_level: SkillLevel = SkillLevel.BEGINNER            # dim 5: BEGINNER/INTERMEDIATE/ADVANCED
+    available_time: int = 30                                  # dim 6: minutes/week (updated weekly)
+    preferences: Dict[str, Any] = Field(default_factory=lambda: {
+        "pace": "medium",           # slow/medium/fast
+        "verbosity": "normal",      # brief/normal/verbose
+        "hint_level": 2,            # 1-3 (fewer to more hints)
+        "difficulty_next": "MEDIUM" # EASY/MEDIUM/HARD
+    })                                                        # dim 7
+    constraints: Dict[str, Any] = Field(default_factory=lambda: {
+        "deadline": None,           # datetime or None
+        "blackout_hours": [],       # hours when unavailable
+        "priority_skills": []       # skills to prioritize
+    })                                                        # dim 8
+    
+    # ==========================================
+    # EPISODIC DIMENSIONS (9-14) - History tracking
+    # ==========================================
+    concept_mastery_map: Dict[str, float] = Field(default_factory=dict)  # dim 9: {concept_id: 0-1}
+    completed_concepts: List[str] = Field(default_factory=list)           # dim 10: concepts with PROCEED
+    error_patterns: List[Dict[str, Any]] = Field(default_factory=list)    # dim 11: [{concept_id, misconception_type, severity}]
+    session_history: List[Dict[str, Any]] = Field(default_factory=list)   # dim 12: [{session_id, start, end, concepts_covered}]
+    interaction_log: List[Dict[str, Any]] = Field(default_factory=list)   # dim 13: [{role, content, timestamp}]
+    artifact_ids: List[str] = Field(default_factory=list)                 # dim 14: [note_id1, note_id2, ...]
+    
+    # ==========================================
+    # COMPUTED DIMENSIONS (15-16) - Derived metrics
+    # ==========================================
+    avg_mastery_level: float = 0.0                            # dim 15: mean(mastery_map.values())
+    learning_velocity: float = 0.0                            # dim 16: concepts/hour
+    
+    # ==========================================
+    # AGGREGATED DIMENSION (17)
+    # ==========================================
+    engagement_score: float = 0.0                             # dim 17: 0-1 from analytics
+    
+    # ==========================================
+    # BLOOM'S TRACKING (per concept)
+    # ==========================================
+    mastery_progression: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    # {concept_id: {timestamp, bloom_level, score, difficulty}}
+    
+    # ==========================================
+    # METADATA
+    # ==========================================
+    version: int = 0                                          # For optimistic locking
+    created_at: datetime = Field(default_factory=datetime.now)
+    last_updated: datetime = Field(default_factory=datetime.now)
+    last_updated_by: str = "system"                           # "profiler", "planner", "tutor", etc.
+    
+    # Legacy fields (for backward compatibility)
+    name: str = ""
+    goal: str = ""
+    time_available: int = 30  # Alias for available_time
+    preferred_learning_style: LearningStyle = LearningStyle.VISUAL
+    current_skill_level: SkillLevel = SkillLevel.BEGINNER
+    current_mastery: List[MasteryMap] = Field(default_factory=list)
+    prerequisites_met: List[str] = Field(default_factory=list)
+    
+    def recalculate_avg_mastery(self):
+        """Recalculate dim 15: avg_mastery_level"""
+        if self.concept_mastery_map:
+            self.avg_mastery_level = sum(self.concept_mastery_map.values()) / len(self.concept_mastery_map)
+        else:
+            self.avg_mastery_level = 0.0
+    
+    def get_bloom_level(self, concept_id: str) -> str:
+        """Get Bloom's level for a concept"""
+        if concept_id in self.mastery_progression:
+            return self.mastery_progression[concept_id].get("bloom_level", "REMEMBER")
+        return "REMEMBER"
+
 class LearnerProfileOutput(BaseModel):
     """Output from profiler agent"""
     profile: LearnerProfile

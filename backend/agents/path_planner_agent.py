@@ -5,6 +5,19 @@ import logging
 
 from backend.core.base_agent import BaseAgent, AgentType
 from backend.core.rl_engine import RLEngine, BanditStrategy
+from backend.core.constants import (
+    CHAIN_RELATIONSHIPS,
+    MASTERY_PREREQUISITE_THRESHOLD,
+    CONCEPT_BASE_TIME,
+    DIFFICULTY_MULTIPLIER,
+    TIME_BUDGET_FACTOR,
+    MAX_PATH_CONCEPTS,
+    PACING_AGGRESSIVE_THRESHOLD,
+    PACING_MODERATE_THRESHOLD,
+    SUCCESS_PROB_MASTERY_WEIGHT,
+    SUCCESS_PROB_TIME_WEIGHT,
+    SUCCESS_PROB_DIFFICULTY_WEIGHT
+)
 from backend.models import LearnerProfile
 from backend.config import get_settings
 
@@ -12,10 +25,19 @@ logger = logging.getLogger(__name__)
 
 
 class ChainingMode(str, Enum):
-    """Adaptive Sequencing Modes per Thesis"""
+    """Adaptive Sequencing Modes per THESIS Section 3.1.2"""
     FORWARD = "FORWARD"    # Success -> NEXT, IS_PREREQUISITE_OF
-    BACKWARD = "BACKWARD"  # Fail -> REQUIRES (go to prerequisites)
-    LATERAL = "LATERAL"    # Stuck -> SIMILAR_TO, HAS_ALTERNATIVE_PATH
+    BACKWARD = "BACKWARD"  # Remediate -> REQUIRES (go to prerequisites)
+    LATERAL = "LATERAL"    # Stuck -> SIMILAR_TO, HAS_ALTERNATIVE_PATH, REMEDIATES
+
+
+class EvaluationDecision(str, Enum):
+    """From Evaluator Agent (Agent 5)"""
+    PROCEED = "PROCEED"      # Score >= 0.8, move forward
+    MASTERED = "MASTERED"    # Perfect score, skip to next
+    REMEDIATE = "REMEDIATE"  # Score < 0.3, go backward
+    ALTERNATE = "ALTERNATE"  # Different approach needed
+    RETRY = "RETRY"          # Try again with same concept
 
 
 class PathPlannerAgent(BaseAgent):
@@ -428,20 +450,38 @@ class PathPlannerAgent(BaseAgent):
         learner_profile: Dict[str, Any],
         learning_path: List[Dict[str, Any]]
     ) -> float:
-        """Calculate probability of completing learning path"""
+        """
+        Calculate probability of completing learning path.
+        
+        Formula (per THESIS Section 3.1.3):
+        P(success) = 0.4 × avg_mastery + 0.4 × time_fit - 0.2 × difficulty_penalty
+        """
         if not learning_path:
             return 0.0
         
-        current_mastery = learner_profile.get("current_mastery", [])
-        avg_mastery = sum(m.get("mastery_level", 0) for m in current_mastery) / max(len(current_mastery), 1)
+        # Component 1: Average mastery (40%)
+        concept_mastery_map = learner_profile.get("concept_mastery_map", {})
+        mastery_scores = [
+            concept_mastery_map.get(step['concept'], 0.0)
+            for step in learning_path
+        ]
+        avg_mastery = sum(mastery_scores) / len(mastery_scores) if mastery_scores else 0.0
         
-        avg_difficulty = sum(s.get("difficulty", 2) for s in learning_path) / len(learning_path)
-        
-        time_available = learner_profile.get("time_available", 30)
+        # Component 2: Time fit (40%)
         total_hours = sum(s.get("estimated_hours", 0) for s in learning_path)
-        time_factor = min(total_hours / (time_available * 2), 1.0)
+        available_hours = learner_profile.get("available_time", 600) / 60  # minutes -> hours
+        time_fit = min(1.0, available_hours / total_hours) if total_hours > 0 else 1.0
         
-        prob = avg_mastery + (0.3 * time_factor) - (0.1 * (avg_difficulty / 5.0))
+        # Component 3: Difficulty penalty (20%) - penalty above medium difficulty
+        avg_difficulty = sum(s.get("difficulty", 2) for s in learning_path) / len(learning_path)
+        difficulty_penalty = max(0.0, (avg_difficulty - 3.0) * 0.1)
+        
+        # Combined with constants
+        prob = (
+            SUCCESS_PROB_MASTERY_WEIGHT * avg_mastery +
+            SUCCESS_PROB_TIME_WEIGHT * time_fit -
+            SUCCESS_PROB_DIFFICULTY_WEIGHT * difficulty_penalty
+        )
         
         return max(0.0, min(1.0, prob))
     

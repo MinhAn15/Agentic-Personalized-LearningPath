@@ -1,9 +1,12 @@
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from enum import Enum
 
 from backend.core.base_agent import BaseAgent, AgentType
+from backend.core.grounding_manager import GroundingManager, GroundingContext
+from backend.core.harvard_enforcer import Harvard7Enforcer
+from backend.models.dialogue import DialogueState, DialoguePhase, ScaffoldingLevel
 from backend.config import get_settings
 from llama_index.llms.gemini import Gemini
 
@@ -61,11 +64,23 @@ class TutorAgent(BaseAgent):
         )
         self.logger = logging.getLogger(f"TutorAgent.{agent_id}")
         
+        # Harvard 7 Enforcer for response quality
+        self.harvard_enforcer = Harvard7Enforcer()
+        
+        # Dialogue states per (learner_id, concept_id)
+        self.dialogue_states: Dict[Tuple[str, str], DialogueState] = {}
+        
         # Confidence weights for 3-layer grounding
         self.W_DOC = 0.4   # Document grounding weight
         self.W_KG = 0.35   # Course KG weight
         self.W_PERSONAL = 0.25  # Personal KG weight
         self.CONFIDENCE_THRESHOLD = 0.5
+        
+        # Event subscriptions
+        if event_bus and hasattr(event_bus, 'subscribe'):
+            event_bus.subscribe('PATH_PLANNED', self._on_path_planned)
+            event_bus.subscribe('EVALUATION_COMPLETED', self._on_evaluation_completed)
+            self.logger.info("Subscribed to PATH_PLANNED, EVALUATION_COMPLETED")
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Main execution method."""
@@ -583,3 +598,77 @@ RESPONSE RULES:
 """
         
         return prompt
+    
+    # ==========================================
+    # EVENT HANDLERS (Per THESIS Integration)
+    # ==========================================
+    
+    async def _on_path_planned(self, event: Dict):
+        """Handle path_planned event from Agent 3"""
+        try:
+            learner_id = event.get('learner_id')
+            concept_id = event.get('current_concept')
+            
+            if learner_id and concept_id:
+                # Reset dialogue state for new concept
+                key = (learner_id, concept_id)
+                if key in self.dialogue_states:
+                    del self.dialogue_states[key]
+                
+                self.logger.info(f"PATH_PLANNED: Reset state for {learner_id}/{concept_id}")
+        except Exception as e:
+            self.logger.error(f"Error handling PATH_PLANNED: {e}")
+    
+    async def _on_evaluation_completed(self, event: Dict):
+        """Handle evaluation result from Agent 5"""
+        try:
+            learner_id = event.get('learner_id')
+            concept_id = event.get('concept_id')
+            key = (learner_id, concept_id)
+            
+            if key in self.dialogue_states:
+                # Update misconceptions from Evaluator
+                for misc in event.get('misconceptions', []):
+                    self.dialogue_states[key].suspected_misconceptions.append(misc)
+                
+                self.logger.info(f"EVALUATION_COMPLETED: Updated misconceptions for {learner_id}/{concept_id}")
+        except Exception as e:
+            self.logger.error(f"Error handling EVALUATION_COMPLETED: {e}")
+    
+    async def _handoff_to_evaluator(self, learner_id: str, concept_id: str, state: DialogueState):
+        """Handoff to Evaluator Agent when reaching ASSESSMENT phase"""
+        if self.event_bus:
+            await self.send_message(
+                receiver="evaluator",
+                message_type="TUTOR_ASSESSMENT_READY",
+                payload={
+                    'learner_id': learner_id,
+                    'concept_id': concept_id,
+                    'dialogue_transcript': state.interaction_log,
+                    'suspected_misconceptions': state.suspected_misconceptions,
+                    'total_turns': state.turn_count
+                }
+            )
+            self.logger.info(f"Handoff to Evaluator: {learner_id}/{concept_id}")
+    
+    def _get_or_create_dialogue_state(self, learner_id: str, concept_id: str, 
+                                      learning_style: str = "VISUAL") -> DialogueState:
+        """Get existing dialogue state or create new one"""
+        key = (learner_id, concept_id)
+        if key not in self.dialogue_states:
+            self.dialogue_states[key] = DialogueState(
+                learner_id=learner_id,
+                concept_id=concept_id,
+                learning_style=learning_style
+            )
+        return self.dialogue_states[key]
+    
+    def enforce_harvard_principles(self, response: str, learning_style: str, 
+                                   phase: str) -> str:
+        """Apply Harvard 7 Principles to response using enforcer"""
+        return self.harvard_enforcer.enforce(
+            response=response,
+            learner_context={'learning_style': learning_style},
+            phase=phase
+        )
+

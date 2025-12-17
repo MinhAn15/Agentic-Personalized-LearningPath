@@ -25,6 +25,15 @@ from .schemas import (
     AgentExecutionResponse
 )
 
+from .episodes import (
+    EpisodeType,
+    Episode,
+    SessionEpisode,
+    ConceptEpisode,
+    ErrorEpisode,
+    ArtifactEpisode
+)
+
 __all__ = [
     # Enums
     "SkillLevel",
@@ -44,5 +53,13 @@ __all__ = [
     "LearnerProfile",
     "LearnerProfileOutput",
     "AgentExecutionRequest",
-    "AgentExecutionResponse"
+    "AgentExecutionResponse",
+    # Episodes
+    "EpisodeType",
+    "Episode",
+    "SessionEpisode",
+    "ConceptEpisode",
+    "ErrorEpisode",
+    "ArtifactEpisode"
 ]
+
