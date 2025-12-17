@@ -1,30 +1,24 @@
 import logging
-from typing import Dict, Any, Optional, List
+import uuid
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from enum import Enum
 import json
 
 from backend.core.base_agent import BaseAgent, AgentType
+from backend.core.semantic_scorer import SemanticScorer
+from backend.core.error_classifier import ErrorClassifier
+from backend.core.mastery_tracker import MasteryTracker
+from backend.core.decision_engine import DecisionEngine
+from backend.models.evaluation import (
+    ErrorType, PathDecision, Misconception, EvaluationResult
+)
 from backend.config import get_settings
 from llama_index.llms.gemini import Gemini
 
 logger = logging.getLogger(__name__)
 
-class ErrorType(str, Enum):
-    """Classification of error types"""
-    CORRECT = "CORRECT"
-    CARELESS = "CARELESS"
-    INCOMPLETE = "INCOMPLETE"
-    PROCEDURAL = "PROCEDURAL"
-    CONCEPTUAL = "CONCEPTUAL"
-
-class PathDecision(str, Enum):
-    """Decisions for next learning action (per Thesis)"""
-    PROCEED = "PROCEED"      # Ready for next concept
-    REMEDIATE = "REMEDIATE"  # Review prerequisite
-    ALTERNATE = "ALTERNATE"  # Try different example/angle
-    RETRY = "RETRY"          # Same concept, new question
-    MASTERED = "MASTERED"    # Fully understands, move on
+# ErrorType and PathDecision imported from backend.models.evaluation
 
 class EvaluatorAgent(BaseAgent):
     """
@@ -62,7 +56,8 @@ class EvaluatorAgent(BaseAgent):
         Update: Set WHERE mastery to 0.2, flag for remediation
     """
     
-    def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
+    def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
+                 embedding_model=None, course_kg=None, personal_kg=None):
         """
         Initialize Evaluator Agent.
         
@@ -71,6 +66,9 @@ class EvaluatorAgent(BaseAgent):
             state_manager: Central state manager
             event_bus: Event bus for inter-agent communication
             llm: LLM instance (Gemini by default)
+            embedding_model: Sentence transformer for semantic similarity
+            course_kg: Course Knowledge Graph accessor
+            personal_kg: Personal Knowledge Graph accessor
         """
         super().__init__(agent_id, AgentType.EVALUATOR, state_manager, event_bus)
         
@@ -80,6 +78,33 @@ class EvaluatorAgent(BaseAgent):
             api_key=self.settings.GOOGLE_API_KEY
         )
         self.logger = logging.getLogger(f"EvaluatorAgent.{agent_id}")
+        
+        # Store KG references
+        self.course_kg = course_kg
+        self.personal_kg = personal_kg
+        
+        # Initialize core modules
+        self.scorer = SemanticScorer(
+            llm_client=self.llm,
+            embedding_model=embedding_model,
+            course_kg=course_kg
+        )
+        self.classifier = ErrorClassifier(
+            course_kg=course_kg,
+            embedding_model=embedding_model
+        )
+        self.tracker = MasteryTracker(
+            personal_kg=personal_kg,
+            course_kg=course_kg
+        )
+        self.decision_engine = DecisionEngine(
+            personal_kg=personal_kg
+        )
+        
+        # Event subscriptions
+        if event_bus and hasattr(event_bus, 'subscribe'):
+            event_bus.subscribe('TUTOR_ASSESSMENT_READY', self._on_assessment_ready)
+            self.logger.info("Subscribed to TUTOR_ASSESSMENT_READY")
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """
@@ -447,3 +472,65 @@ class EvaluatorAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Mastery update error: {e}")
             return current_mastery
+    
+    # ==========================================
+    # EVENT HANDLERS (Per THESIS Integration)
+    # ==========================================
+    
+    async def _on_assessment_ready(self, event: Dict):
+        """
+        Handle TUTOR_ASSESSMENT_READY event from Tutor Agent.
+        
+        Event payload:
+        {
+            'learner_id': str,
+            'concept_id': str,
+            'learner_answer': str (optional),
+            'expected_answer': str (optional),
+            'dialogue_transcript': list
+        }
+        """
+        try:
+            learner_id = event.get('learner_id')
+            concept_id = event.get('concept_id')
+            
+            if not learner_id or not concept_id:
+                self.logger.warning("Missing learner_id or concept_id in event")
+                return
+            
+            self.logger.info(f"TUTOR_ASSESSMENT_READY: Evaluating {learner_id}/{concept_id}")
+            
+            # Execute evaluation
+            result = await self.execute(
+                learner_id=learner_id,
+                concept_id=concept_id,
+                learner_response=event.get('learner_answer', ''),
+                expected_answer=event.get('expected_answer', ''),
+                dialogue_transcript=event.get('dialogue_transcript', [])
+            )
+            
+            if result.get('success'):
+                self.logger.info(
+                    f"Evaluation complete: score={result.get('score', 0):.2f}, "
+                    f"decision={result.get('evaluation', {}).get('path_decision', 'UNKNOWN')}"
+                )
+        except Exception as e:
+            self.logger.exception(f"Error handling TUTOR_ASSESSMENT_READY: {e}")
+    
+    async def generate_feedback_for_kag(
+        self, 
+        learner_id: str, 
+        concept_id: str,
+        misconceptions: List[Misconception],
+        error_type: ErrorType
+    ) -> Dict:
+        """Generate diagnostic feedback for KAG artifact generation"""
+        return {
+            'learner_id': learner_id,
+            'concept_id': concept_id,
+            'source': 'evaluation',
+            'misconceptions': [m.to_dict() for m in misconceptions],
+            'struggle_area': error_type.value,
+            'needs_remediation': len(misconceptions) > 0 or error_type == ErrorType.CONCEPTUAL
+        }
+

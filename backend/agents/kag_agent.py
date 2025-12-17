@@ -1,23 +1,23 @@
 import logging
 import uuid
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 from statistics import mean, stdev
 from enum import Enum
 
 from backend.core.base_agent import BaseAgent, AgentType
+from backend.core.note_generator import AtomicNoteGenerator
+from backend.core.kg_synchronizer import KGSynchronizer
+from backend.models.artifacts import (
+    ArtifactType, AtomicNote, MisconceptionNote, ArtifactState
+)
 from backend.config import get_settings
 from llama_index.llms.gemini import Gemini
 
 logger = logging.getLogger(__name__)
 
 
-class ArtifactType(str, Enum):
-    """Zettelkasten Artifact Types"""
-    ATOMIC_NOTE = "ATOMIC_NOTE"
-    SUMMARY_NOTE = "SUMMARY_NOTE"
-    CONCEPT_MAP = "CONCEPT_MAP"
-    MISCONCEPTION_NOTE = "MISCONCEPTION_NOTE"
+# ArtifactType imported from backend.models.artifacts
 
 
 class KAGAgent(BaseAgent):
@@ -52,7 +52,8 @@ class KAGAgent(BaseAgent):
     6. Generate recommendations for course improvement
     """
     
-    def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
+    def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
+                 embedding_model=None, course_kg=None):
         super().__init__(agent_id, AgentType.KAG, state_manager, event_bus)
         
         self.settings = get_settings()
@@ -61,6 +62,24 @@ class KAGAgent(BaseAgent):
             api_key=self.settings.GOOGLE_API_KEY
         )
         self.logger = logging.getLogger(f"KAGAgent.{agent_id}")
+        
+        # Store references
+        self.course_kg = course_kg
+        
+        # Initialize core modules
+        self.note_generator = AtomicNoteGenerator(
+            llm_client=self.llm,
+            embedding_model=embedding_model,
+            course_kg=course_kg
+        )
+        self.kg_synchronizer = KGSynchronizer(
+            neo4j_driver=state_manager.neo4j if state_manager else None
+        )
+        
+        # Event subscriptions
+        if event_bus and hasattr(event_bus, 'subscribe'):
+            event_bus.subscribe('EVALUATION_COMPLETED', self._on_evaluation_completed)
+            self.logger.info("Subscribed to EVALUATION_COMPLETED")
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Main execution method."""
@@ -682,3 +701,82 @@ Return ONLY valid JSON:
             )
         
         return predictions
+    
+    # ==========================================
+    # EVENT HANDLERS (Per THESIS Integration)
+    # ==========================================
+    
+    async def _on_evaluation_completed(self, event: Dict):
+        """
+        Handle EVALUATION_COMPLETED event from Evaluator Agent.
+        
+        Auto-generates Zettelkasten artifact based on evaluation result.
+        
+        Event payload:
+        {
+            'learner_id': str,
+            'concept_id': str,
+            'score': float,
+            'error_type': str,
+            'misconceptions': list,
+            'mastery_after': float
+        }
+        """
+        try:
+            learner_id = event.get('learner_id')
+            concept_id = event.get('concept_id')
+            
+            if not learner_id or not concept_id:
+                self.logger.warning("Missing learner_id or concept_id in event")
+                return
+            
+            self.logger.info(f"EVALUATION_COMPLETED: Generating artifact for {learner_id}/{concept_id}")
+            
+            # Get learner profile for learning style
+            profile = await self.state_manager.get_state(learner_id, 'LearnerProfile') if self.state_manager else {}
+            learning_style = profile.get('learning_style', 'VISUAL') if profile else 'VISUAL'
+            
+            # Generate artifact using note generator
+            note_dict = await self.note_generator.generate_note(
+                learner_id=learner_id,
+                concept_id=concept_id,
+                eval_result=event,
+                learning_style=learning_style
+            )
+            
+            if not note_dict:
+                self.logger.warning("Note generation failed")
+                return
+            
+            # Sync to Personal KG
+            sync_success = await self.kg_synchronizer.sync_note_to_kg(note_dict, learner_id)
+            
+            if sync_success:
+                # Link related notes
+                connections = note_dict.get('connections', [])
+                links_created = await self.kg_synchronizer.link_related_notes(
+                    note_dict['note_id'], learner_id, connections
+                )
+                
+                # Update mastery node
+                await self.kg_synchronizer.update_mastery_node(
+                    learner_id, concept_id,
+                    event.get('mastery_after', 0.0),
+                    'APPLY'  # Default Bloom level
+                )
+                
+                # Emit ARTIFACT_CREATED event
+                if self.event_bus:
+                    await self.event_bus.publish('ARTIFACT_CREATED', {
+                        'learner_id': learner_id,
+                        'concept_id': concept_id,
+                        'note_id': note_dict['note_id'],
+                        'artifact_type': note_dict['type'],
+                        'links_created': links_created
+                    })
+                
+                self.logger.info(f"Created artifact {note_dict['note_id']} with {links_created} links")
+        
+        except Exception as e:
+            self.logger.exception(f"Error handling EVALUATION_COMPLETED: {e}")
+

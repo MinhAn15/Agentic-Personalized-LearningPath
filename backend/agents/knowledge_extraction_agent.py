@@ -1,28 +1,50 @@
+# Knowledge Extraction Agent - Production Version (V2)
+"""
+Production-grade Knowledge Extraction Agent with:
+1. Document Registry (idempotent ingestion)
+2. Semantic Chunking (by heading/section)
+3. Staging Graph Pattern (extract → validate → promote)
+4. Validation Rules enforcement
+5. Real Entity Resolution (embedding + structural + contextual)
+6. Provenance tracking
+"""
+
 import json
+import uuid
+import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
-import logging
-import numpy as np
 
 from backend.core.base_agent import BaseAgent, AgentType
-from backend.models import DocumentInput, KnowledgeExtractionOutput, ConceptNode, ConceptRelationship
+from backend.models import DocumentInput, KnowledgeExtractionOutput
 from backend.prompts import KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT
-from llama_index.llms.gemini import Gemini
 from backend.config import get_settings
+
+# New production modules
+from backend.models.document_registry import (
+    DocumentRegistry, DocumentRecord, DocumentStatus, ExtractionVersion
+)
+from backend.utils.semantic_chunker import SemanticChunker, SemanticChunk
+from backend.utils.kg_validator import KGValidator, ValidationResult, ValidationSeverity
+from backend.utils.entity_resolver import EntityResolver, ResolutionResult
+from backend.utils.neo4j_batch_upsert import Neo4jBatchUpserter
+from backend.utils.provenance_manager import ProvenanceManager
+
+from llama_index.llms.gemini import Gemini
 
 logger = logging.getLogger(__name__)
 
 
 class RelationshipType(str, Enum):
     """7 Relationship Types per Thesis Specification"""
-    REQUIRES = "REQUIRES"                      # Prerequisite knowledge
-    IS_PREREQUISITE_OF = "IS_PREREQUISITE_OF"  # Reverse dependency
-    NEXT = "NEXT"                              # Recommended sequence
-    REMEDIATES = "REMEDIATES"                  # Concept that fixes understanding
-    HAS_ALTERNATIVE_PATH = "HAS_ALTERNATIVE_PATH"  # Parallel learning option
-    SIMILAR_TO = "SIMILAR_TO"                  # Semantic similarity
-    IS_SUB_CONCEPT_OF = "IS_SUB_CONCEPT_OF"    # Hierarchical structure
+    REQUIRES = "REQUIRES"
+    IS_PREREQUISITE_OF = "IS_PREREQUISITE_OF"
+    NEXT = "NEXT"
+    REMEDIATES = "REMEDIATES"
+    HAS_ALTERNATIVE_PATH = "HAS_ALTERNATIVE_PATH"
+    SIMILAR_TO = "SIMILAR_TO"
+    IS_SUB_CONCEPT_OF = "IS_SUB_CONCEPT_OF"
 
 
 class BloomLevel(str, Enum):
@@ -35,25 +57,28 @@ class BloomLevel(str, Enum):
     CREATE = "CREATE"
 
 
-class KnowledgeExtractionAgent(BaseAgent):
+class KnowledgeExtractionAgentV2(BaseAgent):
     """
-    Knowledge Extraction Agent - Automatically build Course Knowledge Graph from documents.
+    Production-grade Knowledge Extraction Agent.
     
-    Features (per Thesis):
-    1. SPR Generator - 3-layer extraction (Concept, Relationship, Metadata)
-    2. 7 Relationship Types (REQUIRES, IS_PREREQUISITE_OF, NEXT, REMEDIATES, 
-       HAS_ALTERNATIVE_PATH, SIMILAR_TO, IS_SUB_CONCEPT_OF)
-    3. 3-Way Node Merging Algorithm (Semantic + Structural + Contextual)
-    4. Enhanced Metadata (SemanticTags, FocusedSemanticTags, TimeEstimate, Bloom's Level)
+    Features:
+    1. Idempotent ingestion via Document Registry
+    2. Semantic chunking (by heading/section)
+    3. Staging graph pattern (StagingConcept → validation → CourseConcept)
+    4. Validation enforcement
+    5. Real entity resolution (embedding + structural + contextual)
+    6. Provenance tracking
+    7. COURSEKG_UPDATED event
     
     Process Flow:
-    1. Receive document content
-    2. Layer 1: Core Concept Extraction
-    3. Layer 2: Relationship Extraction (7 types)
-    4. Layer 3: Validation & Metadata
-    5. Node Merging (if duplicate concepts)
-    6. Create nodes + relationships in Neo4j
-    7. Return extraction results
+    1. Register document (check checksum for idempotency)
+    2. Semantic chunking
+    3. Per-chunk extraction (Layer 1, 2, 3)
+    4. Create StagingConcept nodes
+    5. Validate extracted data
+    6. Entity resolution (merge with existing concepts)
+    7. Promote to CourseConcept (with provenance)
+    8. Emit COURSEKG_UPDATED
     """
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
@@ -64,393 +89,771 @@ class KnowledgeExtractionAgent(BaseAgent):
             model=self.settings.GEMINI_MODEL,
             api_key=self.settings.GOOGLE_API_KEY
         )
-        self.logger = logging.getLogger(f"KnowledgeExtractionAgent.{agent_id}")
+        self.logger = logging.getLogger(f"KnowledgeExtractionAgentV2.{agent_id}")
         
-        # Similarity thresholds for node merging
-        self.SEMANTIC_THRESHOLD = 0.85
-        self.STRUCTURAL_THRESHOLD = 0.7
-        self.CONTEXTUAL_THRESHOLD = 0.6
+        # Initialize production modules
+        self.document_registry = DocumentRegistry(state_manager)
+        self.chunker = SemanticChunker(
+            max_chunk_size=4000,
+            min_chunk_size=500
+        )
+        self.validator = KGValidator(strict_mode=False)
+        self.entity_resolver = EntityResolver(
+            merge_threshold=0.85,
+            use_embeddings=True
+        )
+        
+        # Batch upserter for AuraDB production (initialized lazily)
+        self._batch_upserter = None
+        
+        # Provenance manager for document-level overwrite (lazy init)
+        self._provenance_manager = None
+        
+        # Extraction version for provenance
+        self.extraction_version = ExtractionVersion.V3_ENTITY_RESOLUTION
+    
+    def _get_batch_upserter(self) -> Neo4jBatchUpserter:
+        """Get or create batch upserter (lazy initialization)"""
+        if self._batch_upserter is None:
+            self._batch_upserter = Neo4jBatchUpserter(
+                self.state_manager.neo4j,
+                batch_size=100  # AuraDB optimized
+            )
+        return self._batch_upserter
+    
+    def _get_provenance_manager(self) -> ProvenanceManager:
+        """Get or create provenance manager (lazy initialization)"""
+        if self._provenance_manager is None:
+            self._provenance_manager = ProvenanceManager(self.state_manager.neo4j)
+        return self._provenance_manager
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
-        """Main execution method."""
+        """
+        Main execution - Production ingestion pipeline.
+        
+        Args:
+            document_content: str - Document text
+            document_title: str - Title
+            document_type: str - LECTURE, TUTORIAL, etc.
+            force_reprocess: bool - Override idempotency check
+        """
         try:
             document_content = kwargs.get("document_content")
             document_title = kwargs.get("document_title", "Untitled")
             document_type = kwargs.get("document_type", "LECTURE")
-            existing_concepts = kwargs.get("existing_concepts", [])
+            force_reprocess = kwargs.get("force_reprocess", False)
             
             if not document_content:
+                return self._error_response("document_content is required")
+            
+            self.logger.info(f"🔍 [V2] Processing: {document_title}")
+            
+            # ========================================
+            # STEP 1: Document Registry (Idempotency)
+            # ========================================
+            document_id = f"doc_{uuid.uuid4().hex[:8]}"
+            doc_record = await self.document_registry.register(
+                document_id=document_id,
+                filename=document_title,
+                content=document_content
+            )
+            
+            if doc_record.status == DocumentStatus.SKIPPED and not force_reprocess:
+                self.logger.info(f"⏭️ Document already processed (checksum match)")
                 return {
-                    "success": False,
-                    "error": "document_content is required",
-                    "agent_id": self.agent_id
+                    "success": True,
+                    "agent_id": self.agent_id,
+                    "document_id": doc_record.document_id,
+                    "status": "SKIPPED",
+                    "message": "Document already processed"
                 }
             
-            self.logger.info(f"🔍 Extracting knowledge from: {document_title}")
-            
-            # Step 1: Layer 1 - Core Concept Extraction
-            layer1_result = await self._extract_layer1_concepts(
-                document_content, document_title
+            # Update status to PROCESSING
+            await self.document_registry.update_status(
+                document_id, DocumentStatus.PROCESSING
             )
-            if not layer1_result["success"]:
-                return layer1_result
             
-            # Step 2: Layer 2 - Relationship Extraction (7 types)
-            layer2_result = await self._extract_layer2_relationships(
-                document_content, layer1_result["concepts"]
+            # ========================================
+            # STEP 2: Semantic Chunking
+            # ========================================
+            chunks = self.chunker.chunk(document_content, document_id)
+            chunk_stats = self.chunker.get_stats(chunks)
+            
+            self.logger.info(f"📄 Chunked into {len(chunks)} semantic blocks")
+            
+            await self.document_registry.update_status(
+                document_id, DocumentStatus.PROCESSING,
+                chunk_count=len(chunks)
             )
-            if not layer2_result["success"]:
-                return layer2_result
             
-            # Step 3: Layer 3 - Validation & Enhanced Metadata
-            layer3_result = await self._extract_layer3_metadata(
-                layer1_result["concepts"]
+            # ========================================
+            # STEP 3: Per-Chunk Extraction
+            # ========================================
+            all_concepts = []
+            all_relationships = []
+            
+            for i, chunk in enumerate(chunks):
+                self.logger.debug(f"Processing chunk {i+1}/{len(chunks)}: {chunk.source_heading}")
+                
+                # Layer 1: Concept extraction
+                chunk_concepts = await self._extract_concepts_from_chunk(chunk, document_title)
+                
+                # Layer 2: Relationship extraction
+                chunk_relationships = await self._extract_relationships_from_chunk(
+                    chunk, chunk_concepts
+                )
+                
+                # Layer 3: Metadata enrichment
+                enriched_concepts = await self._enrich_metadata(chunk_concepts)
+                
+                # Add provenance to each concept
+                for concept in enriched_concepts:
+                    concept["source_document_id"] = document_id
+                    concept["source_chunk_id"] = chunk.chunk_id
+                    concept["extraction_version"] = self.extraction_version.value
+                    concept["extracted_at"] = datetime.now().isoformat()
+                
+                all_concepts.extend(enriched_concepts)
+                all_relationships.extend(chunk_relationships)
+            
+            self.logger.info(f"📦 Raw extraction: {len(all_concepts)} concepts, {len(all_relationships)} relationships")
+            
+            # ========================================
+            # STEP 4: Create Staging Nodes
+            # ========================================
+            staging_result = await self._create_staging_nodes(
+                document_id, all_concepts, all_relationships
             )
-            if not layer3_result["success"]:
-                return layer3_result
             
-            enriched_concepts = layer3_result["enriched_concepts"]
-            relationships = layer2_result["relationships"]
+            # ========================================
+            # STEP 5: Validation
+            # ========================================
+            validation_result = self.validator.validate(all_concepts, all_relationships)
             
-            # Step 4: Node Merging (if existing concepts)
-            if existing_concepts:
-                merge_result = await self._merge_nodes(
-                    enriched_concepts, existing_concepts
+            if not validation_result.is_valid:
+                self.logger.warning(f"⚠️ Validation issues found: {len(validation_result.errors)} errors")
+                
+                # Auto-fix if possible
+                fixed_concepts, fixed_relationships = self.validator.auto_fix(
+                    all_concepts, all_relationships, validation_result
                 )
-                enriched_concepts = merge_result["merged_concepts"]
-                self.logger.info(f"Merged {merge_result['merged_count']} duplicate concepts")
+                
+                # Re-validate
+                validation_result = self.validator.validate(fixed_concepts, fixed_relationships)
+                all_concepts = fixed_concepts
+                all_relationships = fixed_relationships
             
-            # Step 5: Create in Neo4j
-            neo4j = self.state_manager.neo4j
-            created_concepts = 0
-            for concept in enriched_concepts:
-                success = await neo4j.create_course_concept(
-                    concept_id=concept["concept_id"],
-                    name=concept["name"],
-                    difficulty=concept["difficulty"],
-                    description=concept["description"],
-                    bloom_level=concept.get("bloom_level", "UNDERSTAND"),
-                    time_estimate=concept.get("time_estimate", 30),
-                    semantic_tags=concept.get("semantic_tags", []),
-                    focused_tags=concept.get("focused_tags", [])
+            if not validation_result.is_valid:
+                await self.document_registry.update_status(
+                    document_id, DocumentStatus.FAILED,
+                    error_message=f"Validation failed: {len(validation_result.errors)} errors"
                 )
-                if success:
-                    created_concepts += 1
-            
-            # Create relationships (all 7 types)
-            created_relationships = 0
-            for rel in relationships:
-                success = await neo4j.create_relationship(
-                    source_id=rel["source_concept_id"],
-                    target_id=rel["target_concept_id"],
-                    rel_type=rel["relation_type"],
-                    confidence=rel.get("confidence", 0.8)
+                return self._error_response(
+                    f"Validation failed: {validation_result.errors[:3]}"
                 )
-                if success:
-                    created_relationships += 1
             
-            # Step 6: Save extraction metadata
-            document_id = f"doc_{int(datetime.now().timestamp())}"
-            await self.save_state(
-                f"extraction_{document_id}",
-                {
-                    "title": document_title,
-                    "type": document_type,
-                    "concepts_count": len(enriched_concepts),
-                    "relationships_count": len(relationships),
-                    "timestamp": datetime.now().isoformat()
+            self.logger.info(f"✅ Validation passed: {validation_result.valid_nodes} nodes, {validation_result.valid_relationships} relationships")
+            
+            await self.document_registry.update_status(
+                document_id, DocumentStatus.VALIDATED
+            )
+            
+            # ========================================
+            # STEP 6: Entity Resolution
+            # ========================================
+            existing_concepts = await self._get_existing_concepts()
+            existing_relationships = await self._get_existing_relationships()
+            
+            resolution_result = self.entity_resolver.resolve(
+                new_concepts=all_concepts,
+                existing_concepts=existing_concepts,
+                new_relationships=all_relationships,
+                existing_relationships=existing_relationships
+            )
+            
+            self.logger.info(
+                f"🔗 Entity resolution: {resolution_result.stats['merged_concepts']} merges, "
+                f"{resolution_result.stats['truly_new_concepts']} new concepts"
+            )
+            
+            # ========================================
+            # STEP 7: Promote to CourseConcept (Commit)
+            # ========================================
+            commit_result = await self._promote_to_course_kg(
+                document_id=document_id,
+                concepts=resolution_result.resolved_concepts,
+                relationships=resolution_result.resolved_relationships,
+                merge_mapping=resolution_result.merge_mapping
+            )
+            
+            await self.document_registry.update_status(
+                document_id, DocumentStatus.COMMITTED,
+                concept_count=commit_result["concepts_created"],
+                relationship_count=commit_result["relationships_created"],
+                extracted_concept_ids=[c["concept_id"] for c in all_concepts]
+            )
+            
+            # ========================================
+            # STEP 8: Cleanup Staging + Emit Event
+            # ========================================
+            await self._cleanup_staging(document_id)
+            
+            # Emit COURSEKG_UPDATED event
+            await self.send_message(
+                receiver="planner",
+                message_type="COURSEKG_UPDATED",
+                payload={
+                    "document_id": document_id,
+                    "document_title": document_title,
+                    "concepts_added": resolution_result.stats["truly_new_concepts"],
+                    "concepts_merged": resolution_result.stats["merged_concepts"],
+                    "total_concepts": commit_result["concepts_created"],
+                    "total_relationships": commit_result["relationships_created"],
+                    "extraction_version": self.extraction_version.value
                 }
             )
             
-            result = {
+            self.logger.info(f"✅ [V2] Extraction complete: {document_id}")
+            
+            return {
                 "success": True,
                 "agent_id": self.agent_id,
                 "document_id": document_id,
-                "document_title": document_title,
-                "concepts_extracted": len(enriched_concepts),
-                "concepts_created": created_concepts,
-                "relationships_created": created_relationships,
-                "relationship_types": list(set(r["relation_type"] for r in relationships)),
-                "concepts": enriched_concepts
+                "status": "COMMITTED",
+                "chunking": chunk_stats,
+                "validation": validation_result.to_dict(),
+                "resolution": resolution_result.to_dict(),
+                "commit": commit_result
             }
-            
-            # Emit event for other agents
-            await self.send_message(
-                receiver="planner",
-                message_type="knowledge_extracted",
-                payload={
-                    "document_id": document_id,
-                    "concepts_count": len(enriched_concepts),
-                    "relationship_types": result["relationship_types"]
-                }
-            )
-            
-            self.logger.info(f"✅ Knowledge extraction complete: {created_concepts} concepts, {created_relationships} relationships")
-            
-            return result
         
         except Exception as e:
-            self.logger.error(f"❌ Extraction failed: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "agent_id": self.agent_id
-            }
+            self.logger.error(f"❌ [V2] Extraction failed: {e}")
+            
+            # Update registry if we have document_id
+            if 'document_id' in locals():
+                await self.document_registry.update_status(
+                    document_id, DocumentStatus.FAILED,
+                    error_message=str(e)
+                )
+            
+            return self._error_response(str(e))
     
-    async def _extract_layer1_concepts(
-        self, document_content: str, document_title: str
-    ) -> Dict[str, Any]:
-        """Layer 1: Core Concept Extraction"""
-        try:
-            prompt = f"""
-You are a knowledge extraction expert. Extract all learning concepts from this document.
+    # ===========================================
+    # EXTRACTION METHODS
+    # ===========================================
+    
+    async def _extract_concepts_from_chunk(
+        self, chunk: SemanticChunk, document_title: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract concepts from a single chunk.
+        
+        LLM provides raw fields (name, context, description, etc.)
+        Backend builds concept_code using ConceptIdBuilder.
+        """
+        prompt = f"""
+You are extracting learning concepts from a document section.
 
-Document Title: {document_title}
+Document: {document_title}
+Section: {chunk.source_heading}
+Content:
+{chunk.content}
 
-Document Content:
-{document_content[:8000]}
-
-For each concept, extract:
-1. concept_id: Unique identifier (e.g., "SQL_SELECT", "SQL_JOIN")
-2. name: Human-readable name
+Extract ALL learning concepts from this section. For each concept provide:
+1. name: Human-readable name (e.g., "SELECT Statement")
+2. context: Topic/category context (e.g., "SQL Queries", "Database Basics")
 3. description: 1-2 sentence definition
 4. learning_objective: What learner will be able to do
 5. examples: 1-2 concrete examples
 6. difficulty: 1-5 (1=beginner, 5=expert)
 
+IMPORTANT: Do NOT generate concept IDs yourself. Just provide the name and context - 
+the system will generate standardized IDs automatically.
+
 Return ONLY valid JSON array:
 [
   {{
-    "concept_id": "CONCEPT_NAME",
-    "name": "Concept Name",
-    "description": "Definition...",
-    "learning_objective": "Learner will...",
-    "examples": ["Example 1", "Example 2"],
+    "name": "SELECT Statement",
+    "context": "SQL Queries",
+    "description": "SQL command to retrieve data from database tables",
+    "learning_objective": "Learner will write basic SELECT queries",
+    "examples": ["SELECT * FROM users", "SELECT name, email FROM customers"],
     "difficulty": 2
   }}
 ]
+
+If no concepts found, return empty array: []
 """
-            response = await self.llm.acomplete(prompt)
-            response_text = response.text
-            
-            # Parse JSON
-            json_start = response_text.find("[")
-            json_end = response_text.rfind("]") + 1
-            if json_start >= 0 and json_end > json_start:
-                concepts = json.loads(response_text[json_start:json_end])
-                return {"success": True, "concepts": concepts}
-            
-            return {"success": False, "error": "Could not parse Layer 1 output"}
-        
-        except Exception as e:
-            self.logger.error(f"Layer 1 extraction error: {e}")
-            return {"success": False, "error": str(e)}
-    
-    async def _extract_layer2_relationships(
-        self, document_content: str, concepts: List[Dict]
-    ) -> Dict[str, Any]:
-        """Layer 2: Relationship Extraction (7 Types)"""
         try:
-            concept_names = [c["concept_id"] for c in concepts]
+            response = await self.llm.acomplete(prompt)
+            raw_concepts = self._parse_json_array(response.text)
             
-            prompt = f"""
-You are a curriculum designer. Identify relationships between these concepts.
+            # Build concept IDs using backend logic
+            from backend.utils.concept_id_builder import get_concept_id_builder
+            builder = get_concept_id_builder(domain=self._extract_domain(document_title))
+            
+            for concept in raw_concepts:
+                ids = builder.build_from_llm_output(concept)
+                concept["concept_id"] = ids.concept_code  # Use concept_code as primary ID
+                concept["concept_uuid"] = ids.concept_uuid
+                concept["concept_code"] = ids.concept_code
+                concept["sanitized_concept"] = ids.sanitized_concept
+            
+            return raw_concepts
+        except Exception as e:
+            self.logger.error(f"Concept extraction error: {e}")
+            return []
+    
+    def _extract_domain(self, document_title: str) -> str:
+        """Extract domain from document title for concept_code generation"""
+        # Simple heuristic: first word or known keywords
+        title_lower = document_title.lower()
+        
+        known_domains = {
+            "sql": "sql", "database": "sql", "mysql": "sql", "postgresql": "sql",
+            "python": "python", "java": "java", "javascript": "js",
+            "react": "react", "node": "node", "nodejs": "node",
+            "machine": "ml", "learning": "ml", "deep": "dl",
+            "statistics": "stats", "probability": "stats",
+            "algorithm": "algo", "data structure": "ds",
+        }
+        
+        for keyword, domain in known_domains.items():
+            if keyword in title_lower:
+                return domain
+        
+        # Default: first word
+        first_word = title_lower.split()[0] if title_lower.split() else "course"
+        return first_word[:10].replace(" ", "_")
+    
+    async def _extract_relationships_from_chunk(
+        self, chunk: SemanticChunk, concepts: List[Dict]
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract relationships between concepts with SPR-compliant fields.
+        
+        SPR Spec Fields:
+        - relationship_type: One of 7 types
+        - weight: 0.0-1.0 importance/strength
+        - dependency: STRONG, MODERATE, WEAK
+        - confidence: LLM confidence in extraction
+        """
+        if len(concepts) < 2:
+            return []
+        
+        concept_list = "\n".join([
+            f"- {c.get('concept_id')}: {c.get('name', '')}" 
+            for c in concepts
+        ])
+        
+        prompt = f"""
+Identify relationships between these concepts:
 
-Concepts: {json.dumps(concept_names)}
+{concept_list}
 
-Document Context:
-{document_content[:4000]}
+For each relationship, specify:
+1. source: Source concept_id (UPPERCASE_WITH_UNDERSCORES)
+2. target: Target concept_id
+3. relationship_type: One of [REQUIRES, IS_PREREQUISITE_OF, NEXT, REMEDIATES, HAS_ALTERNATIVE_PATH, SIMILAR_TO, IS_SUB_CONCEPT_OF]
+4. weight: 0.0-1.0 (how important is this link for learning?)
+5. dependency: STRONG (must learn first), MODERATE (recommended), or WEAK (optional)
+6. confidence: 0.0-1.0 (your confidence in this relationship)
+7. reasoning: Brief explanation why this relationship exists
 
-Relationship Types (use EXACTLY these):
-1. REQUIRES - A requires B as prerequisite
-2. IS_PREREQUISITE_OF - A is prerequisite of B
-3. NEXT - A should be learned before B (sequence)
-4. REMEDIATES - Learning A helps fix misunderstanding of B
-5. HAS_ALTERNATIVE_PATH - A and B are alternative ways to learn same skill
-6. SIMILAR_TO - A and B are semantically similar
-7. IS_SUB_CONCEPT_OF - A is a sub-topic of B
+Relationship Type Meanings:
+- REQUIRES: A requires knowledge of B first
+- IS_PREREQUISITE_OF: A is prerequisite for B
+- NEXT: A should be learned before B (sequencing)
+- REMEDIATES: A helps fix misunderstanding of B
+- HAS_ALTERNATIVE_PATH: A and B are alternative ways to learn same concept
+- SIMILAR_TO: A and B are semantically similar
+- IS_SUB_CONCEPT_OF: A is a sub-concept/part of B
 
 Return ONLY valid JSON array:
 [
   {{
-    "source_concept_id": "CONCEPT_A",
-    "target_concept_id": "CONCEPT_B",
-    "relation_type": "REQUIRES",
+    "source": "CONCEPT_A_ID",
+    "target": "CONCEPT_B_ID",
+    "relationship_type": "REQUIRES",
+    "weight": 0.8,
+    "dependency": "STRONG",
     "confidence": 0.9,
-    "reasoning": "Why this relationship exists"
+    "reasoning": "Brief explanation..."
   }}
 ]
+
+Return empty array [] if no relationships found.
 """
-            response = await self.llm.acomplete(prompt)
-            response_text = response.text
-            
-            json_start = response_text.find("[")
-            json_end = response_text.rfind("]") + 1
-            if json_start >= 0 and json_end > json_start:
-                relationships = json.loads(response_text[json_start:json_end])
-                
-                # Validate relationship types
-                valid_types = [rt.value for rt in RelationshipType]
-                validated = [
-                    r for r in relationships 
-                    if r.get("relation_type") in valid_types
-                ]
-                
-                return {"success": True, "relationships": validated}
-            
-            return {"success": False, "error": "Could not parse Layer 2 output"}
-        
-        except Exception as e:
-            self.logger.error(f"Layer 2 extraction error: {e}")
-            return {"success": False, "error": str(e)}
-    
-    async def _extract_layer3_metadata(
-        self, concepts: List[Dict]
-    ) -> Dict[str, Any]:
-        """Layer 3: Validation & Enhanced Metadata"""
         try:
-            enriched = []
-            
-            for concept in concepts:
-                prompt = f"""
-Enrich this learning concept with metadata.
+            response = await self.llm.acomplete(prompt)
+            return self._parse_json_array(response.text)
+        except Exception as e:
+            self.logger.error(f"Relationship extraction error: {e}")
+            return []
+    
+    async def _enrich_metadata(self, concepts: List[Dict]) -> List[Dict]:
+        """Layer 3: Enrich with metadata"""
+        if not concepts:
+            return []
+        
+        concept_names = ", ".join([c.get("name", "") for c in concepts])
+        
+        prompt = f"""
+Add metadata to these concepts: {concept_names}
 
-Concept: {json.dumps(concept)}
+For each concept, add:
+1. bloom_level: REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, or CREATE
+2. time_estimate: Minutes to learn (15-120)
+3. semantic_tags: 3-5 keywords for search
+4. focused_tags: 2-3 most specific keywords
 
-Generate:
-1. semantic_tags: 15-20 related keywords
-2. focused_tags: 3-5 most important keywords
-3. bloom_level: REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, or CREATE
-4. time_estimate: Minutes to learn (10-120)
-5. common_misconceptions: 2-3 typical mistakes learners make
-
-Return ONLY valid JSON:
+Return JSON object mapping concept_id to metadata:
 {{
-  "semantic_tags": ["tag1", "tag2", ...],
-  "focused_tags": ["tag1", "tag2", "tag3"],
-  "bloom_level": "UNDERSTAND",
-  "time_estimate": 30,
-  "common_misconceptions": ["Misconception 1", "Misconception 2"]
+  "CONCEPT_ID": {{
+    "bloom_level": "UNDERSTAND",
+    "time_estimate": 30,
+    "semantic_tags": ["tag1", "tag2", "tag3"],
+    "focused_tags": ["focused1", "focused2"]
+  }}
 }}
 """
-                response = await self.llm.acomplete(prompt)
-                response_text = response.text
-                
-                try:
-                    json_start = response_text.find("{")
-                    json_end = response_text.rfind("}") + 1
-                    if json_start >= 0 and json_end > json_start:
-                        metadata = json.loads(response_text[json_start:json_end])
-                        enriched_concept = {**concept, **metadata}
-                        enriched.append(enriched_concept)
-                    else:
-                        enriched.append(concept)
-                except:
-                    enriched.append(concept)
+        try:
+            response = await self.llm.acomplete(prompt)
+            metadata = self._parse_json_object(response.text)
             
-            return {"success": True, "enriched_concepts": enriched}
-        
+            # Merge metadata into concepts
+            for concept in concepts:
+                cid = concept.get("concept_id", "")
+                if cid in metadata:
+                    concept.update(metadata[cid])
+            
+            return concepts
         except Exception as e:
-            self.logger.error(f"Layer 3 extraction error: {e}")
-            return {"success": False, "error": str(e)}
+            self.logger.error(f"Metadata enrichment error: {e}")
+            return concepts
     
-    async def _merge_nodes(
-        self, new_concepts: List[Dict], existing_concepts: List[Dict]
+    # ===========================================
+    # STAGING METHODS
+    # ===========================================
+    
+    async def _create_staging_nodes(
+        self, document_id: str, concepts: List[Dict], relationships: List[Dict]
+    ) -> Dict[str, Any]:
+        """Create staging nodes in Neo4j"""
+        neo4j = self.state_manager.neo4j
+        created = 0
+        
+        for concept in concepts:
+            await neo4j.run_query(
+                """
+                CREATE (s:StagingConcept {
+                    concept_id: $concept_id,
+                    extraction_id: $extraction_id,
+                    name: $name,
+                    description: $description,
+                    difficulty: $difficulty,
+                    bloom_level: $bloom_level,
+                    semantic_tags: $tags,
+                    created_at: datetime()
+                })
+                """,
+                concept_id=concept.get("concept_id"),
+                extraction_id=document_id,
+                name=concept.get("name", ""),
+                description=concept.get("description", ""),
+                difficulty=concept.get("difficulty", 2),
+                bloom_level=concept.get("bloom_level", "UNDERSTAND"),
+                tags=concept.get("semantic_tags", [])
+            )
+            created += 1
+        
+        return {"staging_concepts_created": created}
+    
+    async def _cleanup_staging(self, document_id: str) -> None:
+        """Remove staging nodes after commit"""
+        neo4j = self.state_manager.neo4j
+        await neo4j.run_query(
+            "MATCH (s:StagingConcept {extraction_id: $id}) DETACH DELETE s",
+            id=document_id
+        )
+    
+    # ===========================================
+    # COMMIT METHODS
+    # ===========================================
+    
+    async def _get_existing_concepts(self) -> List[Dict]:
+        """Get all existing concepts from Course KG"""
+        neo4j = self.state_manager.neo4j
+        result = await neo4j.run_query(
+            """
+            MATCH (c:CourseConcept)
+            RETURN c.concept_id as concept_id,
+                   c.name as name,
+                   c.description as description,
+                   c.difficulty as difficulty,
+                   c.semantic_tags as semantic_tags
+            """
+        )
+        return result if result else []
+    
+    async def _get_existing_relationships(self) -> List[Dict]:
+        """Get all existing relationships from Course KG"""
+        neo4j = self.state_manager.neo4j
+        result = await neo4j.run_query(
+            """
+            MATCH (a:CourseConcept)-[r]->(b:CourseConcept)
+            RETURN a.concept_id as source,
+                   b.concept_id as target,
+                   type(r) as relationship_type
+            """
+        )
+        return result if result else []
+    
+    async def _promote_to_course_kg(
+        self,
+        document_id: str,
+        concepts: List[Dict],
+        relationships: List[Dict],
+        merge_mapping: Dict[str, str]
     ) -> Dict[str, Any]:
         """
-        3-Way Node Merging Algorithm
+        Promote validated concepts to CourseConcept using batch UNWIND.
         
-        1. Semantic Similarity (Embeddings)
-        2. Structural Similarity (Jaccard of prerequisites)  
-        3. Contextual Similarity (Jaccard of tags)
+        Features:
+        - Batch operations for AuraDB performance
+        - Provenance tracking with source_document_ids list
+        - MERGE for idempotent upserts
         """
-        merged_concepts = []
-        merged_count = 0
+        upserter = self._get_batch_upserter()
         
-        for new_concept in new_concepts:
-            best_match = None
-            best_score = 0
-            
-            for existing in existing_concepts:
-                # 1. Semantic Similarity (description + examples)
-                semantic_sim = self._calculate_text_similarity(
-                    new_concept.get("description", ""),
-                    existing.get("description", "")
-                )
-                
-                # 2. Structural Similarity (skipped if no graph data)
-                structural_sim = 0.0
-                
-                # 3. Contextual Similarity (tags)
-                new_tags = set(new_concept.get("semantic_tags", []))
-                existing_tags = set(existing.get("semantic_tags", []))
-                contextual_sim = self._jaccard_similarity(new_tags, existing_tags)
-                
-                # Weighted score
-                total_score = (
-                    0.5 * semantic_sim +
-                    0.2 * structural_sim +
-                    0.3 * contextual_sim
-                )
-                
-                if total_score > best_score and total_score > self.SEMANTIC_THRESHOLD:
-                    best_score = total_score
-                    best_match = existing
-            
-            if best_match:
-                # Merge into existing concept
-                merged_concept = self._merge_two_concepts(best_match, new_concept)
-                merged_concepts.append(merged_concept)
-                merged_count += 1
-            else:
-                # New unique concept
-                merged_concepts.append(new_concept)
-        
-        return {
-            "merged_concepts": merged_concepts,
-            "merged_count": merged_count
-        }
-    
-    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
-        """Simple word overlap similarity (production would use embeddings)"""
-        if not text1 or not text2:
-            return 0.0
-        
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
-        
-        return self._jaccard_similarity(words1, words2)
-    
-    def _jaccard_similarity(self, set1: set, set2: set) -> float:
-        """Calculate Jaccard similarity between two sets"""
-        if not set1 and not set2:
-            return 0.0
-        
-        intersection = len(set1 & set2)
-        union = len(set1 | set2)
-        
-        return intersection / union if union > 0 else 0.0
-    
-    def _merge_two_concepts(
-        self, existing: Dict, new: Dict
-    ) -> Dict[str, Any]:
-        """Merge two concepts, keeping best data from each"""
-        merged = existing.copy()
-        
-        # Merge examples
-        existing_examples = existing.get("examples", [])
-        new_examples = new.get("examples", [])
-        merged["examples"] = list(set(existing_examples + new_examples))[:5]
-        
-        # Merge tags
-        existing_tags = set(existing.get("semantic_tags", []))
-        new_tags = set(new.get("semantic_tags", []))
-        merged["semantic_tags"] = list(existing_tags | new_tags)[:20]
-        
-        # Keep higher difficulty if different
-        merged["difficulty"] = max(
-            existing.get("difficulty", 2),
-            new.get("difficulty", 2)
+        # Batch upsert concepts with provenance list
+        concept_result = await upserter.upsert_concepts(
+            concepts=concepts,
+            source_document_id=document_id
         )
         
-        return merged
+        # Batch upsert relationships
+        rel_result = await upserter.upsert_relationships(
+            relationships=relationships,
+            source_document_id=document_id
+        )
+        
+        self.logger.info(
+            f"📊 Batch upsert: {concept_result['upserted']} concepts in {concept_result['batches']} batches, "
+            f"{rel_result['upserted']} relationships"
+        )
+        
+        return {
+            "concepts_created": concept_result["upserted"],
+            "relationships_created": rel_result["upserted"],
+            "concept_batches": concept_result["batches"],
+            "relationship_batches": rel_result["batches"]
+        }
+    
+    # ===========================================
+    # HELPER METHODS
+    # ===========================================
+    
+    def _parse_json_array(self, text: str) -> List[Dict]:
+        """Parse JSON array from LLM response"""
+        try:
+            json_start = text.find("[")
+            json_end = text.rfind("]") + 1
+            if json_start >= 0 and json_end > json_start:
+                return json.loads(text[json_start:json_end])
+        except json.JSONDecodeError:
+            pass
+        return []
+    
+    def _parse_json_object(self, text: str) -> Dict:
+        """Parse JSON object from LLM response"""
+        try:
+            json_start = text.find("{")
+            json_end = text.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                return json.loads(text[json_start:json_end])
+        except json.JSONDecodeError:
+            pass
+        return {}
+    
+    def _error_response(self, error: str) -> Dict[str, Any]:
+        """Create error response"""
+        return {
+            "success": False,
+            "agent_id": self.agent_id,
+            "error": error
+        }
+    
+    # ===========================================
+    # PROVENANCE-AWARE EXECUTION
+    # ===========================================
+    
+    async def execute_with_provenance(self, **kwargs) -> Dict[str, Any]:
+        """
+        Execute with full provenance subgraph support.
+        
+        This method uses ConceptSnapshot/RelSnapshot pattern for:
+        - Document-level overwrite (re-upload same filename)
+        - Delta rebuild (only affected concepts)
+        - Full audit trail
+        
+        Args:
+            document_content: str - Document text
+            document_title: str - Filename (used for overwrite detection)
+            document_type: str - LECTURE, TUTORIAL, etc.
+        """
+        import hashlib
+        
+        try:
+            document_content = kwargs.get("document_content")
+            document_title = kwargs.get("document_title", "Untitled")
+            document_type = kwargs.get("document_type", "LECTURE")
+            
+            if not document_content:
+                return self._error_response("document_content is required")
+            
+            self.logger.info(f"🔍 [V2+Provenance] Processing: {document_title}")
+            
+            # Generate document ID and checksum
+            checksum = hashlib.sha256(document_content.encode()).hexdigest()
+            document_id = f"doc_{uuid.uuid4().hex[:8]}"
+            
+            provenance_manager = self._get_provenance_manager()
+            
+            # ========================================
+            # STEP 1: Check for existing document (by filename)
+            # ========================================
+            existing = await provenance_manager.get_existing_doc_by_filename(document_title)
+            
+            if existing and existing.get("checksum") == checksum:
+                self.logger.info(f"⏭️ Document unchanged (same checksum)")
+                return {
+                    "success": True,
+                    "agent_id": self.agent_id,
+                    "document_id": existing["doc_id"],
+                    "status": "SKIPPED",
+                    "reason": "checksum_unchanged"
+                }
+            
+            was_overwrite = bool(existing)
+            if was_overwrite:
+                self.logger.info(f"♻️ Re-upload detected, will overwrite: {existing['doc_id']}")
+            
+            # ========================================
+            # STEP 2: Semantic Chunking
+            # ========================================
+            chunks = self.chunker.chunk(document_content, document_id)
+            self.logger.info(f"📄 Chunked into {len(chunks)} semantic blocks")
+            
+            # ========================================
+            # STEP 3: Per-Chunk Extraction
+            # ========================================
+            concept_snapshots = []
+            rel_snapshots = []
+            
+            for i, chunk in enumerate(chunks):
+                self.logger.debug(f"Processing chunk {i+1}/{len(chunks)}: {chunk.source_heading}")
+                
+                # Layer 1: Concept extraction
+                chunk_concepts = await self._extract_concepts_from_chunk(chunk, document_title)
+                
+                # Layer 2: Relationship extraction
+                chunk_relationships = await self._extract_relationships_from_chunk(
+                    chunk, chunk_concepts
+                )
+                
+                # Layer 3: Metadata enrichment
+                enriched_concepts = await self._enrich_metadata(chunk_concepts)
+                
+                # Convert to snapshot format
+                for concept in enriched_concepts:
+                    concept_snapshots.append({
+                        "concept_id": concept.get("concept_id"),
+                        "name": concept.get("name", ""),
+                        "description": concept.get("description", ""),
+                        "bloom_level": concept.get("bloom_level", "UNDERSTAND"),
+                        "time_estimate": concept.get("time_estimate", 30),
+                        "semantic_tags": concept.get("semantic_tags", []),
+                        "focused_tags": concept.get("focused_tags", []),
+                        "difficulty": concept.get("difficulty", 2),
+                        "learning_objective": concept.get("learning_objective", ""),
+                        "examples": concept.get("examples", []),
+                        "confidence": 0.85  # Default confidence
+                    })
+                
+                for rel in chunk_relationships:
+                    rel_snapshots.append({
+                        "rel_type": rel.get("relationship_type", rel.get("type", "REQUIRES")),
+                        "source_id": rel.get("source"),
+                        "target_id": rel.get("target"),
+                        "weight": 1.0,
+                        "dependency": "STRONG",
+                        "confidence": rel.get("confidence", 0.8),
+                        "reasoning": ""
+                    })
+            
+            self.logger.info(f"📦 Extracted: {len(concept_snapshots)} concepts, {len(rel_snapshots)} relationships")
+            
+            # ========================================
+            # STEP 4: Validation
+            # ========================================
+            validation_result = self.validator.validate(concept_snapshots, rel_snapshots)
+            
+            if not validation_result.is_valid:
+                fixed_concepts, fixed_rels = self.validator.auto_fix(
+                    concept_snapshots, rel_snapshots, validation_result
+                )
+                validation_result = self.validator.validate(fixed_concepts, fixed_rels)
+                concept_snapshots = fixed_concepts
+                rel_snapshots = fixed_rels
+            
+            if not validation_result.is_valid:
+                return self._error_response(
+                    f"Validation failed: {validation_result.errors[:3]}"
+                )
+            
+            self.logger.info(f"✅ Validation passed")
+            
+            # ========================================
+            # STEP 5: Provenance Overwrite (delete + insert + rebuild)
+            # ========================================
+            result = await provenance_manager.overwrite_document(
+                doc_id=document_id,
+                filename=document_title,
+                checksum=checksum,
+                concept_snapshots=concept_snapshots,
+                rel_snapshots=rel_snapshots
+            )
+            
+            # ========================================
+            # STEP 6: Emit COURSEKG_UPDATED event
+            # ========================================
+            await self.send_message(
+                receiver="planner",
+                message_type="COURSEKG_UPDATED",
+                payload={
+                    "document_id": document_id,
+                    "document_title": document_title,
+                    "was_overwrite": was_overwrite,
+                    "concepts_inserted": result["snapshots"]["concepts_inserted"],
+                    "relationships_inserted": result["snapshots"]["relationships_inserted"],
+                    "concepts_rebuilt": result["canonical"]["concepts_rebuilt"],
+                    "extraction_version": self.extraction_version.value
+                }
+            )
+            
+            self.logger.info(f"✅ [V2+Provenance] Complete: {document_id}")
+            
+            return {
+                "success": True,
+                "agent_id": self.agent_id,
+                "document_id": document_id,
+                "status": "COMMITTED",
+                "was_overwrite": was_overwrite,
+                "provenance": result
+            }
+        
+        except Exception as e:
+            self.logger.error(f"❌ [V2+Provenance] Failed: {e}")
+            return self._error_response(str(e))
+
