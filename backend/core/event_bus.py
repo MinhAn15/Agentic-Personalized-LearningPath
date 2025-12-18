@@ -21,7 +21,7 @@ class EventBus:
         self.event_log: List[Dict[str, Any]] = []
         self.logger = logging.getLogger(__name__)
     
-    async def subscribe(self, event_type: str, handler: Callable) -> None:
+    def subscribe(self, event_type: str, handler: Callable) -> None:
         """
         Subscribe to events of a specific type.
         

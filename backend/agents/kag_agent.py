@@ -774,13 +774,18 @@ Return ONLY valid JSON:
                 
                 # Emit ARTIFACT_CREATED event
                 if self.event_bus:
-                    await self.event_bus.publish('ARTIFACT_CREATED', {
-                        'learner_id': learner_id,
-                        'concept_id': concept_id,
-                        'note_id': note_dict['note_id'],
-                        'artifact_type': note_dict['type'],
-                        'links_created': links_created
-                    })
+                    await self.event_bus.publish(
+                        sender=self.agent_id,
+                        receiver="all",
+                        message_type='ARTIFACT_CREATED',
+                        payload={
+                            'learner_id': learner_id,
+                            'concept_id': concept_id,
+                            'note_id': note_dict['note_id'],
+                            'artifact_type': note_dict['type'],
+                            'links_created': links_created
+                        }
+                    )
                 
                 self.logger.info(f"Created artifact {note_dict['note_id']} with {links_created} links")
         

@@ -98,8 +98,6 @@ class EvaluatorAgent(BaseAgent):
             personal_kg=personal_kg,
             course_kg=course_kg
         )
-            personal_kg=personal_kg
-        )
         
         # Initialize Notification Service
         self.notification_service = InstructorNotificationService()

@@ -61,7 +61,7 @@ class BloomLevel(str, Enum):
     CREATE = "CREATE"
 
 
-class KnowledgeExtractionAgentV2(BaseAgent):
+class KnowledgeExtractionAgent(BaseAgent):
     """
     Production-grade Knowledge Extraction Agent.
     
@@ -93,7 +93,7 @@ class KnowledgeExtractionAgentV2(BaseAgent):
             model=self.settings.GEMINI_MODEL,
             api_key=self.settings.GOOGLE_API_KEY
         )
-        self.logger = logging.getLogger(f"KnowledgeExtractionAgentV2.{agent_id}")
+        self.logger = logging.getLogger(f"KnowledgeExtractionAgent.{agent_id}")
         
         # Initialize production modules
         self.document_registry = DocumentRegistry(state_manager)

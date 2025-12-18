@@ -71,6 +71,15 @@ class PathPlannerAgent(BaseAgent):
         self.rl_engine = RLEngine(strategy=BanditStrategy.UCB)
         self.logger = logging.getLogger(f"PathPlannerAgent.{agent_id}")
         
+        # Relationship type priorities for each chaining mode
+        self.CHAIN_RELATIONSHIPS = {
+            ChainingMode.FORWARD: ["NEXT", "IS_PREREQUISITE_OF"],
+            ChainingMode.BACKWARD: ["REQUIRES"],
+            ChainingMode.LATERAL: ["SIMILAR_TO", "HAS_ALTERNATIVE_PATH", "REMEDIATES"],
+            ChainingMode.ACCELERATE: ["NEXT", "IS_SUB_CONCEPT_OF"],
+            ChainingMode.REVIEW: ["REQUIRES"]  # Logic uses this to find prior nodes
+        }
+        
         self._subscribe_to_events()
         
     def _subscribe_to_events(self):
@@ -175,15 +184,7 @@ class PathPlannerAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Error processing feedback: {e}")
         
-        # Relationship type priorities for each chaining mode
-        self.CHAIN_RELATIONSHIPS = {
-            ChainingMode.FORWARD: ["NEXT", "IS_PREREQUISITE_OF"],
-            ChainingMode.BACKWARD: ["REQUIRES"],
-            ChainingMode.LATERAL: ["SIMILAR_TO", "HAS_ALTERNATIVE_PATH", "REMEDIATES"],
-            ChainingMode.ACCELERATE: ["NEXT", "IS_SUB_CONCEPT_OF"],
-            ChainingMode.REVIEW: ["REQUIRES"]  # Logic uses this to find prior nodes
-        }
-    
+
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Main execution method."""
         try:

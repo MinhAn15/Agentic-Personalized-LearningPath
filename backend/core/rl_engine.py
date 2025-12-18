@@ -101,7 +101,8 @@ class RLEngine:
         learner_mastery: Dict[str, float],
         prerequisites: Dict[str, List[str]],
         time_available: int,
-        learning_style: str
+        learning_style: str,
+        candidate_concepts: Optional[List[str]] = None
     ) -> Optional[str]:
         """
         Select next concept for learner to study.
@@ -117,6 +118,7 @@ class RLEngine:
             prerequisites: Prerequisite relationships {concept: [required_concepts]}
             time_available: Hours remaining
             learning_style: Learner's preferred style (VISUAL, AUDITORY, etc.)
+            candidate_concepts: Optional list of candidate concept IDs to consider
             
         Returns:
             Selected concept ID or None if no eligible concepts
@@ -125,7 +127,8 @@ class RLEngine:
         
         # Filter eligible concepts
         eligible = []
-        for concept_id, arm in self.arms.items():
+        concepts_to_check = candidate_concepts if candidate_concepts else list(self.arms.keys())
+        for concept_id in concepts_to_check:
             # Skip if already mastered
             current_mastery = learner_mastery.get(concept_id, 0)
             if current_mastery >= 0.9:
@@ -148,7 +151,11 @@ class RLEngine:
         # Calculate rewards for each eligible concept
         rewards = {}
         for concept_id in eligible:
-            arm = self.arms[concept_id]
+            arm = self.arms.get(concept_id)
+            if not arm:
+                # If arm doesn't exist yet, create it with default difficulty
+                self.add_arm(concept_id, 2)
+                arm = self.arms[concept_id]
             current_mastery = learner_mastery.get(concept_id, 0)
             
             # Reward = improvement potential × difficulty match
