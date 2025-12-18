@@ -29,13 +29,13 @@ class Arm:
         self.concept_id = concept_id
         self.difficulty = difficulty
         self.pulls = 0  # Number of times selected
-        self.rewards = []  # Rewards from each pull
+        self.total_reward = 0.0  # Sum of rewards
         self.regret = 0  # Cumulative regret
     
     @property
     def avg_reward(self) -> float:
         """Average reward for this arm"""
-        return sum(self.rewards) / len(self.rewards) if self.rewards else 0
+        return self.total_reward / self.pulls if self.pulls > 0 else 0.0
     
     def ucb_score(self, t: int) -> float:
         """
@@ -57,7 +57,12 @@ class Arm:
             reward: Reward received
         """
         self.pulls += 1
-        self.rewards.append(reward)
+        self.total_reward += reward
+
+    def set_stats(self, pulls: int, total_reward: float) -> None:
+        """Restore stats from persistence"""
+        self.pulls = pulls
+        self.total_reward = total_reward
 
 class RLEngine:
     """
@@ -88,7 +93,8 @@ class RLEngine:
             concept_id: Concept ID
             difficulty: Difficulty level (1-5)
         """
-        self.arms[concept_id] = Arm(concept_id, difficulty)
+        if concept_id not in self.arms:
+            self.arms[concept_id] = Arm(concept_id, difficulty)
     
     def select_concept(
         self,

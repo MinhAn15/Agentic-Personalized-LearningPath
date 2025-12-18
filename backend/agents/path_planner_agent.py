@@ -71,6 +71,110 @@ class PathPlannerAgent(BaseAgent):
         self.rl_engine = RLEngine(strategy=BanditStrategy.UCB)
         self.logger = logging.getLogger(f"PathPlannerAgent.{agent_id}")
         
+        self._subscribe_to_events()
+        
+    def _subscribe_to_events(self):
+        """Subscribe to feedback events"""
+        if hasattr(self.event_bus, 'subscribe'):
+            self.event_bus.subscribe("EVALUATION_COMPLETED", self._on_evaluation_feedback)
+            self.logger.info("Subscribed to EVALUATION_COMPLETED")
+
+    async def _load_mab_stats(self, concept_ids: List[str]):
+        """Load MAB stats from Redis for relevant concepts"""
+        redis = self.state_manager.redis
+        pipeline = redis.pipeline()
+        
+        for cid in concept_ids:
+            pipeline.get(f"mab_stats:{cid}")
+            
+        results = await pipeline.execute()
+        
+        for cid, data_str in zip(concept_ids, results):
+            if data_str:
+                try:
+                    data = json.loads(data_str)
+                    if cid in self.rl_engine.arms:
+                        self.rl_engine.arms[cid].set_stats(
+                            pulls=data.get("pulls", 0),
+                            total_reward=data.get("total_reward", 0.0)
+                        )
+                except Exception as e:
+                    self.logger.warning(f"Failed to load MAB stats for {cid}: {e}")
+
+    async def _save_mab_stats(self, concept_ids: List[str]):
+        """Save MAB stats to Redis"""
+        redis = self.state_manager.redis
+        pipeline = redis.pipeline()
+        
+        for cid in concept_ids:
+            if cid in self.rl_engine.arms:
+                arm = self.rl_engine.arms[cid]
+                data = {
+                    "pulls": arm.pulls,
+                    "total_reward": arm.total_reward
+                }
+                pipeline.set(f"mab_stats:{cid}", json.dumps(data))
+                
+        await pipeline.execute()
+
+    async def _on_evaluation_feedback(self, event: Dict[str, Any]):
+        """
+        Process feedback from Evaluator Agent.
+        R = 0.6 * score + 0.4 * completion - penalty
+        """
+        try:
+            concept_id = event.get('concept_id')
+            score = event.get('score', 0.0)
+            # Infer passed status if not explicitly provided
+            passed = event.get('passed', score >= 0.8)
+            
+            if not concept_id:
+                return
+                
+            # Calculate Reward
+            completion_reward = 1.0 if passed else 0.0
+            dropout_penalty = 0.0 # TODO: detect dropout
+            
+            reward = (0.6 * score) + (0.4 * completion_reward) - dropout_penalty
+            
+            # Update In-Memory RLEngine (if arm exists)
+            # We might need to ensure arm exists or load it first
+            # But simpler to just update generic key in Redis directly if we are stateless?
+            # Since we maintain self.rl_engine, we update it.
+            
+            if concept_id not in self.rl_engine.arms:
+                 # If we don't have it loaded, we might skip or load-update-save
+                 # Let's simple load-update-save pattern here
+                 await self._load_mab_stats([concept_id])
+                 # If still not in arms (wasn't added), we can't update. 
+                 # But arms are usually added during execute().
+                 # So we might need to add it temporarily.
+                 pass
+
+            # For now, let's just do a Read-Modify-Write cycle on Redis directly
+            # This is safer for concurrency across multiple agent instances
+            redis = self.state_manager.redis
+            key = f"mab_stats:{concept_id}"
+            data_str = await redis.get(key)
+            
+            if data_str:
+                data = json.loads(data_str)
+                pulls = data.get("pulls", 0) + 1
+                total_reward = data.get("total_reward", 0.0) + reward
+            else:
+                pulls = 1
+                total_reward = reward
+                
+            await redis.set(key, json.dumps({
+                "pulls": pulls,
+                "total_reward": total_reward
+            }))
+            
+            self.logger.info(f"Feedback processed for {concept_id}: Reward={reward:.2f}")
+            
+        except Exception as e:
+            self.logger.error(f"Error processing feedback: {e}")
+        
         # Relationship type priorities for each chaining mode
         self.CHAIN_RELATIONSHIPS = {
             ChainingMode.FORWARD: ["NEXT", "IS_PREREQUISITE_OF"],
@@ -281,6 +385,26 @@ class PathPlannerAgent(BaseAgent):
             relevant_rel_types = self.CHAIN_RELATIONSHIPS[chain_mode]
             prerequisites = relationship_map.get("REQUIRES", {})
             
+            # --- STRICT MASTERY GATE (Phase 6) ---
+            # If current concept exists and mastery < 0.8, FORCE Remediation.
+            if path:
+                last_concept_id = path[-1]["concept"]
+            else:
+                 # If generating fresh path, check the requested 'goal' or context if available
+                 # For now, we assume we are extending from what is passed in or starting fresh.
+                 # If starting fresh, we don't block.
+                 last_concept_id = None
+
+            if last_concept_id:
+                current_score = current_mastery.get(last_concept_id, 0.0)
+                if current_score < 0.8:
+                    self.logger.warning(f"⛔ MASTERY GATE: Concept {last_concept_id} has score {current_score:.2f} < 0.8. Blocking forward progress.")
+                    # Force ChainingMode to BACKWARD or LATERAL to prevent new concepts
+                    if chain_mode not in [ChainingMode.BACKWARD, ChainingMode.LATERAL, ChainingMode.REVIEW]:
+                        chain_mode = ChainingMode.BACKWARD
+                        relevant_rel_types = self.CHAIN_RELATIONSHIPS[ChainingMode.BACKWARD]
+            # -------------------------------------
+
             visited = set()
             
             while hours_used < total_hours * 0.8:
@@ -312,6 +436,9 @@ class PathPlannerAgent(BaseAgent):
                     
                     if not candidates:
                         break
+                
+                # LOAD MAB STATS FOR CANDIDATES (Stateful Bandit)
+                await self._load_mab_stats(candidates)
                 
                 # Use RL to select from candidates
                 next_concept = self.rl_engine.select_concept(

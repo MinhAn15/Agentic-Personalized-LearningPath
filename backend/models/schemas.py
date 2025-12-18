@@ -86,10 +86,11 @@ class LearnerProfile(BaseModel):
         "difficulty_next": "MEDIUM" # EASY/MEDIUM/HARD
     })                                                        # dim 7
     constraints: Dict[str, Any] = Field(default_factory=lambda: {
-        "deadline": None,           # datetime or None
         "blackout_hours": [],       # hours when unavailable
         "priority_skills": []       # skills to prioritize
     })                                                        # dim 8
+    
+    interest_tags: Dict[str, float] = Field(default_factory=dict) # NEW: Interest tracking for decay
     
     # ==========================================
     # EPISODIC DIMENSIONS (9-14) - History tracking

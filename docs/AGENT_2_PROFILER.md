@@ -14,6 +14,66 @@ Builds and maintains 17-dimensional Learner Profile with real-time event updates
 3. **Profile Vectorization** - Embedding for similarity search
 4. **Real-time Event Updates** - Optimistic locking for concurrency
 
+---
+
+## 🏗️ Architecture (Phase 7 Refinement)
+
+```mermaid
+flowchart TD
+    subgraph Input
+        GOAL[User Goal]
+        HIST[Assessment History]
+        BEHAVIOR[Clickstream/Time]
+    end
+
+    subgraph "Core Profiling Engine"
+        COLD[Cold-Start Handler]
+        BLOOM[Bloom Tracker]
+        VECTOR[Profile Vectorizer]
+    end
+
+    subgraph "Dynamic State"
+        P_KG[(Personal KG)]
+        L_PROF[Learner Profile JSON]
+    end
+
+    GOAL --> COLD
+    COLD -- "Anchor Concepts" --> DIAG[Diagnostic Test]
+    DIAG --> L_PROF
+
+    HIST --> BLOOM
+    BLOOM -- "Update Velocity" --> L_PROF
+
+    L_PROF --> VECTOR
+    VECTOR --> MATCH[Peer Matching]
+```
+
+## 🧠 Business Logic & Mechanisms
+
+Agent 2 implements a **Multi-Dimensional Profiling System**:
+
+### Mechanism 1: Cold-Start Heuristic (Anchor Concepts)
+Solves the "New Learner Problem" by intelligently seeding the profile.
+- **Problem:** No history to make recommendations.
+- **Logic:**
+    1. Select 5 **Anchor Concepts** from Course KG (Nodes with highest Degree Centrality).
+    2. Administer a mini-diagnostic test on these anchors.
+    3. Result determines initial `current_level` (Beginner/Intermediate/Advanced) and `concept_mastery_map`.
+
+### Mechanism 2: Bloom Taxonomy Tracking
+Differentiates between "Rote Memorization" and "Deep Understanding".
+- **Problem:** A score of 0.8 could mean 80% on multiple choice (Remembering), not necessarily understanding.
+- **Logic:**
+    - Track mastery individually for each Bloom Level:
+        - `mastery_remember`: 0.9
+        - `mastery_analyze`: 0.3
+    - **Action:** If `analyze < 0.4`, the Profiler signals the Tutor to switch to `SocraticState.PROBING` to force deeper thinking.
+
+### Mechanism 3: Dynamic Interest Decay
+Ensures the profile stays relevant to the learner's *current* focus.
+- **Logic:** Apply a time-decay factor ($\lambda = 0.95$) to `focused_tags`.
+- **Effect:** Interests from 3 months ago fade out unless reinforced.
+
 ## Diagnostic States
 
 ```python

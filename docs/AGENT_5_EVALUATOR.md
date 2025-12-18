@@ -62,6 +62,9 @@ MasteryTracker:
 
 DecisionEngine:
     Implements THESIS Table 3.10 logic
+
+InstructorNotificationService:
+    Triggers alert if score < 0.4 (Critical Failure)
 ```
 
 ## Event Flow
@@ -71,7 +74,10 @@ TUTOR_ASSESSMENT_READY (from Agent 4)
     → Score response
     → Classify error
     → Detect misconceptions
+    → Classify error
+    → Detect misconceptions
     → Update mastery
+    → Check for critical failure (Alert Instructor)
     → Make path decision
     → EVALUATION_COMPLETED (to Agent 6, Agent 2, Agent 3)
 ```
@@ -82,4 +88,5 @@ TUTOR_ASSESSMENT_READY (from Agent 4)
 - `ErrorClassifier` - Decision tree + ontology
 - `MasteryTracker` - Weighted average + Bloom
 - `DecisionEngine` - 5-path logic
+- `InstructorNotificationService` - Alerting system
 - `EvaluationResult` - Complete result dataclass

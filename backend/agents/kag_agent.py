@@ -195,6 +195,9 @@ class KAGAgent(BaseAgent):
         feedback = session_data.get("feedback", "")
         score = session_data.get("score", 0)
         
+        # Extract source context (e.g., tutor session ID)
+        source_context = session_data.get("source_context", "unknown_session")
+        
         # Determine note type
         if score < 0.5:
             note_type = ArtifactType.MISCONCEPTION_NOTE
@@ -206,6 +209,7 @@ class KAGAgent(BaseAgent):
 Create a concise learning note (Zettelkasten style) from this learning interaction.
 
 Concept: {concept_id}
+Source Context: {source_context}
 Question: {question}
 Learner's Answer: {answer}
 Feedback: {feedback}
@@ -271,7 +275,8 @@ Return ONLY valid JSON:
             "personal_example": note_data.get("personal_example", ""),
             "common_mistake": note_data.get("common_mistake", ""),
             "connections": note_data.get("connections", []),
-            "concept_id": concept_id
+            "concept_id": concept_id,
+            "source_context": source_context
         }
     
     async def _find_related_notes(
@@ -346,6 +351,7 @@ Return ONLY valid JSON:
                 personal_example: $personal_example,
                 common_mistake: $common_mistake,
                 tags: $tags,
+                source_context: $source_context,
                 created_at: datetime()
             })
             CREATE (l)-[:CREATED_NOTE]->(n)
@@ -361,7 +367,8 @@ Return ONLY valid JSON:
             key_insight=atomic_note.get("key_insight", ""),
             personal_example=atomic_note.get("personal_example", ""),
             common_mistake=atomic_note.get("common_mistake", ""),
-            tags=tags
+            tags=tags,
+            source_context=atomic_note.get("source_context", "unknown")
         )
         
         return note_id

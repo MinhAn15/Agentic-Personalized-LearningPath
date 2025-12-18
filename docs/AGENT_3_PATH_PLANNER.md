@@ -40,14 +40,29 @@ EvaluationDecision:  # From Agent 5
 | `_recommend_resources()`           | Suggest content types per concept                      |
 | `_calculate_success_probability()` | Predict completion likelihood                          |
 
-## RL Engine Integration
+## RL Engine Integration (Stateful MAB)
 
 ```python
-RLEngine with BanditStrategy:
-    - UCB (Upper Confidence Bound) for concept selection
-    - Tracks arm statistics per concept
-    - Balances known-good vs unexplored concepts
+RLEngine with Persisted BanditStrategy:
+    - Policy: LinUCB (Simplified)
+    - State Storage: Redis (mab_stats:{concept_id})
+    - Persistence: Q-values and Visit Counts are saved across sessions
 ```
+
+## Reward Function
+The agent learns from the Evaluator's feedback:
+```math
+R = 0.6 \times \text{Score} + 0.4 \times \text{Completion} - \text{Penalty}
+```
+*   **Score:** 0.0 - 1.0 (from Evaluator)
+*   **Completion:** 1.0 if passed, 0.0 if failed/skipped
+*   **Penalty:** 0.2 if user dropped out immediately
+
+## Mastery Gate (Strict)
+The planner enforces a **Blocking Gate** for progression:
+- If current concept mastery < 0.8:
+  - ⛔ **BLOCKS** ChainingMode.FORWARD
+  - ⚠️ Forces ChainingMode.BACKWARD (Remediation)
 
 ## Success Probability Formula
 
@@ -82,3 +97,4 @@ P(success) = 0.4 × avg_mastery
 - `RLEngine` - Multi-Armed Bandit implementation
 - `BanditStrategy` - UCB algorithm
 - `rl_config.py` - Thresholds and weights
+- `Redis` - State persistence

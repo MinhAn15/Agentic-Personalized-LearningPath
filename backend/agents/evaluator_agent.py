@@ -15,6 +15,7 @@ from backend.models.evaluation import (
 )
 from backend.config import get_settings
 from llama_index.llms.gemini import Gemini
+from backend.services.instructor_notification import InstructorNotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +98,13 @@ class EvaluatorAgent(BaseAgent):
             personal_kg=personal_kg,
             course_kg=course_kg
         )
-        self.decision_engine = DecisionEngine(
             personal_kg=personal_kg
         )
+        
+        # Initialize Notification Service
+        self.notification_service = InstructorNotificationService()
+        
+        # Event subscriptions
         
         # Event subscriptions
         if event_bus and hasattr(event_bus, 'subscribe'):
@@ -248,6 +253,15 @@ class EvaluatorAgent(BaseAgent):
                 }
             )
             
+            if score < 0.4:
+                # Trigger Instructor Alert for Critical Failure
+                await self.notification_service.notify_failure(
+                    learner_id=learner_id,
+                    concept_id=concept_id,
+                    score=score,
+                    attempts=1 # TODO: Fetch actual attempts from personal KG
+                )
+
             self.logger.info(f"✅ Evaluation complete: {error_type.value} ({score:.1%})")
             
             return result
@@ -434,7 +448,7 @@ class EvaluatorAgent(BaseAgent):
         
         if score >= 0.9:
             return PathDecision.MASTERED
-        elif score >= 0.85:
+        elif score >= 0.8:
             return PathDecision.PROCEED
         elif score >= 0.6:
             # Good enough but not perfect - try different angle

@@ -12,7 +12,8 @@ Validation Rules:
 """
 
 import re
-from typing import List, Dict, Any, Optional, Set, Tuple
+from typing import List, Dict, Any, Optional, Set, Tuple, DefaultDict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -165,6 +166,11 @@ class KGValidator:
         referenced_nodes = self._get_referenced_nodes(relationships)
         orphan_issues = self._check_orphans(node_ids, referenced_nodes)
         for issue in orphan_issues:
+            result.add_issue(issue)
+        
+        # Check for cycles (DAG enforcement)
+        cycle_issues = self._detect_cycles(relationships)
+        for issue in cycle_issues:
             result.add_issue(issue)
         
         return result
@@ -466,3 +472,58 @@ class KGValidator:
             fixed_rels.append(fixed)
         
         return fixed_nodes, fixed_rels
+
+    def _detect_cycles(self, relationships: List[Dict[str, Any]]) -> List[ValidationIssue]:
+        """
+        Detect cycles in the relationship graph (DAG enforcement).
+        Using persistent DFS.
+        """
+        issues = []
+        adj = defaultdict(list)
+        
+        # Build adjacency list from input relationships
+        for rel in relationships:
+            src = rel.get("source")
+            tgt = rel.get("target")
+            rel_type = rel.get("relationship_type", "")
+            
+            # Only consider structural relationships for cycles
+            if src and tgt and rel_type in ["REQUIRES", "NEXT", "IS_SUB_CONCEPT_OF"]:
+                adj[src].append((tgt, rel))
+        
+        visited = set()
+        recursion_stack = set()
+        
+        def dfs(u, path):
+            visited.add(u)
+            recursion_stack.add(u)
+            path.append(u)
+            
+            if u in adj:
+                for v, rel_data in adj[u]:
+                    if v not in visited:
+                        if dfs(v, path):
+                            return True
+                    elif v in recursion_stack:
+                        # Cycle detected
+                        cycle_path = " -> ".join(path[path.index(v):] + [v])
+                        issues.append(ValidationIssue(
+                            rule="DAG_VIOLATION",
+                            severity=ValidationSeverity.ERROR,
+                            message=f"Cycle detected: {cycle_path}",
+                            relationship_id=f"{u}->{v}",
+                            suggested_fix="Remove one of the relationships in the cycle"
+                        ))
+                        return True
+            
+            recursion_stack.remove(u)
+            path.pop()
+            return False
+
+        # Run DFS from each node
+        nodes = list(adj.keys())
+        for node in nodes:
+            if node not in visited:
+                dfs(node, [])
+        
+        return issues

@@ -597,6 +597,9 @@ Return ONLY valid JSON:
                     if concept_id not in profile_data['completed_concepts']:
                         profile_data['completed_concepts'].append(concept_id)
                 
+                # 3. Apply Interest Decay (Mechanism 3)
+                self._apply_interest_decay(profile_data)
+                
                 # 3. Add error episodes if misconceptions detected (dim 11)
                 if misconceptions:
                     if 'error_patterns' not in profile_data:
@@ -797,6 +800,26 @@ Return ONLY valid JSON:
         final_idx = round(min(6, max(1, combined)))
         bloom_levels = ["", "REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE", "EVALUATE", "CREATE"]
         return bloom_levels[final_idx]
+
+    def _apply_interest_decay(self, profile_data: Dict[str, Any], decay_rate: float = 0.95):
+        """
+        Mechanism 3: Dynamic Interest Decay.
+        Apply time-decay factor to interest_tags.
+        Remove tags that fall below threshold (0.1).
+        """
+        if 'interest_tags' in profile_data:
+            tags = profile_data['interest_tags']
+            to_remove = []
+            
+            for tag in tags:
+                tags[tag] *= decay_rate
+                if tags[tag] < 0.1:
+                    to_remove.append(tag)
+            
+            for tag in to_remove:
+                del tags[tag]
+            
+            profile_data['interest_tags'] = tags
     
     async def _create_error_episode(self, learner_id: str, error_data: Dict):
         """Create ErrorEpisode node in Neo4j Personal KG"""
