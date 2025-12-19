@@ -46,3 +46,9 @@ docker-compose.override.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# Docker Volumes
+chroma_data/
+neo4j_data/
+postgres_data/
+redis_data/
