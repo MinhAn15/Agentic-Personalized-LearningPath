@@ -11,32 +11,29 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
     
     # ============================================
-    # SQL Server Database
+    # PostgreSQL Database (Docker)
     # ============================================
-    # Connection string format: mssql+pyodbc://user:password@server/database?driver=ODBC+Driver+17+for+SQL+Server
-    SQLSERVER_HOST: str = "localhost"
-    SQLSERVER_PORT: int = 1433
-    SQLSERVER_DATABASE: str = "learning_db"
-    SQLSERVER_USER: str = "sa"
-    SQLSERVER_PASSWORD: str = ""
-    SQLSERVER_DRIVER: str = "ODBC Driver 17 for SQL Server"
+    # Connection string format: postgresql://user:password@host:port/database
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DATABASE: str = "learning_db"
+    POSTGRES_USER: str = "user"
+    POSTGRES_PASSWORD: str = "password"
     
     @property
     def DATABASE_URL(self) -> str:
-        """Build SQL Server connection string for SQLAlchemy"""
+        """Build PostgreSQL connection string for asyncpg"""
         return (
-            f"mssql+pyodbc://{self.SQLSERVER_USER}:{self.SQLSERVER_PASSWORD}"
-            f"@{self.SQLSERVER_HOST}:{self.SQLSERVER_PORT}/{self.SQLSERVER_DATABASE}"
-            f"?driver={self.SQLSERVER_DRIVER.replace(' ', '+')}"
+            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DATABASE}"
         )
     
     # ============================================
-    # Neo4j Aura (Cloud Knowledge Graph)
+    # Neo4j (Docker - Local Development)
     # ============================================
-    # Get credentials from https://console.neo4j.io/
-    NEO4J_URI: str = "neo4j+s://xxxxxxxx.databases.neo4j.io"  # Aura connection string
+    NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
-    NEO4J_PASSWORD: str = ""
+    NEO4J_PASSWORD: str = "testpassword"  # Matches docker-compose.yml
     
     # ============================================
     # Redis Cache

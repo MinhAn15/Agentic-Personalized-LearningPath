@@ -53,8 +53,10 @@ async def init_neo4j_schema():
     factory = get_factory()
     
     if factory.neo4j:
-        schema_manager = Neo4jSchemaManager(factory.neo4j)
-        await schema_manager.initialize_schema()
+        schema_manager = Neo4jSchemaManager()  # Uses settings from config.py
+        await schema_manager.connect()
+        await schema_manager.setup_schema()
+        await schema_manager.close()
         print("✅ Neo4j schema initialized!")
     else:
         print("⚠️ Neo4j not connected, skipping schema initialization")

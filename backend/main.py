@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
     factory = get_factory()
     global _state_manager, _event_bus
     _state_manager = CentralStateManager(factory.redis, factory.postgres)
+    _state_manager.neo4j = factory.neo4j  # Add neo4j to state_manager
     _event_bus = EventBus()
     
     logger.info("✅ Infrastructure initialized")
