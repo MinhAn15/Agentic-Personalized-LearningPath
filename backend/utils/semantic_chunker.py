@@ -1,28 +1,36 @@
-# Semantic Chunker for Knowledge Extraction
+# Pure Agentic Semantic Chunker for Knowledge Extraction
 """
-Semantic Chunker: Split documents by headings/sections instead of arbitrary character limits.
+Pure Agentic Semantic Chunker: Uses LLM reasoning to split documents 
+instead of regex/rule-based logic.
 
-Benefits:
-- Preserves relationships within sections
-- Reproducible chunking
-- Better context for LLM extraction
+Philosophy:
+- Maximize AI capabilities, minimize traditional code logic
+- AI understands invisible boundaries (tone shifts, metaphor endings)
+- Future-proof: Better models = better chunking without code changes
+
+Pipeline:
+1. Architect Phase: LLM creates logical Table of Contents from idea flows
+2. Refiner Phase: LLM self-reviews using Reflexion technique
+3. Executor Phase: Extract content based on refined plan
 """
 
-import re
-from typing import List, Dict, Any, Optional, Tuple
+import logging
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+logger = logging.getLogger(__name__)
+
 
 class ChunkType(str, Enum):
-    """Type of chunk based on source structure"""
-    HEADING_1 = "HEADING_1"       # # Title
-    HEADING_2 = "HEADING_2"       # ## Section
-    HEADING_3 = "HEADING_3"       # ### Subsection
-    PARAGRAPH = "PARAGRAPH"       # No heading, paragraph break
-    CODE_BLOCK = "CODE_BLOCK"     # ```code```
-    LIST_BLOCK = "LIST_BLOCK"     # Bulleted/numbered list
-    RAW = "RAW"                   # Fallback raw split
+    """Type of chunk based on semantic analysis"""
+    CONCEPT_INTRO = "CONCEPT_INTRO"      # Introduction of a new concept
+    EXPLANATION = "EXPLANATION"           # Detailed explanation
+    EXAMPLE = "EXAMPLE"                   # Examples and illustrations
+    PRACTICE = "PRACTICE"                 # Exercises or practice problems
+    SUMMARY = "SUMMARY"                   # Summary or conclusion
+    TRANSITION = "TRANSITION"             # Transitional content
+    MIXED = "MIXED"                       # Mixed content types
 
 
 @dataclass
@@ -33,7 +41,7 @@ class SemanticChunk:
     Contains:
     - Content text
     - Metadata for provenance
-    - Hierarchy information
+    - AI-determined structure information
     """
     chunk_id: str
     content: str
@@ -44,14 +52,13 @@ class SemanticChunk:
     start_char: int
     end_char: int
     
-    # Hierarchy
-    source_heading: str              # Parent heading
-    heading_path: List[str]          # Full path: ["Chapter 1", "Section 1.1", "1.1.1"]
+    # AI-determined hierarchy
+    source_heading: str              # AI-inferred topic
+    heading_path: List[str]          # Logical path in document structure
     
     # Metadata
     word_count: int
-    has_code: bool
-    has_list: bool
+    pedagogical_purpose: str         # What this chunk teaches
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -64,52 +71,54 @@ class SemanticChunk:
             "source_heading": self.source_heading,
             "heading_path": self.heading_path,
             "word_count": self.word_count,
-            "has_code": self.has_code,
-            "has_list": self.has_list
+            "pedagogical_purpose": self.pedagogical_purpose
         }
 
 
-class SemanticChunker:
+class AgenticChunker:
     """
-    Semantic Chunker: Split by headings/sections.
+    Pure Agentic Chunker: Uses LLM reasoning for document segmentation.
     
-    Strategy:
-    1. Try to split by ## headings (Heading 2)
-    2. If chunk too large, split by ### headings (Heading 3)
-    3. If still too large, split by paragraphs
-    4. Fallback: split by max_chunk_size with overlap
+    Pipeline:
+    1. Architect: LLM analyzes document and proposes logical boundaries
+    2. Refiner: LLM self-reviews and fixes segmentation errors (Reflexion)
+    3. Executor: Extract content based on refined plan
     
-    Preserves:
-    - Heading hierarchy
-    - Code blocks (don't split mid-block)
-    - List blocks (don't split mid-list)
+    No regex, no rule-based logic - pure AI reasoning.
     """
-    
-    # Regex patterns
-    HEADING_PATTERN = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
-    CODE_BLOCK_PATTERN = re.compile(r'```[\s\S]*?```', re.MULTILINE)
-    LIST_PATTERN = re.compile(r'^[\s]*[-*+]\s+.+$', re.MULTILINE)
-    NUMBERED_LIST_PATTERN = re.compile(r'^[\s]*\d+\.\s+.+$', re.MULTILINE)
     
     def __init__(
         self,
-        max_chunk_size: int = 4000,      # Target max characters per chunk
-        min_chunk_size: int = 500,        # Minimum chunk size (avoid tiny chunks)
-        overlap_size: int = 200,          # Overlap for fallback splitting
-        preserve_code_blocks: bool = True
+        llm,
+        max_chunk_size: int = 4000,
+        min_chunk_size: int = 500
     ):
-        self.max_chunk_size = max_chunk_size
-        self.min_chunk_size = min_chunk_size
-        self.overlap_size = overlap_size
-        self.preserve_code_blocks = preserve_code_blocks
-    
-    def chunk(self, document: str, document_id: str = "doc") -> List[SemanticChunk]:
         """
-        Main chunking method.
+        Initialize Agentic Chunker.
         
         Args:
-            document: Full document text
+            llm: LLM instance (e.g., Gemini) for reasoning
+            max_chunk_size: Soft limit for chunk size (AI will respect this)
+            min_chunk_size: Minimum chunk size (AI will merge small chunks)
+        """
+        self.llm = llm
+        self.max_chunk_size = max_chunk_size
+        self.min_chunk_size = min_chunk_size
+        self.logger = logging.getLogger(f"{__name__}.AgenticChunker")
+    
+    async def chunk_with_ai(
+        self, 
+        document: str, 
+        document_id: str = "doc",
+        document_title: str = "Untitled"
+    ) -> List[SemanticChunk]:
+        """
+        Main async chunking method using 3-phase AI pipeline.
+        
+        Args:
+            document: Full document text (any format - plain text, markdown, etc.)
             document_id: ID for chunk naming
+            document_title: Title for context
             
         Returns:
             List of SemanticChunk objects
@@ -117,221 +126,267 @@ class SemanticChunker:
         if not document or not document.strip():
             return []
         
-        # Step 1: Protect code blocks (replace with placeholders)
-        document_protected, code_blocks = self._protect_code_blocks(document)
+        self.logger.info(f"🧠 [Agentic Chunker] Starting 3-phase pipeline for: {document_title}")
         
-        # Step 2: Split by headings
-        sections = self._split_by_headings(document_protected)
+        # Phase 1: Architect - Create logical structure
+        structure = await self._architect_phase(document, document_title)
+        self.logger.info(f"📐 [Architect] Proposed {len(structure)} sections")
         
-        # Step 3: Process each section
+        # Phase 2: Refiner - Self-review with Reflexion
+        refined_structure = await self._refiner_phase(document, structure)
+        self.logger.info(f"🔍 [Refiner] Refined to {len(refined_structure)} sections")
+        
+        # Phase 3: Executor - Extract chunks based on refined plan
+        chunks = await self._executor_phase(document, refined_structure, document_id)
+        self.logger.info(f"✅ [Executor] Created {len(chunks)} semantic chunks")
+        
+        return chunks
+    
+    async def _architect_phase(
+        self, 
+        document: str, 
+        document_title: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 1: The Architect
+        
+        LLM analyzes the entire document and creates a logical 
+        Table of Contents based on idea flows, regardless of formatting.
+        """
+        prompt = f"""You are an expert document analyst. Analyze this educational document and identify logical sections based on the FLOW OF IDEAS, not formatting.
+
+Document Title: {document_title}
+Document Content:
+---
+{document}
+---
+
+Your task:
+1. Read the entire document carefully
+2. Identify where topics/concepts BEGIN and END based on semantic meaning
+3. Create a logical Table of Contents that groups related content together
+
+Rules:
+- Each section should represent ONE complete pedagogical unit (concept + explanation + examples)
+- Do NOT split examples from their concepts
+- Do NOT split definitions from their explanations
+- Aim for sections between {self.min_chunk_size} and {self.max_chunk_size} characters
+- Ignore any existing formatting (headings, bullets) - focus on MEANING
+
+Return a JSON array where each item has:
+- "title": A descriptive title for this section
+- "start_text": The EXACT first 50 characters of where this section begins
+- "end_text": The EXACT last 50 characters of where this section ends
+- "purpose": What this section teaches (1 sentence)
+- "chunk_type": One of [CONCEPT_INTRO, EXPLANATION, EXAMPLE, PRACTICE, SUMMARY, TRANSITION, MIXED]
+
+Example output:
+[
+  {{
+    "title": "Introduction to Variables",
+    "start_text": "Variables are fundamental building blocks",
+    "end_text": "before moving to data types.",
+    "purpose": "Introduces the concept of variables and their role in programming",
+    "chunk_type": "CONCEPT_INTRO"
+  }}
+]
+
+Return ONLY valid JSON array. No explanations before or after."""
+
+        try:
+            response = await self.llm.acomplete(prompt)
+            structure = self._parse_json_array(response.text)
+            return structure if structure else []
+        except Exception as e:
+            self.logger.error(f"Architect phase error: {e}")
+            # Fallback: treat entire document as one chunk
+            return [{
+                "title": document_title,
+                "start_text": document[:50] if len(document) > 50 else document,
+                "end_text": document[-50:] if len(document) > 50 else document,
+                "purpose": "Full document content",
+                "chunk_type": "MIXED"
+            }]
+    
+    async def _refiner_phase(
+        self, 
+        document: str, 
+        structure: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Phase 2: The Refiner (Reflexion)
+        
+        LLM self-reviews its proposed boundaries and fixes segmentation errors.
+        Uses Reflexion technique: AI critiques and improves its own output.
+        """
+        if not structure:
+            return structure
+        
+        structure_json = self._to_json_string(structure)
+        
+        prompt = f"""You are reviewing a document segmentation plan. Your job is to find and fix errors.
+
+Original Document (for reference):
+---
+{document[:2000]}...
+---
+
+Proposed Segmentation:
+{structure_json}
+
+CRITICAL REVIEW QUESTIONS:
+1. Are any EXAMPLES being separated from their parent CONCEPTS? (BAD - merge them)
+2. Are any sections too small (< {self.min_chunk_size} chars)? (BAD - merge with neighbors)
+3. Are any sections too large (> {self.max_chunk_size} chars)? (Consider splitting if there's a natural break)
+4. Does each section represent a COMPLETE learning unit? (A student should understand the topic without needing adjacent chunks)
+
+If you find issues:
+- Merge sections that should be together
+- Split sections only at natural pedagogical boundaries
+- Adjust titles and purposes as needed
+
+Return the CORRECTED JSON array in the same format.
+If no changes needed, return the original array.
+
+Return ONLY valid JSON array. No explanations."""
+
+        try:
+            response = await self.llm.acomplete(prompt)
+            refined = self._parse_json_array(response.text)
+            return refined if refined else structure
+        except Exception as e:
+            self.logger.error(f"Refiner phase error: {e}")
+            return structure
+    
+    async def _executor_phase(
+        self, 
+        document: str, 
+        structure: List[Dict[str, Any]],
+        document_id: str
+    ) -> List[SemanticChunk]:
+        """
+        Phase 3: The Executor
+        
+        Extract actual content based on the refined structure.
+        Uses fuzzy text matching to find section boundaries.
+        """
         chunks = []
-        chunk_index = 0
         
-        for section in sections:
-            # Restore code blocks in this section
-            section_content = self._restore_code_blocks(section["content"], code_blocks)
+        for idx, section in enumerate(structure):
+            start_text = section.get("start_text", "")
+            end_text = section.get("end_text", "")
             
-            # Check if section needs further splitting
-            if len(section_content) > self.max_chunk_size:
-                # Split large section by paragraphs
-                sub_chunks = self._split_by_paragraphs(
-                    section_content, 
-                    section["heading"],
-                    section["heading_path"]
-                )
+            # Find boundaries using fuzzy matching
+            start_pos = self._fuzzy_find(document, start_text, search_start=0)
+            end_pos = self._fuzzy_find(document, end_text, search_start=start_pos)
+            
+            if start_pos == -1:
+                start_pos = 0
+            if end_pos == -1 or end_pos <= start_pos:
+                # If end not found, try to find next section's start
+                if idx + 1 < len(structure):
+                    next_start = structure[idx + 1].get("start_text", "")
+                    next_pos = self._fuzzy_find(document, next_start, search_start=start_pos + 1)
+                    end_pos = next_pos - 1 if next_pos > start_pos else len(document)
+                else:
+                    end_pos = len(document)
             else:
-                sub_chunks = [(section_content, section["heading"], section["heading_path"])]
+                end_pos = end_pos + len(end_text)
             
-            # Create SemanticChunk objects
-            for content, heading, path in sub_chunks:
-                if len(content.strip()) < self.min_chunk_size and len(chunks) > 0:
-                    # Merge tiny chunk with previous
-                    chunks[-1] = SemanticChunk(
-                        chunk_id=chunks[-1].chunk_id,
-                        content=chunks[-1].content + "\n\n" + content,
-                        chunk_type=chunks[-1].chunk_type,
-                        chunk_index=chunks[-1].chunk_index,
-                        start_char=chunks[-1].start_char,
-                        end_char=chunks[-1].end_char + len(content) + 2,
-                        source_heading=chunks[-1].source_heading,
-                        heading_path=chunks[-1].heading_path,
-                        word_count=len(chunks[-1].content.split()) + len(content.split()),
-                        has_code=chunks[-1].has_code or "```" in content,
-                        has_list=chunks[-1].has_list or bool(self.LIST_PATTERN.search(content))
-                    )
-                    continue
+            content = document[start_pos:end_pos].strip()
+            
+            if content:
+                chunk_type_str = section.get("chunk_type", "MIXED")
+                try:
+                    chunk_type = ChunkType(chunk_type_str)
+                except ValueError:
+                    chunk_type = ChunkType.MIXED
                 
                 chunk = SemanticChunk(
-                    chunk_id=f"{document_id}_chunk_{chunk_index}",
-                    content=content.strip(),
-                    chunk_type=self._determine_chunk_type(content, heading),
-                    chunk_index=chunk_index,
-                    start_char=section.get("start", 0),
-                    end_char=section.get("end", len(content)),
-                    source_heading=heading,
-                    heading_path=path,
+                    chunk_id=f"{document_id}_chunk_{idx}",
+                    content=content,
+                    chunk_type=chunk_type,
+                    chunk_index=idx,
+                    start_char=start_pos,
+                    end_char=end_pos,
+                    source_heading=section.get("title", f"Section {idx + 1}"),
+                    heading_path=[section.get("title", f"Section {idx + 1}")],
                     word_count=len(content.split()),
-                    has_code="```" in content,
-                    has_list=bool(self.LIST_PATTERN.search(content))
+                    pedagogical_purpose=section.get("purpose", "")
                 )
                 chunks.append(chunk)
-                chunk_index += 1
         
         return chunks
     
-    def _protect_code_blocks(self, text: str) -> Tuple[str, Dict[str, str]]:
-        """Replace code blocks with placeholders to prevent splitting"""
-        code_blocks = {}
+    def _fuzzy_find(self, text: str, pattern: str, search_start: int = 0) -> int:
+        """
+        Find pattern in text with some tolerance for whitespace differences.
+        """
+        if not pattern:
+            return -1
         
-        def replacer(match):
-            placeholder = f"__CODE_BLOCK_{len(code_blocks)}__"
-            code_blocks[placeholder] = match.group(0)
-            return placeholder
+        # Normalize whitespace
+        normalized_pattern = ' '.join(pattern.split())
+        normalized_text = ' '.join(text[search_start:].split())
         
-        protected = self.CODE_BLOCK_PATTERN.sub(replacer, text)
-        return protected, code_blocks
+        # Try exact match first
+        pos = text.find(pattern, search_start)
+        if pos != -1:
+            return pos
+        
+        # Try normalized match
+        normalized_pos = normalized_text.find(normalized_pattern)
+        if normalized_pos != -1:
+            # Convert back to original position (approximate)
+            return search_start + normalized_pos
+        
+        # Try first few words
+        words = normalized_pattern.split()[:5]
+        if words:
+            partial = ' '.join(words)
+            pos = text.lower().find(partial.lower(), search_start)
+            if pos != -1:
+                return pos
+        
+        return -1
     
-    def _restore_code_blocks(self, text: str, code_blocks: Dict[str, str]) -> str:
-        """Restore code blocks from placeholders"""
-        for placeholder, code in code_blocks.items():
-            text = text.replace(placeholder, code)
-        return text
+    def _parse_json_array(self, text: str) -> List[Dict]:
+        """Parse JSON array from LLM response."""
+        import json
+        
+        # Clean up common LLM response issues
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        
+        try:
+            result = json.loads(text)
+            if isinstance(result, list):
+                return result
+            return []
+        except json.JSONDecodeError:
+            # Try to find JSON array in text
+            start = text.find('[')
+            end = text.rfind(']') + 1
+            if start != -1 and end > start:
+                try:
+                    return json.loads(text[start:end])
+                except:
+                    pass
+            return []
     
-    def _split_by_headings(self, document: str) -> List[Dict[str, Any]]:
-        """Split document by headings, tracking hierarchy"""
-        sections = []
-        current_path = []
-        
-        # Find all headings
-        headings = list(self.HEADING_PATTERN.finditer(document))
-        
-        if not headings:
-            # No headings - treat entire document as one section
-            return [{
-                "content": document,
-                "heading": "Document",
-                "heading_path": ["Document"],
-                "level": 0,
-                "start": 0,
-                "end": len(document)
-            }]
-        
-        # Process each section between headings
-        for i, match in enumerate(headings):
-            level = len(match.group(1))  # Number of #
-            heading_text = match.group(2).strip()
-            
-            # Update heading path
-            while len(current_path) >= level:
-                current_path.pop()
-            current_path.append(heading_text)
-            
-            # Get content (from this heading to next, or end)
-            start = match.end()
-            end = headings[i + 1].start() if i + 1 < len(headings) else len(document)
-            content = document[start:end].strip()
-            
-            if content:  # Only add non-empty sections
-                sections.append({
-                    "content": f"{'#' * level} {heading_text}\n\n{content}",
-                    "heading": heading_text,
-                    "heading_path": current_path.copy(),
-                    "level": level,
-                    "start": match.start(),
-                    "end": end
-                })
-        
-        # Add content before first heading if exists
-        first_heading_start = headings[0].start()
-        if first_heading_start > 0:
-            preamble = document[:first_heading_start].strip()
-            if preamble:
-                sections.insert(0, {
-                    "content": preamble,
-                    "heading": "Introduction",
-                    "heading_path": ["Introduction"],
-                    "level": 0,
-                    "start": 0,
-                    "end": first_heading_start
-                })
-        
-        return sections
-    
-    def _split_by_paragraphs(
-        self, 
-        content: str, 
-        heading: str,
-        heading_path: List[str]
-    ) -> List[Tuple[str, str, List[str]]]:
-        """Split large section by paragraphs"""
-        paragraphs = re.split(r'\n\n+', content)
-        
-        chunks = []
-        current_chunk = ""
-        
-        for para in paragraphs:
-            if len(current_chunk) + len(para) > self.max_chunk_size:
-                if current_chunk:
-                    chunks.append((current_chunk, heading, heading_path))
-                current_chunk = para
-            else:
-                current_chunk = current_chunk + "\n\n" + para if current_chunk else para
-        
-        if current_chunk:
-            chunks.append((current_chunk, heading, heading_path))
-        
-        # If still too large, do raw split with overlap
-        final_chunks = []
-        for chunk_content, h, hp in chunks:
-            if len(chunk_content) > self.max_chunk_size * 1.5:
-                # Raw split as last resort
-                raw_chunks = self._raw_split(chunk_content)
-                for rc in raw_chunks:
-                    final_chunks.append((rc, h, hp))
-            else:
-                final_chunks.append((chunk_content, h, hp))
-        
-        return final_chunks
-    
-    def _raw_split(self, text: str) -> List[str]:
-        """Fallback: split by character limit with overlap"""
-        chunks = []
-        start = 0
-        
-        while start < len(text):
-            end = start + self.max_chunk_size
-            
-            # Try to break at sentence boundary
-            if end < len(text):
-                # Look for sentence end within overlap zone
-                for punct in ['. ', '? ', '! ', '\n']:
-                    last_punct = text.rfind(punct, start + self.max_chunk_size - self.overlap_size, end)
-                    if last_punct != -1:
-                        end = last_punct + 1
-                        break
-            
-            chunks.append(text[start:end])
-            start = end - self.overlap_size if end < len(text) else end
-        
-        return chunks
-    
-    def _determine_chunk_type(self, content: str, heading: str) -> ChunkType:
-        """Determine the type of chunk"""
-        if heading.startswith("# ") or heading.startswith("# "):
-            return ChunkType.HEADING_1
-        elif "## " in content[:50]:
-            return ChunkType.HEADING_2
-        elif "### " in content[:50]:
-            return ChunkType.HEADING_3
-        elif self.CODE_BLOCK_PATTERN.search(content):
-            return ChunkType.CODE_BLOCK
-        elif self.LIST_PATTERN.search(content) or self.NUMBERED_LIST_PATTERN.search(content):
-            return ChunkType.LIST_BLOCK
-        else:
-            return ChunkType.PARAGRAPH
+    def _to_json_string(self, obj: Any) -> str:
+        """Convert object to JSON string."""
+        import json
+        return json.dumps(obj, indent=2, ensure_ascii=False)
     
     def get_stats(self, chunks: List[SemanticChunk]) -> Dict[str, Any]:
-        """Get statistics about chunking results"""
+        """Get statistics about chunking results."""
         if not chunks:
             return {"total_chunks": 0}
         
@@ -346,7 +401,57 @@ class SemanticChunker:
             "avg_chars_per_chunk": sum(char_counts) / len(chunks),
             "min_chars": min(char_counts),
             "max_chars": max(char_counts),
-            "chunks_with_code": sum(1 for c in chunks if c.has_code),
-            "chunks_with_lists": sum(1 for c in chunks if c.has_list),
             "chunk_types": {t.value: sum(1 for c in chunks if c.chunk_type == t) for t in ChunkType}
         }
+
+
+# Backward compatibility: Keep old class name as alias
+class SemanticChunker(AgenticChunker):
+    """
+    Backward compatibility alias for AgenticChunker.
+    
+    Note: For new code, use AgenticChunker directly.
+    This class requires an LLM instance for the AI pipeline.
+    """
+    
+    def __init__(
+        self,
+        llm=None,
+        max_chunk_size: int = 4000,
+        min_chunk_size: int = 500,
+        overlap_size: int = 200,  # Ignored in agentic approach
+        preserve_code_blocks: bool = True  # Handled by AI automatically
+    ):
+        if llm is None:
+            raise ValueError(
+                "SemanticChunker now requires an LLM instance. "
+                "Pass llm=your_llm_instance to the constructor."
+            )
+        super().__init__(llm, max_chunk_size, min_chunk_size)
+    
+    def chunk(self, document: str, document_id: str = "doc") -> List[SemanticChunk]:
+        """
+        Synchronous wrapper for backward compatibility.
+        
+        WARNING: This runs the async pipeline synchronously.
+        For better performance, use chunk_with_ai() directly in async code.
+        """
+        import asyncio
+        
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in an async context, create a new task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        asyncio.run,
+                        self.chunk_with_ai(document, document_id)
+                    )
+                    return future.result()
+            else:
+                return loop.run_until_complete(
+                    self.chunk_with_ai(document, document_id)
+                )
+        except RuntimeError:
+            return asyncio.run(self.chunk_with_ai(document, document_id))

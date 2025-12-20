@@ -98,6 +98,7 @@ class KnowledgeExtractionAgent(BaseAgent):
         # Initialize production modules
         self.document_registry = DocumentRegistry(state_manager)
         self.chunker = SemanticChunker(
+            llm=self.llm,  # Pass LLM for Pure Agentic Chunking
             max_chunk_size=4000,
             min_chunk_size=500
         )
@@ -186,12 +187,16 @@ class KnowledgeExtractionAgent(BaseAgent):
             )
             
             # ========================================
-            # STEP 2: Semantic Chunking
+            # STEP 2: Pure Agentic Chunking (AI-driven)
             # ========================================
-            chunks = self.chunker.chunk(document_content, document_id)
+            chunks = await self.chunker.chunk_with_ai(
+                document_content, 
+                document_id,
+                document_title
+            )
             chunk_stats = self.chunker.get_stats(chunks)
             
-            self.logger.info(f"📄 Chunked into {len(chunks)} semantic blocks")
+            self.logger.info(f"🧠 Agentic Chunker: {len(chunks)} semantic blocks")
             
             await self.document_registry.update_status(
                 document_id, DocumentStatus.PROCESSING,
