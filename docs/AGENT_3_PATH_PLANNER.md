@@ -3,98 +3,51 @@
 ## Overview
 
 **File:** `backend/agents/path_planner_agent.py`  
-**Lines:** 496 | **Methods:** 14
+**Purpose:** Generates optimal learning sequences using Multi-Armed Bandit (RL) with adaptive chaining.
 
-Generates optimal learning sequences using Multi-Armed Bandit RL with adaptive chaining.
+---
 
-## Key Features
+## 🏗️ RL Engine: Multi-Armed Bandit (MAB)
 
-1. **Multi-Armed Bandit with UCB** - Balance exploration/exploitation
-2. **3 Chaining Modes** - Forward, Backward, Lateral sequencing
-3. **Pacing Recommendations** - Based on time budget usage
-4. **Success Probability** - Predict path completion likelihood
+The agent uses a **LinUCB-based Multi-Armed Bandit** strategy to balance pedagogical consistency (exploitation) with discovery of better sequences (exploration).
 
-## Chaining Modes
-
-```python
-ChainingMode:
-    FORWARD     # Progression: Success -> NEXT, IS_PREREQUISITE_OF
-    BACKWARD    # Remediation: Fail -> REQUIRES (go to prerequisites)
-    LATERAL     # Stabilization: Stuck -> SIMILAR_TO (try different approach)
-    ACCELERATE  # Flow State: Mastered -> NEXT (harder), IS_SUB_CONCEPT_OF
-    REVIEW      # Spaced Repetition: Start -> REQUIRES (review old concepts)
-
-EvaluationDecision:  # From Agent 5
-    PROCEED, MASTERED, REMEDIATE, ALTERNATE, RETRY
-```
-
-## Main Methods
-
-| Method                             | Purpose                                                |
-| ---------------------------------- | ------------------------------------------------------ |
-| `execute()`                        | Generate personalized learning path                    |
-| `_select_chain_mode()`             | `MASTERED`→`ACCELERATE`, `REMEDIATE`→`BACKWARD`        |
-| `_generate_adaptive_path()`        | Build path using chaining strategy                     |
-| `_get_chain_candidates()`          | Get concepts (with depth-2 lookahead for `ACCELERATE`) |
-| `_determine_pacing()`              | Calculate pacing recommendations                       |
-| `_recommend_resources()`           | Suggest content types per concept                      |
-| `_calculate_success_probability()` | Predict completion likelihood                          |
-
-## RL Engine Integration (Stateful MAB)
-
-```python
-RLEngine with Persisted BanditStrategy:
-    - Policy: LinUCB (Simplified)
-    - State Storage: Redis (mab_stats:{concept_id})
-    - Persistence: Q-values and Visit Counts are saved across sessions
-```
-
-## Reward Function
+### Reward Function
 The agent learns from the Evaluator's feedback:
-```math
-R = 0.6 \times \text{Score} + 0.4 \times \text{Completion} - \text{Penalty}
-```
-*   **Score:** 0.0 - 1.0 (from Evaluator)
-*   **Completion:** 1.0 if passed, 0.0 if failed/skipped
-*   **Penalty:** 0.2 if user dropped out immediately
+$R = 0.6 \times \text{Score} + 0.4 \times \text{Completion} - \text{Penalty}$
 
-## Mastery Gate (Strict)
-The planner enforces a **Blocking Gate** for progression:
+- **Score:** 0.0 - 1.0 (from Agent 5).
+- **Completion:** Binary success of the node.
+- **Penalty:** Deduction for immediate dropouts or frustration signals.
+
+---
+
+## 🧠 Adaptive Chaining Modes
+
+Agent 3 shifts its sequencing logic based on the learner's current state:
+
+| Mode | Trigger | Logic |
+| :--- | :--- | :--- |
+| **FORWARD** | Success (0.8 - 0.9) | Follows `NEXT` or `IS_PREREQUISITE_OF` links. |
+| **BACKWARD** | Failure (< 0.6) | **Remediation**: Jumps back to `REQUIRES` prerequisites. |
+| **LATERAL** | Struggle (Stuck) | **Stabilization**: Switches to `SIMILAR_TO` concepts (alternative explanations). |
+| **ACCELERATE** | Mastery (> 0.95) | **Flow State**: Skips basics, jumps to sub-concepts or higher complexity. |
+| **REVIEW** | New Session | **Spaced Repetition**: Injects review of old nodes based on decay. |
+
+---
+
+## 📋 Mastery Gate (Strict)
+The planner enforces a **Blocking Gate**:
 - If current concept mastery < 0.8:
-  - ⛔ **BLOCKS** ChainingMode.FORWARD
-  - ⚠️ Forces ChainingMode.BACKWARD (Remediation)
+  - ⛔ **BLOCKS** FORWARD progression.
+  - ⚠️ Forces BACKWARD/LATERAL modes.
 
-## Success Probability Formula
+---
 
-```
-P(success) = 0.4 × avg_mastery
-           + 0.4 × time_fit
-           - 0.2 × difficulty_penalty
-```
+## 🔧 Output Structure
 
-## Output Structure
-
-```python
-{
-    'path': [
-        {
-            'concept_id': str,
-            'title': str,
-            'difficulty': int,
-            'bloom_level': str,
-            'estimated_time': int,
-            'recommended_content': str
-        }
-    ],
-    'chain_mode': str,
-    'success_probability': float,
-    'pacing': str  # COMFORTABLE, MODERATE, TIGHT
-}
-```
-
-## Dependencies
-
-- `RLEngine` - Multi-Armed Bandit implementation
-- `BanditStrategy` - UCB algorithm
-- `rl_config.py` - Thresholds and weights
-- `Redis` - State persistence
+| Field | Description |
+| :--- | :--- |
+| `learning_path` | Ordered list of concept objects with metadata. |
+| `success_probability` | Prediction based on mastery vs difficulty. |
+| `pacing` | COMFORTABLE, MODERATE, or TIGHT (derived from time budget). |
+| `chain_mode` | The logic used for this generation (e.g., REMEDIATE). |

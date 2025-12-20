@@ -1,0 +1,44 @@
+1. Cách Hash toàn bộ nội dung file
+Trong code hiện tại (DocumentRegistry.compute_checksum dòng 124), chúng ta đang dùng thư viện chuẩn của Python là hashlib.sha256.
+
+Cơ chế: Nó lấy toàn bộ chuỗi văn bản (content.encode('utf-8')) và băm ra một chuỗi Hex unique.
+Hiệu năng: Với các file tài liệu giáo khoa (Markdown, PDF chuyển thành Text) cỡ vài MB, việc nạp vào RAM để hash là cực kỳ nhanh và an toàn. Tuy nhiên, nếu sau này bạn muốn xử lý những file khổng lồ (GBs), chúng ta sẽ cần cải tiến sang cơ chế Stream Hashing (đọc đến đâu hash đến đó) để không làm treo RAM.
+2. Sự hợp lý của việc so sánh mã băm (Deduplication Logic)
+Việc so sánh mã băm đóng vai trò là một "Người gác cổng" (Gatekeeper) để tối ưu chi phí và tính nhất quán:
+
+Business Logic: Mục tiêu của Agent 1 là "làm giàu" Knowledge Graph.
+Tại sao cần Hash?: Việc trích xuất kiến thức bằng LLM (Gemini) là một tác vụ đắt đỏ (tốn token) và chậm. Nếu bạn vô tình upload cùng một file bài giảng 10 lần, chúng ta không muốn Graph bị rác bởi 10 bộ concepts giống hệt nhau, và cũng không muốn trả tiền cho LLM 10 lần cho cùng một nội dung.
+Hợp lý không?: Rất hợp lý cho việc Deduplication (chống trùng lặp). Nếu nội dung giống hệt 100%, hệ thống mặc định hiểu là "Kiến thức này tôi đã nạp rồi" và sẽ Skip bước trích xuất.
+3. Case: 2 file nội dung giống nhau nhưng tên file khác nhau
+Trong cơ chế hiện tại, nếu 2 file có nội dung y hệt nhưng tên khác nhau (ví dụ: Intro_SQL.pdf và SQL_Copy.pdf):
+
+Document Registry sẽ trả về trạng thái SKIPPED vì mã băm giống nhau.
+Vấn đề: Điều này có thể gây hiểu lầm nếu người dùng muốn nạp lại. Để giải quyết, Agent 1 có một tham số là force_reprocess=True. Nếu bạn bật cái này, nó sẽ bỏ qua mã băm và nạp lại từ đầu.
+4. Logic "Ghi đè" (Provenance Overwrite)
+Hệ thống của bạn có một cơ chế cao cấp hơn nằm ở ProvenanceManager (Xử lý nguồn gốc):
+
+Nó không chỉ nhìn mã băm, mà còn nhìn Filename.
+Nếu bạn upload SQL_Lecture.pdf phiên bản 2 (nội dung đã sửa vài chỗ -> mã băm khác):
+Agent phát hiện cùng tên file nhưng mã băm khác.
+Nó sẽ thực hiện Overwrite: Xóa các trích xuất cũ của file đó trong Graph và nạp cái mới vào. Điều này giúp Graph luôn cập nhật theo tài liệu mới nhất của tổ chức mà không bị chồng chéo kiến thức cũ-mới.
+5. Document Registry: Tự động hay Thủ công?
+Hoàn toàn Tự động: Bạn (người dùng/admin) chỉ cần gọi API 
+extract_knowledge
+ với nội dung file. Agent 1 sẽ tự gọi 
+DocumentRegistry
+ bên trong để kiểm tra và lưu status. Bạn không cần khai báo gì thêm.
+Khai báo ở đâu?: Hiện tại nó đang lưu status vào Redis (với TTL là 30 ngày).
+6. Đã có tính Production chưa?
+Tôi đánh giá là đã có "Production-Ready Foundation" nhưng cần nâng cấp thêm một chút:
+
+Điểm Pro:
+Đã có tính năng chống trùng lặp (Idempotency).
+Đã có cơ chế Overwrite theo File (Provenance).
+Đã có tính năng Staging (Xử lý vùng đệm).
+Điểm cần cải tiến (To-do cho Production thật thụ):
+Persistence: Hiện tại 
+DocumentRegistry
+ đang lưu Status chủ yếu ở Redis (tạm thời). Để lên Production thật, chúng ta nên lưu 
+DocumentRecord
+ vào PostgreSQL để có lịch sử vĩnh viễn và phục vụ báo cáo Admin.
+Cloud Storage: Thay vì hash chuỗi text, nên hash từ byte-stream của file gốc khi upload lên S3/GCS.

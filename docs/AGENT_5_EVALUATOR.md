@@ -3,90 +3,49 @@
 ## Overview
 
 **File:** `backend/agents/evaluator_agent.py`  
-**Lines:** 537 | **Methods:** 12
+**Purpose:** Assesses learner understanding, classifies errors, tracks mastery via weighted moving average, and makes 5-path pedagogical decisions.
 
-Assesses learner understanding, classifies errors, tracks mastery, and makes path decisions.
+---
 
-## Key Features
+## 🎯 Scoring & Classification Engine
 
-1. **Semantic Scoring** - LLM + embedding similarity + KG grounding
-2. **5-Type Error Classification** - Decision tree based on score
-3. **Mastery Tracking** - Weighted moving average with Bloom adjustments
-4. **5-Path Decision Engine** - Per THESIS Table 3.10
+Agent 5 uses a **Multi-Signal Semantic Scorer**:
+$\text{Score} = 0.4 \times \text{SemanticSimilarity} + 0.5 \times \text{LLM\_Score} + 0.1 \times \text{GroundingBoost}$
 
-## Error Types
+### Error Types
+| Type | Condition |
+| :--- | :--- |
+| **CORRECT** | Score ≥ 0.95 |
+| **CARELESS** | High similarity but minor typos or case issues. |
+| **INCOMPLETE** | Score 0.6-0.8; factually correct but lacks detail. |
+| **PROCEDURAL** | Right concept but wrong application/method. |
+| **CONCEPTUAL** | Fundamental misunderstanding (Trigger: Misconception Alert). |
 
-```python
-ErrorType:  # 5 classifications
-    CORRECT     # Score ≥ 0.95
-    CARELESS    # Minor typo, high similarity
-    INCOMPLETE  # Partial answer, missing details
-    PROCEDURAL  # Wrong method, right concept
-    CONCEPTUAL  # Fundamental misunderstanding
+---
 
-PathDecision:  # 5 next actions
-    MASTERED    # ≥ 0.9 mastery, no severe misconceptions
-    PROCEED     # ≥ 0.8 mastery, no conceptual error
-    ALTERNATE   # 0.6-0.79 + conceptual error
-    RETRY       # Moderate issues
-    REMEDIATE   # < 0.4 or persistent misconceptions
-```
+## 🧠 Path Decision Engine (Thesis Table 3.10)
 
-## Main Methods
+After every evaluation, the agent makes a critical decision for the Planner:
 
-| Method                        | Purpose                            |
-| ----------------------------- | ---------------------------------- |
-| `execute()`                   | Main evaluation pipeline           |
-| `_score_response()`           | 0-1 scoring with LLM               |
-| `_classify_error()`           | Determine error type               |
-| `_detect_misconception()`     | Identify specific misunderstanding |
-| `_generate_feedback()`        | Personalized feedback text         |
-| `_make_path_decision()`       | Decide next action                 |
-| `_update_learner_mastery()`   | Update mastery level               |
-| `_on_assessment_ready()`      | Handle TUTOR_ASSESSMENT_READY      |
-| `generate_feedback_for_kag()` | Feedback for artifact generation   |
+- **MASTERED**: Score ≥ 0.9; Advance to next concept.
+- **PROCEED**: Score ≥ 0.8; Advance but flag for light review.
+- **RETRY**: Score 0.6 - 0.79; Repeat the current concept with different content.
+- **ALTERNATE**: Conceptual error present; Use `LATERAL` chaining (different explanation).
+- **REMEDIATE**: Score < 0.4; Jump back to prerequisites (`BACKWARD` chaining).
 
-## Core Modules
+---
 
-```python
-SemanticScorer:
-    Score = 0.4×semantic_sim + 0.5×llm_score + 0.1×grounding_boost
+## 📋 Mastery Tracking
 
-ErrorClassifier:
-    Decision tree: score → similarity check → KG ontology match
+Uses a **Weighted Moving Average** with Bloom context:
+- Old Mastery: $M_{old}$
+- New Score: $S$
+- Update: $M_{new} = 0.7 \times M_{old} + 0.3 \times S$
+- **Bloom Adjustment**: If evaluating higher-order skills (Apply/Analyze), the weight of $S$ increases to 0.5.
 
-MasteryTracker:
-    mastery_new = (1-λ) × mastery_old + λ × score  (λ = 0.3)
-    Bloom boost: +0.05 if score ≥ 0.9
-    Bloom penalty: -0.05 if struggling with higher-order
+---
 
-DecisionEngine:
-    Implements THESIS Table 3.10 logic
-
-InstructorNotificationService:
-    Triggers alert if score < 0.4 (Critical Failure)
-```
-
-## Event Flow
-
-```
-TUTOR_ASSESSMENT_READY (from Agent 4)
-    → Score response
-    → Classify error
-    → Detect misconceptions
-    → Classify error
-    → Detect misconceptions
-    → Update mastery
-    → Check for critical failure (Alert Instructor)
-    → Make path decision
-    → EVALUATION_COMPLETED (to Agent 6, Agent 2, Agent 3)
-```
-
-## Dependencies
-
-- `SemanticScorer` - Multi-signal scoring
-- `ErrorClassifier` - Decision tree + ontology
-- `MasteryTracker` - Weighted average + Bloom
-- `DecisionEngine` - 5-path logic
-- `InstructorNotificationService` - Alerting system
-- `EvaluationResult` - Complete result dataclass
+## 🔧 Event Triggers
+- **Input**: Listens for `TUTOR_ASSESSMENT_READY`.
+- **Output**: Emits `EVALUATION_COMPLETED` (Payload contains score, decision, and error_type).
+- **Alert**: Triggers `INSTRUCTOR_ALERT` if score stays below 0.4 for multiple attempts.

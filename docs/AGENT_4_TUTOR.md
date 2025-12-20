@@ -3,89 +3,46 @@
 ## Overview
 
 **File:** `backend/agents/tutor_agent.py`  
-**Lines:** 675 | **Methods:** 21
+**Purpose:** Teaches using Harvard 7 Principles and a Reverse Socratic Method supported by a 3-layer grounding system.
 
-Teaches using Harvard 7 Principles and Reverse Socratic Method with 3-layer grounding.
+---
 
-## Key Features
+## 🧠 Reverse Socratic State Machine
 
-1. **Reverse Socratic State Machine** - 5-state progression
-2. **3-Layer Grounding** - RAG + Course KG + Personal KG
-3. **Harvard 7 Principles Enforcement** - Via Harvard7Enforcer
-4. **Dialogue State Management** - Multi-turn conversation tracking
+The tutor moves through cognitive states to facilitate active learning rather than passive reading:
 
-## Socratic States
+1.  **PROBING** (State 0): Asks open-ended questions to assess current knowledge.
+2.  **SCAFFOLDING** (State 1): Provides basic conceptual hints (Level 1).
+3.  **GUIDING** (State 2): Provides structural hints/analogies (Level 2).
+4.  **EXPLAINING** (State 3): Direct instruction (only if the learner is truly stuck).
+5.  **CONCLUSION** (State 4): Synthesizes the answer and provides a final insight.
 
-```python
-SocraticState:  # Adaptive Cognitive Loop
-    PROBING     # State 0: Open-ended question
-    SCAFFOLDING # State 1: Hint level 1 (conceptual)
-    GUIDING     # State 2: Hint level 2 (structural)
-    EXPLAINING  # State 3: Direct explanation
-    CONCLUSION  # State 4: Synthesize answer + insight
+---
 
-    # Adaptive States
-    REFUTATION  # Address Misconception (Cognitive Dissonance)
-    ELABORATION # Expand on near-correct answer
-    TEACH_BACK  # Reversed Socratic (Protégé Effect)
+## 🛡️ 3-Layer Grounding (The "Anti-Hallucination" Stack)
 
-UserIntent:
-    HELP_SEEKING # Stuck, error -> Bias towards SCAFFOLDING
-    SENSE_MAKING # Curious, why? -> Bias towards PROBING
-```
+| Layer | Source | Role |
+| :--- | :--- | :--- |
+| **Layer 1: RAG** | Vector DB | Retrieves raw document chunks for factual accuracy. |
+| **Layer 2: Course KG** | Neo4j | Provides structured definitions and "Common Errors". |
+| **Layer 3: Personal KG** | Neo4j | Learner's history (Prev. misconceptions, past notes). |
 
-## Main Methods
+---
 
-| Method                          | Purpose                                   |
-| ------------------------------- | ----------------------------------------- |
-| `execute()`                     | Main tutoring interaction                 |
-| `_determine_socratic_state()`   | Select state based on mastery/turns       |
-| `_three_layer_grounding()`      | Retrieve from RAG, Course KG, Personal KG |
-| `_generate_socratic_response()` | Build response for current state          |
-| `_build_socratic_prompt()`      | State-specific prompt construction        |
-| `_on_path_planned()`            | Handle PATH_PLANNED event                 |
-| `_handoff_to_evaluator()`       | Trigger TUTOR_ASSESSMENT_READY            |
-| `enforce_harvard_principles()`  | Apply 7 principles to response            |
+## 📋 Harvard 7 Principles Enforcement
 
-## 3-Layer Grounding
+Every response is audited by the `Harvard7Enforcer` to ensure it:
+- Encourages **Active Learning**.
+- Provides **Immediate Feedback**.
+- Adapts to **Prior Knowledge**.
+- Manages **Cognitive Load**.
 
-```
-Layer 1: RAG (Local LlamaIndex Vector)
-    → Document chunks semantically similar to query
+---
 
-Layer 2: Course KG (Neo4j)
-    → Concept definitions, examples, common_errors
-    → Prerequisites and related concepts
+## 🔧 Interaction Cycle
 
-Layer 3: Personal KG (Neo4j)
-    → Learner's mastery history
-    → Past misconceptions and error patterns
-    → Previous notes about concept
-```
-
-## State Transitions
-
-## State Transitions (Adaptive)
-
-```
-- Help Seeking + Low Turns → SCAFFOLDING (Reduce frustration)
-- Sense Making + Low Turns → PROBING (Deepen inquiry)
-- High mastery + Low turns → TEACH_BACK (Reversed Socratic)
-- Misconception → REFUTATION
-- Near correct → ELABORATION
-```
-
-## Event Flow
-
-```
-PATH_PLANNED (from Agent 3) → Start tutoring session
-    → Multiple turns with Socratic progression
-    → TUTOR_ASSESSMENT_READY (to Agent 5)
-```
-
-## Dependencies
-
-- `GroundingManager` - 3-layer retrieval
-- `Harvard7Enforcer` - Apply teaching principles
-- `DialogueState` & `UserIntent` - Conversation, state, and intent tracking
-- LlamaIndex - Local vector store for RAG
+1.  **Receive Question/Path**: Handled via `PATH_PLANNED` event or direct query.
+2.  **State Selection**: Checks `DialogueState` to see how many hints have been given.
+3.  **Grounding**: Queries RAG + KG to build context.
+4.  **Generation**: LLM constructs response using the current Socratic State prompt.
+5.  **Handoff**: Once the learner demonstrates understanding, it triggers `TUTOR_ASSESSMENT_READY` for Agent 5.

@@ -3,149 +3,108 @@
 ## Overview
 
 **File:** `backend/agents/knowledge_extraction_agent.py`  
-**Purpose:** Automatically builds the Course Knowledge Graph from educational documents using an Ontology-Guided Hybrid Extraction Pipeline.
+**Purpose:** Automatically builds the Course Knowledge Graph from educational documents using an **Ontology-Guided Hybrid Extraction Pipeline**. It ensures idempotency, data integrity via validation, and semantic consistency through entity resolution.
 
 ---
 
-## 🏗️ Architecture (Phase 7 Refinement)
+## 🏗️ Detailed Architecture & Pipeline
 
 ```mermaid
-flowchart TD
-    subgraph Input
-        DOC[Document Content]
-        TITLE[Document Title]
-        EXIST[Existing Concepts]
-        ONTOLOGY[Schema/Ontology]
+graph TD
+    subgraph "1. Ingestion Control"
+        START((Document)) --> REG[Document Registry]
+        REG -- "New / Forced" --> CHUNK[Semantic Chunker]
+        REG -- "Skipped (Checksum)" --> END((Exit))
     end
 
-    subgraph "Layer 1: Structural Extraction"
-        SPLIT[Structural Semantic Splitter]
-        L1[Extract Concepts]
-        L1_OUT[concept_id, name, description]
+    subgraph "2. 3-Layer Extraction (LLM Iterative)"
+        CHUNK --> L1[Layer 1: Concept Extraction]
+        L1 --> L2[Layer 2: Relationship Extraction]
+        L2 --> L3[Layer 3: Metadata Enrichment]
     end
 
-    subgraph "Layer 2: Relationship Extraction"
-        L2[Extract 7 Relationship Types]
-        L2_OUT[source → target + type]
+    subgraph "3. Staging & Integrity"
+        L3 --> STAGE[Staging Graph]
+        STAGE --> VAL[KG Validator]
+        VAL -- Fail --> FIX[Auto-Fix / Log Error]
+        FIX --> VAL
+        VAL -- Pass --> RESOLVE[Entity Resolver]
     end
 
-    subgraph "Layer 3: Metadata Enrichment"
-        L3[Enrich with Metadata]
-        L3_OUT[semantic_tags, bloom_level, time_estimate]
+    subgraph "4. Promotion & Caching"
+        RESOLVE --> MERGE[Semantic Merge Mapping]
+        MERGE --> BATCH[Neo4j Batch Upserter]
+        BATCH --> VECTOR[Vector Store Persistence]
+        VECTOR --> EVENT[Emit: COURSEKG_UPDATED]
     end
 
-    subgraph "Validation & Merging"
-        VECTOR[Vector Resolution]
-        MERGE[3-Way Node Merging]
-        CYCLE[Cycle Detector]
+    subgraph "Data Layers"
+        NEO[(Neo4j: Course KG)]
+        VEC[(LlamaIndex: Vector Store)]
+        DB[(State: Doc Registry)]
     end
 
-    subgraph Output
-        NEO4J[(Neo4j Course KG)]
-        EVENT[Event: knowledge_extracted]
-    end
-
-    DOC --> SPLIT --> L1 --> L1_OUT --> L2 --> L2_OUT
-    L1_OUT --> L3 --> L3_OUT --> VECTOR
-    EXIST --> VECTOR --> MERGE
-    MERGE --> MERGE_OUT --> CYCLE
-    CYCLE -- Valid --> NEO4J
-    CYCLE -- Invalid (Loop) --> MERGE_OUT
-    NEO4J --> EVENT
+    REG -.-> DB
+    BATCH -.-> NEO
+    VECTOR -.-> VEC
 ```
 
 ---
 
-## 🧠 Business Logic & Mechanisms
+## 🧠 Core Technical Mechanisms
 
-Agent 1 does not simply wrap an LLM. It implements a robust **Ontology-Guided Hybrid Extraction Pipeline**:
+### 1. Document Registry & Idempotency
+- **Mechanism:** Calculates SHA-256 checksum of raw content.
+- **Why:** In production, re-uploading the same file shouldn't waste LLM tokens or corrupt the graph with duplicates.
+- **Logic:** Compares current checksum with `DocumentRecord` in PostgreSQL/Redis.
 
-### Mechanism 1: Structural Semantic Chunking
-Instead of arbitrary token splitting, documents are parsed based on their hierarchical structure (Headers 1-3, Chapters).
-- **Why?** Preserves context for "nested" concepts effectively.
-- **Logic:** `MarkdownSplitter` splits by `#`, `##` boundaries. LLM processes coherent sections.
+### 2. Hybrid Reliable Agentic Chunking (Improved)
+- **Mechanism:** Moves beyond Markdown Regex towards a Pedagogical-aware segmentation.
+- **Step 1: Structural Anchoring:** Pre-processes internal text into a sequence of Sentence-level IDs. This prevents AI from splitting mid-sentence.
+- **Step 2: Agentic Mapping (Gemini 2.0 Flash):** LLM analyzes the entire document flow to suggest boundaries based on learning objectives and concept shifts.
+- **Step 3: Semantic Gap Verification (Math Gate):** 
+    - At each proposed boundary, the system calculates the Cosine Similarity between the last sentences of Chunk A and the first sentences of Chunk B.
+    - If Similarity is too high (> 0.9), the boundary is rejected (merging the chunks) to prevent context fragmentation.
+- **Step 4: Recursive Fallback:** If a pedagogical chunk is still too large (> 4000 chars), a mathematical "Semantic Percentile" split is applied as a last resort.
+- **Advantage:** Ensures chunks are semantically complete, context-rich, and mathematically verified, regardless of the input format (Slide, Book, etc.).
 
-### Mechanism 2: Vector-Based Entity Resolution
-Prevents duplicate nodes (e.g., "JS" vs "JavaScript") using local vector search.
-- **Process:**
-    1. Generate embedding for new concept name.
-    2. Search existing Concept Vector Index (local).
-    3. If `similarity > 0.85` -> **MERGE** (Automatic Alias).
-    4. If `0.7 < similarity < 0.85` -> **FLAG** for Review.
+### 3. Staging Graph Pattern
+- **Concept:** New extractions are first marked as `StagingConcept`.
+- **Validation:** `KGValidator` checks for:
+    - Circular dependencies (Cycle Detection).
+    - Missing descriptions or essential metadata.
+    - Invalid relationship types.
+- **Integrity:** Only validated data is "promoted" to the master `CourseConcept`.
 
-### Mechanism 3: Graph Topology Validation (DAG Enforcement)
-Ensures the Knowledge Graph remains a Directed Acyclic Graph (DAG) for valid learning paths.
-- **Cycle Detector:** Before committing `A REQUIRES B`, run DFS check.
-- **Rule:** If adding `A->B` creates a cycle -> **REJECT** relationship & Log Warning.
+### 4. Vector-Based Entity Resolution
+- **Module:** `EntityResolver`
+- **Mechanism:** Uses `GeminiEmbedding` (`models/embedding-001`) to map new concepts to existing ones.
+- **Merge Logic:** 
+    - If Similarity > 0.85: Automatically treats as an alias/same node.
+    - If Similarity > 0.7: Flags for potential connection (`SIMILAR_TO`).
+- **Result:** Prevents graph fragmentation (e.g., merging "Variables" and "Variable Basics").
 
----
-
-## 📋 Features
-
-| Feature                  | Description                                                                                         |
-| ------------------------ | --------------------------------------------------------------------------------------------------- |
-| **SPR Generator**        | 3-layer extraction (Concept → Relationship → Metadata)                                              |
-| **7 Relationship Types** | REQUIRES, IS_PREREQUISITE_OF, NEXT, REMEDIATES, HAS_ALTERNATIVE_PATH, SIMILAR_TO, IS_SUB_CONCEPT_OF |
-| **3-Way Node Merging**   | Semantic + Structural + Contextual similarity                                                       |
-| **Enhanced Metadata**    | SemanticTags, Bloom's Level, TimeEstimate                                                           |
-
----
-
-## 📊 Data Structures
-
-### Enums
-
-#### RelationshipType
-```python
-class RelationshipType(str, Enum):
-    REQUIRES = "REQUIRES"                      # Forward dependency
-    IS_PREREQUISITE_OF = "IS_PREREQUISITE_OF"  # Reverse dependency
-    NEXT = "NEXT"                              # Recommended sequence
-    REMEDIATES = "REMEDIATES"                  # Correction link
-    HAS_ALTERNATIVE_PATH = "HAS_ALTERNATIVE_PATH"
-    SIMILAR_TO = "SIMILAR_TO"
-    IS_SUB_CONCEPT_OF = "IS_SUB_CONCEPT_OF"    # Hierarchy
-```
-
-#### BloomLevel
-```python
-class BloomLevel(str, Enum):
-    REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, CREATE
-```
+### 5. Neo4j Batch Upserting
+- **Module:** `Neo4jBatchUpserter`
+- **Performance:** Optimized for AuraDB using `UNWIND` cypher patterns.
+- **Provenance:** Every node stores a list of `source_document_ids`, tracking exactly where knowledge originated.
 
 ---
 
-## 🔧 Methods
+## 📋 Relationship Types (Thesis Specification)
 
-### `execute(**kwargs)`
-Main ingestion pipeline.
-1. **Layer 1:** Extract core concepts using `structural_chunking`.
-2. **Layer 2:** Extract relationships.
-3. **Layer 3:** Enrich metadata.
-4. **Validation:** Run `Vector Resolution` and `Cycle Detection`.
-5. **Persist:** Save to Neo4j.
-
-### `_merge_nodes(new, existing)`
-Implements 3-Way Similarity:
-- **Semantic:** Text similarity (Embeddings).
-- **Structural:** Prerequisite overlap.
-- **Contextual:** Tag overlap.
+| Type | Semantic Meaning |
+| :--- | :--- |
+| **REQUIRES** | Node A cannot be understood without B. |
+| **IS_PREREQUISITE_OF** | Higher-level dependency link. |
+| **NEXT** | Suggested pedagogical sequence. |
+| **REMEDIATES** | Advanced: Link to content that fixes a specific misconception. |
+| **IS_SUB_CONCEPT_OF** | Hierarchical parent-child relationship. |
 
 ---
 
-## ⚠️ Limitations
+## 🔧 Key Methods
 
-| Issue                     | Mitigation                  |
-| ------------------------- | --------------------------- |
-| **Token limit**           | Structural Chunking         |
-| **LLM hallucination**     | Cycle Detection, Ontology   |
-| **Ambiguity**             | Vector Resolution           |
-
----
-
-## 📝 Configuration
-
-```python
-SEMANTIC_THRESHOLD = 0.85
-STRUCTURAL_THRESHOLD = 0.7
-```
+- `execute_with_provenance()`: Handles full audit trail and document-level overwrites.
+- `_enrich_metadata()`: LLM call to classify Bloom's Taxonomy and estimate learning hours.
+- `_persist_vector_index()`: Updates the LlamaIndex persistent storage for Agent 4 (Tutor) to use in RAG.

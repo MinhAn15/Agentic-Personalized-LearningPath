@@ -1,108 +1,50 @@
-# Agent 6: KAG Agent (Knowledge Artifact Generator)
+# Agent 6: KAG Agent (Knowledge Graph Aggregator)
 
 ## Overview
 
 **File:** `backend/agents/kag_agent.py`  
-**Lines:** 783 | **Methods:** 20
+**Purpose:** Aggregator responsible for Zettelkasten artifact generation, Dual-KG synchronization, and Cross-Learner system analysis.
 
-Generates Zettelkasten artifacts, synchronizes Dual-KG, and analyzes system-wide patterns.
+---
 
-## Key Features
+## 🏗️ 1. Zettelkasten Artifact Generation
 
-1. **Zettelkasten Artifact Generation** - 4 artifact types
-2. **Dual-KG Synchronization** - 3 layers (Course, Personal, Progress)
-3. **System Learning** - Aggregate patterns for curriculum improvement
-4. **PKM Query Support** - 4 query types for personal knowledge management
+Transforms learning interactions into atomic knowledge snippets:
+- **ATOMIC_NOTE**: Core learning insight (successful understanding).
+- **MISCONCEPTION_NOTE**: Documentation of an error for future reference.
+- **Logic**: Uses LLM to extract `Key Insight`, `Personal Example`, and `Common Mistakes` from session logs.
+- **Storage**: Nodes are created in the **Personal KG** and linked to **CourseConcepts**.
 
-## Artifact Types
+### Node Schema
+- `(Learner) -[:CREATED_NOTE]-> (NoteNode)`
+- `(NoteNode) -[:ABOUT]-> (CourseConcept)`
+- `(NoteNode) -[:LINKS_TO]-> (ExistingNoteNode)` (Semantic/Temporal link)
 
-```python
-ArtifactType:
-    ATOMIC_NOTE       # Single learning insight (score ≥ 0.75)
-    MISCONCEPTION_NOTE # Document error (score < 0.5, conceptual)
-    SUMMARY_NOTE      # Session synthesis (3+ concepts)
-    CONCEPT_MAP       # Visual relationship graph
-```
+---
 
-## Zettelkasten 4 Principles
+## 🔄 2. Dual-KG Synchronization
 
-```
-1. Atomicity      - One note = One key insight
-2. Own Words      - LLM paraphrases with learner context
-3. Contextualization - personal_example + common_mistake
-4. Linking        - LINKSTO relationships in KG
-```
+Maintains the boundary between shared knowledge and private learner state:
+- **Course KG**: Shared, static knowledge (read-only for Agent 6).
+- **Personal KG**: Dynamic learner progress (read-write).
+- **Sync Events**: Listens for `EVALUATION_COMPLETED` to update the `HAS_MASTERY` relationship level and `ErrorNode` history.
 
-## Main Methods
+---
 
-| Method                        | Purpose                                  |
-| ----------------------------- | ---------------------------------------- |
-| `execute()`                   | Router for generate/sync/analyze actions |
-| `_generate_artifact()`        | Create Zettelkasten note                 |
-| `_extract_atomic_note()`      | LLM-based note extraction                |
-| `_find_related_notes()`       | Semantic similarity search               |
-| `_create_note_node()`         | Neo4j NoteNode creation                  |
-| `_create_note_links()`        | LINKSTO relationships                    |
-| `_sync_dual_kg()`             | Synchronize 3 KG layers                  |
-| `_analyze_system()`           | Aggregate learner patterns               |
-| `_generate_recommendations()` | Curriculum improvements                  |
-| `_on_evaluation_completed()`  | Auto-generate artifact on eval           |
+## 📊 3. System Learning (Cross-Learner)
 
-## Dual-KG Layers
+Aggregates patterns from the entire student population to improve the course:
+| Mechanism | Logic |
+| :--- | :--- |
+| **Bottleneck Detection** | Identifies concepts with high "Struggle Rates" (> 60%). |
+| **Recommendation Engine** | Suggests content changes if prerequisite mastery is low across the cohort. |
+| **Prediction** | Predicts intervention points for future learners based on past population failures. |
 
-```
-Layer 1: Course KG (Read-Only)
-    → 217 concept nodes (definitions, examples, errors)
-    → Reference + source of truth
+---
 
-Layer 2: Personal Notes KG (Read-Write)
-    → NoteNode (Zettelkasten artifacts)
-    → REFERENCES → CourseConcept
-    → LINKSTO → other Notes
+## 🔧 Key Methods
 
-Layer 3: Progress KG (System-Managed)
-    → SessionNodes, MasteryNodes, ErrorPatternNodes
-    → Analytics + re-planning triggers
-```
-
-## 4 PKM Query Types
-
-```python
-KGSynchronizer.query_temporal()   # Notes from last N days
-KGSynchronizer.query_retrieval()  # All notes about concept X
-KGSynchronizer.query_synthesis()  # Most connected concepts
-KGSynchronizer.query_review()     # Notes for struggling concepts
-```
-
-## Event Flow
-
-```
-EVALUATION_COMPLETED (from Agent 5)
-    → Generate Zettelkasten note
-    → Sync to Personal KG (Layer 2)
-    → Create LINKSTO relationships
-    → Update MasteryNode (Layer 3)
-    → ARTIFACT_CREATED (to Agent 2)
-```
-
-## System Analysis Output
-
-```python
-{
-    'statistics': {...},           # Per-concept stats
-    'patterns': {
-        'difficult_concepts': [],  # avg_mastery < 0.4
-        'easy_concepts': [],       # avg_mastery > 0.8
-        'insights': []             # Summary messages
-    },
-    'recommendations': [],         # Curriculum improvements
-    'predictions': []              # Next cohort interventions
-}
-```
-
-## Dependencies
-
-- `AtomicNoteGenerator` - LLM-based note creation
-- `KGSynchronizer` - Dual-KG operations
-- `ArtifactState` - Track created artifacts
-- `AtomicNote`, `MisconceptionNote` - Note models
+- `_generate_artifact()`: Creates the Zettelkasten note.
+- `_sync_dual_kg()`: Updates Neo4j relationships.
+- `_analyze_system()`: Batch analysis of all learner graphs.
+- `_find_related_notes()`: Cypher-based semantic search for note-linking.
