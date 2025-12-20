@@ -97,6 +97,15 @@ class KnowledgeExtractionAgent(BaseAgent):
         
         # Initialize production modules
         self.document_registry = DocumentRegistry(state_manager)
+        # Configure LlamaIndex Global Settings
+        # This ensures VectorStoreIndex uses Gemini instead of OpenAI
+        Settings.llm = self.llm
+        self.embedding_model = GeminiEmbedding(
+            model_name="models/embedding-001",
+            api_key=get_settings().GOOGLE_API_KEY
+        )
+        Settings.embed_model = self.embedding_model
+
         self.chunker = SemanticChunker(
             llm=self.llm,  # Pass LLM for Pure Agentic Chunking
             max_chunk_size=4000,
@@ -104,6 +113,7 @@ class KnowledgeExtractionAgent(BaseAgent):
         )
         self.validator = KGValidator(strict_mode=False)
         self.entity_resolver = EntityResolver(
+            embedding_model=self.embedding_model, # Pass Gemini Embedding
             merge_threshold=0.85,
             use_embeddings=True
         )
@@ -117,13 +127,8 @@ class KnowledgeExtractionAgent(BaseAgent):
         # Extraction version for provenance
         self.extraction_version = ExtractionVersion.V3_ENTITY_RESOLUTION
         
-        # Configure LlamaIndex Global Settings
-        # This ensures VectorStoreIndex uses Gemini instead of OpenAI
-        Settings.llm = self.llm
-        Settings.embed_model = GeminiEmbedding(
-            model_name="models/embedding-001",
-            api_key=get_settings().GOOGLE_API_KEY
-        )
+        # Extraction version for provenance
+        self.extraction_version = ExtractionVersion.V3_ENTITY_RESOLUTION
     
     def _get_batch_upserter(self) -> Neo4jBatchUpserter:
         """Get or create batch upserter (lazy initialization)"""
@@ -236,48 +241,9 @@ class KnowledgeExtractionAgent(BaseAgent):
             self.logger.info(f"📦 Raw extraction: {len(all_concepts)} concepts, {len(all_relationships)} relationships")
             
             # ========================================
-            # STEP 4: Create Staging Nodes
+            # STEP 4: Entity Resolution (In-Memory Cleanup)
             # ========================================
-            staging_result = await self._create_staging_nodes(
-                document_id, all_concepts, all_relationships
-            )
-            
-            # ========================================
-            # STEP 5: Validation
-            # ========================================
-            validation_result = self.validator.validate(all_concepts, all_relationships)
-            
-            if not validation_result.is_valid:
-                self.logger.warning(f"⚠️ Validation issues found: {len(validation_result.errors)} errors")
-                
-                # Auto-fix if possible
-                fixed_concepts, fixed_relationships = self.validator.auto_fix(
-                    all_concepts, all_relationships, validation_result
-                )
-                
-                # Re-validate
-                validation_result = self.validator.validate(fixed_concepts, fixed_relationships)
-                all_concepts = fixed_concepts
-                all_relationships = fixed_relationships
-            
-            if not validation_result.is_valid:
-                await self.document_registry.update_status(
-                    document_id, DocumentStatus.FAILED,
-                    error_message=f"Validation failed: {len(validation_result.errors)} errors"
-                )
-                return self._error_response(
-                    f"Validation failed: {validation_result.errors[:3]}"
-                )
-            
-            self.logger.info(f"✅ Validation passed: {validation_result.valid_nodes} nodes, {validation_result.valid_relationships} relationships")
-            
-            await self.document_registry.update_status(
-                document_id, DocumentStatus.VALIDATED
-            )
-            
-            # ========================================
-            # STEP 6: Entity Resolution
-            # ========================================
+            # Resolve Internal (within batch) and External (vs database)
             existing_concepts = await self._get_existing_concepts()
             existing_relationships = await self._get_existing_relationships()
             
@@ -288,9 +254,53 @@ class KnowledgeExtractionAgent(BaseAgent):
                 existing_relationships=existing_relationships
             )
             
+            # Update all_concepts/all_relationships to the RESOLVED versions
+            # resolved_concepts contains (existing + truly_new)
+            # We only want to validate/stage the TRULY NEW ones for this document's scope
+            # but wait, it's better to validate the final resolved concepts to ensure overall graph integrity
+            all_concepts = resolution_result.resolved_concepts
+            all_relationships = resolution_result.resolved_relationships
+
             self.logger.info(
-                f"🔗 Entity resolution: {resolution_result.stats['merged_concepts']} merges, "
-                f"{resolution_result.stats['truly_new_concepts']} new concepts"
+                f"🔗 Resolution complete: {resolution_result.stats['merged_to_existing']} merged to KG, "
+                f"{resolution_result.stats['truly_new_concepts']} truly new concepts"
+            )
+
+            # ========================================
+            # STEP 5: Validation (On Clean Data)
+            # ========================================
+            validation_result = self.validator.validate(all_concepts, all_relationships)
+            
+            if not validation_result.is_valid:
+                self.logger.warning(f"⚠️ Validation issues found in resolved graph")
+                
+                fixed_concepts, fixed_relationships = self.validator.auto_fix(
+                    all_concepts, all_relationships, validation_result
+                )
+                
+                validation_result = self.validator.validate(fixed_concepts, fixed_relationships)
+                all_concepts = fixed_concepts
+                all_relationships = fixed_relationships
+            
+            if not validation_result.is_valid:
+                await self.document_registry.update_status(
+                    document_id, DocumentStatus.FAILED,
+                    error_message="Validation failed post-resolution"
+                )
+                return self._error_response("Validation failed after entity resolution")
+            
+            self.logger.info(f"✅ Clean Graph Validated")
+            
+            await self.document_registry.update_status(
+                document_id, DocumentStatus.VALIDATED
+            )
+            
+            # ========================================
+            # STEP 6: Create Staging Nodes (Audit Trail)
+            # ========================================
+            # Only stage what is actually being added
+            await self._create_staging_nodes(
+                document_id, all_concepts, all_relationships
             )
             
             # ========================================

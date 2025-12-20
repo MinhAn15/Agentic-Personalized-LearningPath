@@ -12,42 +12,52 @@
 ```mermaid
 graph TD
     subgraph "1. Ingestion Control"
-        START((Document)) --> REG[Document Registry]
+        IN1[/"📄 Input: Raw Document (PDF/MD/DOCX)"/]
+        IN1 --> REG[Document Registry]
         REG -- "New / Forced" --> CHUNK[Pure Agentic Chunker]
-        REG -- "Skipped (Checksum)" --> END((Exit))
+        REG -- "Skipped" --> OUT1[/"❌ Output: SKIPPED Status"/]
     end
 
-    subgraph "2. Pure Agentic Chunking (AI-Driven)"
-        CHUNK --> ARCH[🏛️ Architect Phase]
-        ARCH --> REF[🔍 Refiner Phase]
-        REF --> EXEC[⚡ Executor Phase]
+    subgraph "2. Pure Agentic Chunking"
+        CHUNK --> ARCH[🏛️ Architect: LLM plans TOC]
+        ARCH --> REF[🔍 Refiner: Reflexion self-correction]
+        REF --> EXEC[⚡ Executor: Fuzzy text matching]
+        EXEC --> OUT2[/"📦 Output: SemanticChunk[]"/]
     end
 
-    subgraph "3. 3-Layer Extraction (LLM Iterative)"
-        EXEC --> L1[Layer 1: Concept Extraction]
+    subgraph "3. 3-Layer Extraction"
+        OUT2 --> L1[Layer 1: Concept Extraction]
         L1 --> L2[Layer 2: Relationship Extraction]
         L2 --> L3[Layer 3: Metadata Enrichment]
+        L3 --> OUT3[/"📊 Output: Concepts[] + Relationships[]"/]
     end
 
-    subgraph "4. Staging & Integrity"
-        L3 --> STAGE[Staging Graph]
-        STAGE --> VAL[KG Validator]
-        VAL -- Fail --> FIX[Auto-Fix / Log Error]
+    subgraph "4. Two-Stage Entity Resolution"
+        OUT3 --> RESOLVE[🧩 Entity Resolver]
+        RESOLVE --> INTERNAL[Internal Clustering & Averaging]
+        INTERNAL --> CAND[🔎 Candidate Retrieval: Top-K Vector]
+        CAND --> DEEP[Deep 3-Way Scoring]
+        DEEP --> CONFLICT[⚖️ Weighted Conflict Resolution]
+        CONFLICT --> VAL[🛡️ KG Validator: Cycle Detection]
+        VAL -- Fail --> FIX[Auto-Fix]
         FIX --> VAL
-        VAL -- Pass --> RESOLVE[Entity Resolver]
+        VAL --> OUT4[/"✅ Output: Resolved & Validated Data"/]
     end
 
-    subgraph "5. Promotion & Caching"
-        RESOLVE --> MERGE[Semantic Merge Mapping]
-        MERGE --> BATCH[Neo4j Batch Upserter]
-        BATCH --> VECTOR[Vector Store Persistence]
-        VECTOR --> EVENT[Emit: COURSEKG_UPDATED]
+    subgraph "5. Persistence & Promotion"
+        OUT4 --> STAGE[Staging Graph]
+        STAGE --> BATCH[🚀 Neo4j Batch Upserter]
+        BATCH --> OUT5A[/"🗄️ Output: :CourseConcept Nodes"/]
+        OUT4 --> VECTOR[Vector Store Persistence]
+        VECTOR --> OUT5B[/"🔍 Output: LlamaIndex VectorStore"/]
+        OUT4 --> EVENT[Emit: COURSEKG_UPDATED]
+        EVENT --> OUT5C[/"📡 Output: Event to Agent 3"/]
     end
 
-    subgraph "Data Layers"
+    subgraph "Data Stores"
         NEO[(Neo4j: Course KG)]
         VEC[(LlamaIndex: Vector Store)]
-        DB[(State: Doc Registry)]
+        DB[(Redis/Postgres: Doc Registry)]
     end
 
     REG -.-> DB
@@ -59,79 +69,66 @@ graph TD
 
 ## 🧠 Core Technical Mechanisms
 
-### 1. Document Registry & Idempotency
+### 1. Ingestion Control & Idempotency
 
-- **Mechanism:** Calculates SHA-256 checksum of raw content.
-- **Why:** In production, re-uploading the same file shouldn't waste LLM tokens or corrupt the graph with duplicates.
-- **Logic:** Compares current checksum with `DocumentRecord` in PostgreSQL/Redis.
+- **Mechanism:** SHA-256 Hashing of raw UTF-8 content.
+- **Persistence:** Document status is cached in Redis (`doc_registry:{checksum}`) and persisted for 30 days.
+- **Workflow:** If checksum exists, the pipeline early-exists with `SKIPPED` status unless `force_reprocess=True` is passed.
 
-### 2. Pure Agentic Chunking (NEW - AI-First Approach)
+### 2. Pure Agentic Chunking (AI-First)
 
-**Philosophy:** Maximize AI capabilities, minimize traditional code logic. No regex, no rule-based splitting.
+- **Phase 1: Architect:** Uses Gemini 2.0 Flash to identify pedagogical boundaries (intro -> theory -> example -> practice).
+- **Phase 2: Refiner (Reflexion):** A secondary LLM pass critics the proposed segmentation to ensure context integrity.
+- **Phase 3: Executor:** Fuzzy string matching maps LLM text boundaries to exact character offsets.
 
-**3-Phase AI Pipeline:**
+### 3. Iterative 3-Layer Extraction
 
-1. **🏛️ Architect Phase:** LLM reads the entire document and creates a logical Table of Contents based on the *flow of ideas*, regardless of document formatting.
-2. **🔍 Refiner Phase:** LLM self-reviews the proposed boundaries using the **Reflexion** technique. It asks: "Did I accidentally split examples from their concepts?" and fixes errors.
-3. **⚡ Executor Phase:** Extract content based on the refined, AI-approved structure.
+Sequential sub-tasks to minimize LLM cognitive load:
 
-**Key Benefits:**
+1. **Layer 1: Concept Extraction:** Identifies discrete learning units (Nodes). Standardizes names using `ConceptIdBuilder`.
+2. **Layer 2: Relationship Extraction:** Maps dependencies based on **SPR Spec**.
+3. **Layer 3: Metadata Enrichment:** Adds Bloom's Taxonomy and learning time estimates.
 
-- **Format Agnostic:** Works on plain text, slides, books - no Markdown required.
-- **Pedagogically Aware:** AI understands what constitutes a "complete learning unit".
-- **Future-Proof:** Better LLM = better chunking without code changes.
-- **Self-Correcting:** Reflexion loop catches and fixes boundary errors.
+### 4. Two-Stage Entity Resolution (CRITICAL - Scalable)
 
-**Configuration:**
+**Logic:** Resolution happens in-memory *before* any database write to ensure data purity.
 
-```python
-AgenticChunker(
-    llm=Gemini("gemini-2.0-flash"),
-    max_chunk_size=4000,
-    min_chunk_size=500
-)
-```
+- **Step A: Internal Clustering:** Merges duplicate concepts found within the same document (e.g., "Variable" in Slide 1 and "Variables" in Slide 10).
+- **Step B: External Merging (Two-Stage):**
+  - **Stage 1 - Candidate Retrieval:** Uses pre-computed `GeminiEmbedding` vectors to quickly find **Top-K (default: 20)** most similar existing concepts. Complexity: O(N*K) instead of O(N*M).
+  - **Stage 2 - Deep Comparison:** Runs full 3-way scoring (Semantic, Structural, Contextual) only on the Top-K candidates.
+- **Multi-Factor Scoring Engine:**
+  - **Semantic (W=0.6):** Cosine Similarity of `GeminiEmbedding`.
+  - **Structural (W=0.3):** Jaccard Similarity of prerequisite sets.
+  - **Contextual (W=0.1):** Overlap of semantic tags.
+- **Threshold:** `0.85` for automatic `MERGE`.
+- **Conflict Resolution (Weighted Average):**
+  - When merging attributes (Difficulty, Time Estimate), the system calculates a weighted average based on extraction `confidence`.
+  - Formula: $V_{final} = \frac{\sum (V_i \times Confidence_i)}{\sum Confidence_i}$
+  - Prevents "last-write-wins" data loss and ensures scientifically rigorous updates.
 
-### 3. Staging Graph Pattern
+### 5. Persistence & Promotion
 
-- **Concept:** New extractions are first marked as `StagingConcept`.
-- **Validation:** `KGValidator` checks for:
-  - Circular dependencies (Cycle Detection).
-  - Missing descriptions or essential metadata.
-  - Invalid relationship types.
-- **Integrity:** Only validated data is "promoted" to the master `CourseConcept`.
+| Step | Input | Process | Output |
+|------|-------|---------|--------|
+| **Staging** | Resolved Concepts/Rels | Write as `:StagingConcept` for audit trail | Neo4j Staging Nodes |
+| **Batch Upsert** | Resolved Concepts/Rels | Cypher `UNWIND + MERGE` for performance | `:CourseConcept` Production Nodes |
+| **Vector Store** | SemanticChunks | Embed via GeminiEmbedding → LlamaIndex | `./storage/vector_index` for RAG |
+| **Event Emit** | Resolution Stats | `send_message("planner", "COURSEKG_UPDATED")` | Triggers Agent 3 re-planning |
 
-### 4. Vector-Based Entity Resolution
+### 6. Staging & Validation Algorithm
 
-- **Module:** `EntityResolver`
-- **Mechanism:** Uses `GeminiEmbedding` (`models/embedding-001`) to map new concepts to existing ones.
-- **Merge Logic:**
-  - If Similarity > 0.85: Automatically treats as an alias/same node.
-  - If Similarity > 0.7: Flags for potential connection (`SIMILAR_TO`).
-- **Result:** Prevents graph fragmentation (e.g., merging "Variables" and "Variable Basics").
-
-### 5. Neo4j Batch Upserting
-
-- **Module:** `Neo4jBatchUpserter`
-- **Performance:** Optimized for AuraDB using `UNWIND` cypher patterns.
-- **Provenance:** Every node stores a list of `source_document_ids`, tracking exactly where knowledge originated.
+- **Validation (KGValidator):** Runs on **RESOLVED** (clean) data.
+  - **Cycle Detection:** DFS algorithm to prevent circular dependencies.
+  - **Auto-Fixer:** Resolves minor integrity issues.
+- **Staging Pattern:** Cleaned data is written as `:StagingConcept` for auditing before final promotion to `:CourseConcept`.
 
 ---
 
-## 📋 Relationship Types (Thesis Specification)
+## 🔧 Developer Reference
 
-| Type                   | Semantic Meaning                                         |
-| :--------------------- | :------------------------------------------------------- |
-| **REQUIRES**           | Node A cannot be understood without B.                   |
-| **IS_PREREQUISITE_OF** | Higher-level dependency link.                            |
-| **NEXT**               | Suggested pedagogical sequence.                          |
-| **REMEDIATES**         | Advanced: Link to content that fixes a specific misconception. |
-| **IS_SUB_CONCEPT_OF**  | Hierarchical parent-child relationship.                  |
-
----
-
-## 🔧 Key Methods
-
-- `execute_with_provenance()`: Handles full audit trail and document-level overwrites.
-- `_enrich_metadata()`: LLM call to classify Bloom's Taxonomy and estimate learning hours.
-- `_persist_vector_index()`: Updates the LlamaIndex persistent storage for Agent 4 (Tutor) to use in RAG.
+- `execute_with_provenance()`: Primary entry point.
+- `_architect_phase()`: Generates logical TOC via LLM.
+- `entity_resolver.resolve()`: Two-Stage in-memory de-duplication engine.
+- `entity_resolver._retrieve_candidates()`: Vector-based Top-K candidate retrieval.
+- `validator.validate()`: Post-resolution integrity check.

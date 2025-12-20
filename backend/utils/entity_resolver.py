@@ -75,14 +75,17 @@ class EntityResolver:
     - Contextual: 25% weight (tag overlap)
     """
     
-    # Similarity weights
-    W_SEMANTIC = 0.50
-    W_STRUCTURAL = 0.25
-    W_CONTEXTUAL = 0.25
+    # Similarity weights (Scientifically balanced for Pedagogical Graphs)
+    W_SEMANTIC = 0.60    # Core meaning (Embedding)
+    W_STRUCTURAL = 0.30  # Position in graph (Prereqs)
+    W_CONTEXTUAL = 0.10  # Metadata overlap (Tags)
     
     # Thresholds
     MERGE_THRESHOLD = 0.85        # Combined score for auto-merge
     HUMAN_REVIEW_THRESHOLD = 0.70 # Suggest for review
+    
+    # Scalability: Two-Stage Resolution Parameters
+    TOP_K_CANDIDATES = 20         # Max candidates to retrieve per concept
     
     def __init__(
         self,
@@ -94,7 +97,7 @@ class EntityResolver:
         Initialize Entity Resolver.
         
         Args:
-            embedding_model: Sentence transformer model (optional)
+            embedding_model: LlamaIndex/Gemini-compatible embedding model
             merge_threshold: Similarity threshold for merging
             use_embeddings: Whether to use embeddings for semantic similarity
         """
@@ -103,15 +106,9 @@ class EntityResolver:
         self._embedding_model = embedding_model
         self._embedding_cache: Dict[str, np.ndarray] = {}
         
-        # Try to load embedding model
         if use_embeddings and embedding_model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-                self._embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-                logger.info("Loaded embedding model: all-MiniLM-L6-v2")
-            except ImportError:
-                logger.warning("sentence-transformers not installed, using text similarity fallback")
-                self.use_embeddings = False
+            logger.warning("No embedding model provided. Semantic similarity will fallback to Jaccard.")
+            self.use_embeddings = False
     
     def resolve(
         self,
@@ -121,38 +118,72 @@ class EntityResolver:
         existing_relationships: List[Dict[str, Any]]
     ) -> ResolutionResult:
         """
-        Resolve entities between new and existing concepts.
-        
-        Args:
-            new_concepts: Newly extracted concepts
-            existing_concepts: Concepts already in the KG
-            new_relationships: Newly extracted relationships
-            existing_relationships: Relationships already in the KG
-            
-        Returns:
-            ResolutionResult with merged concepts and remapped relationships
+        Unified resolution: 
+        1. Resolve duplicates WITHIN the new concepts (Internal Clustering)
+        2. Resolve duplicates vs EXISTING concepts (External Merging)
         """
         logger.info(f"Entity resolution: {len(new_concepts)} new vs {len(existing_concepts)} existing")
         
-        # Build indices
+        # --- Step 1: Internal Clustering (New vs New) ---
+        # Find clusters within the new batch to avoid redundant comparisons
+        internal_clusters = self.find_clusters(new_concepts, new_relationships)
+        
+        unique_new_concepts = []
+        internal_mapping = {} # old_id -> representative_id
+        
+        for cluster_ids in internal_clusters:
+            cluster_objs = [c for c in new_concepts if c["concept_id"] in cluster_ids]
+            rep_id = self.select_representative(cluster_objs)
+            rep_obj = next(c for c in cluster_objs if c["concept_id"] == rep_id)
+            
+            unique_new_concepts.append(rep_obj)
+            for cid in cluster_ids:
+                internal_mapping[cid] = rep_id
+
+        # Remap relationships within the unique batch
+        unique_new_relationships = self._resolve_relationships(
+            new_relationships=new_relationships,
+            existing_relationships=[],
+            merge_mapping=internal_mapping
+        )
+
+        # --- Step 2: External Merging (Two-Stage: Candidate Retrieval + Deep Comparison) ---
         existing_by_id = {c["concept_id"]: c for c in existing_concepts}
         existing_prereqs = self._build_prereq_map(existing_relationships)
-        new_prereqs = self._build_prereq_map(new_relationships)
+        new_prereqs = self._build_prereq_map(unique_new_relationships)
         
-        # Find matches
+        # Pre-compute embeddings for existing concepts (cached)
+        existing_embeddings = {}
+        if self.use_embeddings and existing_concepts:
+            logger.info(f"Pre-computing embeddings for {len(existing_concepts)} existing concepts...")
+            for c in existing_concepts:
+                text = self._get_concept_text(c)
+                existing_embeddings[c["concept_id"]] = self._get_embedding(text)
+        
         matches = []
-        merge_mapping: Dict[str, str] = {}  # new_id -> existing_id
+        external_mapping: Dict[str, str] = {}  # unique_new_id -> existing_id
         
-        for new_concept in new_concepts:
+        for new_concept in unique_new_concepts:
             new_id = new_concept.get("concept_id", "")
             
+            # STAGE 1: Candidate Retrieval (Vector Similarity Top-K)
+            candidates = self._retrieve_candidates(
+                new_concept=new_concept,
+                existing_concepts=existing_concepts,
+                existing_embeddings=existing_embeddings,
+                top_k=self.TOP_K_CANDIDATES
+            )
+            
+            if not candidates:
+                continue  # No similar candidates found
+            
+            # STAGE 2: Deep Comparison (3-Way Scoring on Top-K only)
             best_match = None
             best_score = 0.0
             
-            for existing_concept in existing_concepts:
+            for existing_concept in candidates:
                 existing_id = existing_concept.get("concept_id", "")
                 
-                # Calculate 3-way similarity
                 match = self._calculate_similarity(
                     new_concept=new_concept,
                     existing_concept=existing_concept,
@@ -160,49 +191,62 @@ class EntityResolver:
                     existing_prereqs=existing_prereqs.get(existing_id, set())
                 )
                 
-                matches.append(match)
-                
                 if match.combined_score > best_score:
                     best_score = match.combined_score
                     best_match = match
             
-            # Check if should merge
             if best_match and best_match.combined_score >= self.merge_threshold:
-                merge_mapping[new_id] = best_match.existing_concept_id
+                # MARK FOR MERGE
+                external_mapping[new_id] = best_match.existing_concept_id
                 best_match.should_merge = True
-                logger.debug(f"Merging {new_id} -> {best_match.existing_concept_id} (score: {best_score:.2f})")
+                matches.append(best_match)
+                
+                # CONFLICT RESOLUTION: Update the existing concept's attributes
+                target_concept = next(c for c in existing_concepts if c["concept_id"] == best_match.existing_concept_id)
+                merged_attributes = self._resolve_attribute_conflicts(target_concept, new_concept)
+                target_concept.update(merged_attributes)
+                logger.debug(f"Merged attributes for {best_match.existing_concept_id} using Weighted Average")
         
-        # Resolve concepts: keep existing, add truly new
-        resolved_concepts = list(existing_concepts)
-        for new_concept in new_concepts:
+        # --- Step 3: Final Consolidation ---
+        # truly_unique = concepts that aren't merged into existing
+        final_concepts = list(existing_concepts)
+        truly_new_concepts = []
+        for new_concept in unique_new_concepts:
             new_id = new_concept.get("concept_id", "")
-            if new_id not in merge_mapping:
-                # Truly new concept - add it
-                resolved_concepts.append(new_concept)
+            if new_id not in external_mapping:
+                final_concepts.append(new_concept)
+                truly_new_concepts.append(new_concept)
         
-        # Resolve relationships: merge duplicates, remap merged concepts
+        # Combine mappings: raw_new_id -> representative_new_id -> existing_id
+        full_merge_mapping = {}
+        for raw_id, rep_id in internal_mapping.items():
+            final_target = external_mapping.get(rep_id, rep_id)
+            if final_target != raw_id:
+                full_merge_mapping[raw_id] = final_target
+
         resolved_relationships = self._resolve_relationships(
             new_relationships=new_relationships,
             existing_relationships=existing_relationships,
-            merge_mapping=merge_mapping
+            merge_mapping=full_merge_mapping
         )
         
         stats = {
-            "new_concepts": len(new_concepts),
+            "raw_new_concepts": len(new_concepts),
+            "internal_unique_concepts": len(unique_new_concepts),
             "existing_concepts": len(existing_concepts),
-            "merged_concepts": len(merge_mapping),
-            "truly_new_concepts": len(new_concepts) - len(merge_mapping),
-            "total_resolved_concepts": len(resolved_concepts),
+            "merged_to_existing": len(external_mapping),
+            "truly_new_concepts": len(truly_new_concepts),
+            "total_resolved_concepts": len(final_concepts),
             "total_resolved_relationships": len(resolved_relationships)
         }
         
-        logger.info(f"Resolution complete: {stats['merged_concepts']} merges, {stats['truly_new_concepts']} new")
+        logger.info(f"Resolution complete: {stats['internal_unique_concepts']} unique from {stats['raw_new_concepts']} raw")
         
         return ResolutionResult(
-            resolved_concepts=resolved_concepts,
+            resolved_concepts=final_concepts,
             resolved_relationships=resolved_relationships,
-            merge_mapping=merge_mapping,
-            matches=[m for m in matches if m.should_merge],
+            merge_mapping=full_merge_mapping,
+            matches=matches,
             stats=stats
         )
     
@@ -278,9 +322,82 @@ class EntityResolver:
         if text in self._embedding_cache:
             return self._embedding_cache[text]
         
-        embedding = self._embedding_model.encode(text, convert_to_numpy=True)
-        self._embedding_cache[text] = embedding
-        return embedding
+        # Support LlamaIndex embedding model interface
+        if hasattr(self._embedding_model, "get_text_embedding"):
+            embedding = self._embedding_model.get_text_embedding(text)
+            embedding_np = np.array(embedding)
+        # Support SentenceTransformer interface
+        elif hasattr(self._embedding_model, "encode"):
+            embedding_np = self._embedding_model.encode(text, convert_to_numpy=True)
+        else:
+            logger.warning("Unknown embedding model interface")
+            return np.zeros(1)
+            
+        self._embedding_cache[text] = embedding_np
+        return embedding_np
+    
+    def _retrieve_candidates(
+        self,
+        new_concept: Dict[str, Any],
+        existing_concepts: List[Dict[str, Any]],
+        existing_embeddings: Dict[str, np.ndarray],
+        top_k: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Two-Stage Entity Resolution: Stage 1 - Candidate Retrieval.
+        
+        Uses vector similarity to quickly find Top-K most similar existing concepts
+        before performing expensive 3-way deep comparison.
+        
+        Complexity: O(M) where M = number of existing concepts
+        vs O(M * feature_comparisons) for full comparison
+        
+        Args:
+            new_concept: The new concept to find matches for
+            existing_concepts: All concepts in the KG
+            existing_embeddings: Pre-computed embeddings for existing concepts
+            top_k: Maximum number of candidates to return
+            
+        Returns:
+            List of top-K most similar existing concepts
+        """
+        if not existing_concepts:
+            return []
+        
+        # Get embedding for new concept
+        new_text = self._get_concept_text(new_concept)
+        new_embedding = self._get_embedding(new_text)
+        
+        # Calculate cosine similarities with all existing concepts
+        similarities = []
+        for existing_concept in existing_concepts:
+            existing_id = existing_concept.get("concept_id", "")
+            
+            # Use pre-computed embedding if available
+            if existing_id in existing_embeddings:
+                existing_embedding = existing_embeddings[existing_id]
+            else:
+                existing_text = self._get_concept_text(existing_concept)
+                existing_embedding = self._get_embedding(existing_text)
+            
+            # Quick cosine similarity calculation
+            dot_product = np.dot(new_embedding, existing_embedding)
+            norm1 = np.linalg.norm(new_embedding)
+            norm2 = np.linalg.norm(existing_embedding)
+            
+            if norm1 > 0 and norm2 > 0:
+                sim = float(dot_product / (norm1 * norm2))
+            else:
+                sim = 0.0
+            
+            similarities.append((existing_concept, sim))
+        
+        # Sort by similarity (descending) and take top-K
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        candidates = [concept for concept, sim in similarities[:top_k]]
+        
+        logger.debug(f"Retrieved {len(candidates)} candidates for '{new_concept.get('name', 'unknown')}'")
+        return candidates
     
     def _text_similarity(self, text1: str, text2: str) -> float:
         """Fallback: Jaccard word similarity"""
@@ -425,15 +542,120 @@ class EntityResolver:
     
     def select_representative(self, cluster: List[Dict[str, Any]]) -> str:
         """
-        Select representative concept from cluster.
+        Select representative concept from cluster and MERGE attributes.
         
-        Strategy: Prefer concept with longest description (most complete)
+        Strategy: 
+        1. Select Rep: One with longest description (most complete info)
+        2. Merge Attributes: Use Weighted Average for Difficulty/Time based on confidence (if available)
         """
         if not cluster:
             return ""
         
-        best = max(
+        # 1. Select initial representative
+        best_concept = max(
             cluster,
             key=lambda c: len(c.get("description", "") or "")
         )
-        return best.get("concept_id", "")
+        rep_id = best_concept.get("concept_id", "")
+        
+        # 2. Merge attributes (Weighted Conflict Resolution)
+        # We start with the representative's attributes and merge others into it
+        merged_attributes = best_concept.copy()
+        
+        # Collect all values from cluster members
+        difficulties = []
+        times = []
+        
+        for member in cluster:
+            # Assume default confidence 0.5 if not present (legacy support)
+            conf = float(member.get("confidence", 0.5))
+            
+            if "difficulty" in member and member["difficulty"]:
+                try:
+                    difficulties.append((float(member["difficulty"]), conf))
+                except (ValueError, TypeError):
+                    pass
+            
+            if "time_estimate" in member and member["time_estimate"]:
+                try:
+                    times.append((float(member["time_estimate"]), conf))
+                except (ValueError, TypeError):
+                    pass
+            
+            # Merge set-based attributes (Tags)
+            if member["concept_id"] != rep_id:
+                current_semantic = set(merged_attributes.get("semantic_tags", []) or [])
+                member_semantic = set(member.get("semantic_tags", []) or [])
+                merged_attributes["semantic_tags"] = list(current_semantic | member_semantic)
+                
+                current_focused = set(merged_attributes.get("focused_tags", []) or [])
+                member_focused = set(member.get("focused_tags", []) or [])
+                merged_attributes["focused_tags"] = list(current_focused | member_focused)
+
+        # Apply Weighted Average Conflict Resolution
+        if len(difficulties) > 1:
+            merged_attributes["difficulty"] = self._weighted_average(difficulties)
+            logger.debug(f"Resolved difficulty conflict for {rep_id}: {merged_attributes['difficulty']:.2f} (from {len(difficulties)} sources)")
+            
+        if len(times) > 1:
+            merged_attributes["time_estimate"] = int(self._weighted_average(times))
+            logger.debug(f"Resolved time conflict for {rep_id}: {merged_attributes['time_estimate']}m (from {len(times)} sources)")
+
+        # Update the original object in the list
+        best_concept.update(merged_attributes)
+        
+        return rep_id
+
+    def _resolve_attribute_conflicts(
+        self, 
+        target_concept: Dict[str, Any], 
+        source_concept: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Merge attributes from source -> target using Weighted Average Strategy.
+        Used during External Merging (New vs Existing).
+        """
+        merged = target_concept.copy()
+        
+        # Default confidences
+        # Existing DB concepts imply higher confidence (e.g., 1.0) or stored confidence
+        target_conf = float(target_concept.get("confidence", 1.0)) 
+        source_conf = float(source_concept.get("confidence", 0.7)) # New extraction confidence
+        
+        # Resolve Difficulty
+        d1 = target_concept.get("difficulty")
+        d2 = source_concept.get("difficulty")
+        if d1 is not None and d2 is not None:
+            try:
+                merged["difficulty"] = self._weighted_average([(float(d1), target_conf), (float(d2), source_conf)])
+            except (ValueError, TypeError):
+                pass
+        
+        # Resolve Time Estimate
+        t1 = target_concept.get("time_estimate")
+        t2 = source_concept.get("time_estimate")
+        if t1 is not None and t2 is not None:
+            try:
+                merged["time_estimate"] = int(self._weighted_average([(float(t1), target_conf), (float(t2), source_conf)]))
+            except (ValueError, TypeError):
+                pass
+            
+        # Merge Tags (Union)
+        for tag_field in ["semantic_tags", "focused_tags"]:
+            s1 = set(target_concept.get(tag_field, []) or [])
+            s2 = set(source_concept.get(tag_field, []) or [])
+            merged[tag_field] = list(s1 | s2)
+            
+        return merged
+
+    def _weighted_average(self, values: List[Tuple[float, float]]) -> float:
+        """
+        Calculate weighted average.
+        Args: values: List of (value, weight) tuples
+        """
+        total_weight = sum(w for v, w in values)
+        if total_weight == 0:
+            return sum(v for v, w in values) / len(values)
+        
+        weighted_sum = sum(v * w for v, w in values)
+        return weighted_sum / total_weight
