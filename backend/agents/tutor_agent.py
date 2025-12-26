@@ -1,4 +1,5 @@
 import logging
+import random  # FIX: Move import to top (Issue 2)
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from enum import Enum
@@ -126,8 +127,15 @@ class TutorAgent(BaseAgent):
             learner_id = kwargs.get("learner_id")
             question = kwargs.get("question")
             concept_id = kwargs.get("concept_id")
+            
+            # FIX: Validate hint_level range (0-4)
             hint_level = kwargs.get("hint_level", 0)
+            hint_level = min(4, max(0, int(hint_level)))  # Clamp to valid range
+            
+            # FIX: Validate conversation_history is a list
             conversation_history = kwargs.get("conversation_history", [])
+            if not isinstance(conversation_history, list):
+                conversation_history = []
             
             if not all([learner_id, question, concept_id]):
                 return {
@@ -196,13 +204,21 @@ class TutorAgent(BaseAgent):
             if not response.get("success"):
                 return response
             
-            # Step 7: Prepare result
+            # Step 7: Apply Harvard 7 Principles (FIX: was missing)
+            learning_style = learner_state.get("learning_style", "VISUAL")
+            enforced_guidance = self.enforce_harvard_principles(
+                response=response["guidance"],
+                learning_style=learning_style,
+                phase=socratic_state.value
+            )
+            
+            # Step 8: Prepare result
             result = {
                 "success": True,
                 "agent_id": self.agent_id,
                 "learner_id": learner_id,
                 "concept_id": concept_id,
-                "guidance": response["guidance"],
+                "guidance": enforced_guidance,  # Use enforced version
                 "follow_up_question": response.get("follow_up_question"),
                 "socratic_state": socratic_state.value,
                 "next_state": self._get_next_state(socratic_state).value,
@@ -213,17 +229,18 @@ class TutorAgent(BaseAgent):
                 "timestamp": datetime.now().isoformat()
             }
             
-            # Step 8: Save session state
+            # Step 9: Save session state (with 24h TTL)
             await self.save_state(
                 f"tutor_session:{learner_id}:{concept_id}",
                 {
                     "last_guidance": result,
                     "socratic_state": socratic_state.value,
                     "conversation_turns": len(conversation_history) + 1
-                }
+                },
+                ttl=86400  # FIX Issue 2: Expire after 24 hours
             )
             
-            # Step 9: Emit event for evaluator
+            # Step 10: Emit event for evaluator (with full context)
             await self.send_message(
                 receiver="evaluator",
                 message_type="tutor_guidance_provided",
@@ -231,7 +248,10 @@ class TutorAgent(BaseAgent):
                     "learner_id": learner_id,
                     "concept_id": concept_id,
                     "socratic_state": socratic_state.value,
-                    "hint_level": result["hint_level"]
+                    "hint_level": result["hint_level"],
+                    # FIX Issue 1: Add guidance context for evaluation
+                    "guidance": result["guidance"],
+                    "follow_up_question": result.get("follow_up_question")
                 }
             )
             
@@ -279,7 +299,8 @@ class TutorAgent(BaseAgent):
             OPTIONAL MATCH (l)-[m:HAS_MASTERY]->(c:CourseConcept {concept_id: $concept_id})
             OPTIONAL MATCH (l)-[:HAS_MISCONCEPTION]->(e:ErrorNode)-[:ABOUT]->(c)
             OPTIONAL MATCH (l)-[:CREATED_NOTE]->(n:NoteNode)-[:ABOUT]->(c)
-            RETURN m.level as mastery, 
+            RETURN l.learning_style as learning_style,
+                   m.level as mastery, 
                    collect(DISTINCT e.description) as misconceptions,
                    collect(DISTINCT n.content) as notes
             """,
@@ -289,11 +310,12 @@ class TutorAgent(BaseAgent):
         
         if result:
             return {
+                "learning_style": result[0].get("learning_style", "VISUAL"),  # FIX Issue 3
                 "mastery": result[0].get("mastery", 0.0) or 0.0,
                 "misconceptions": result[0].get("misconceptions", []),
                 "notes": result[0].get("notes", [])
             }
-        return {"mastery": 0.0, "misconceptions": [], "notes": []}
+        return {"learning_style": "VISUAL", "mastery": 0.0, "misconceptions": [], "notes": []}
     
     def _determine_socratic_state(
         self,
@@ -323,9 +345,9 @@ class TutorAgent(BaseAgent):
             return SocraticState.PROBING
             
         # 3. Reversed Socratic for high performers (The Protégé Effect)
+        # Scientific Basis: Bargh & Schul, 1980 - Teaching others improves own understanding
         if current_mastery > 0.7 and conversation_turns > 2:
-            import random
-            if random.random() < 0.4: # 40% chance to trigger TEACH_BACK when mastery is high
+            if random.random() < 0.4:  # 40% chance to trigger TEACH_BACK
                 return SocraticState.TEACH_BACK
                 
         # 3. Elaboration for near-misses
@@ -345,7 +367,13 @@ class TutorAgent(BaseAgent):
             return SocraticState.PROBING
     
     def _get_next_state(self, current_state: SocraticState) -> SocraticState:
-        """Get next state in Socratic progression"""
+        """
+        Get next state in Socratic progression.
+        
+        Scientific Basis: Collins & Stevens, 1982 - Socratic Dialogue Framework.
+        Special states (REFUTATION, ELABORATION, TEACH_BACK) return to standard flow.
+        """
+        # Standard progression order
         state_order = [
             SocraticState.PROBING,
             SocraticState.SCAFFOLDING,
@@ -353,9 +381,26 @@ class TutorAgent(BaseAgent):
             SocraticState.EXPLAINING,
             SocraticState.CONCLUSION
         ]
-        current_idx = state_order.index(current_state)
-        next_idx = min(current_idx + 1, len(state_order) - 1)
-        return state_order[next_idx]
+        
+        # FIX Issue 3: Special states return to appropriate standard state
+        if current_state == SocraticState.REFUTATION:
+            # After refuting misconception, probe to verify correction
+            return SocraticState.PROBING
+        elif current_state == SocraticState.ELABORATION:
+            # After elaboration on near-correct, move to conclusion
+            return SocraticState.CONCLUSION
+        elif current_state == SocraticState.TEACH_BACK:
+            # After teach-back, conclude the learning cycle
+            return SocraticState.CONCLUSION
+        
+        # Standard progression
+        if current_state in state_order:
+            current_idx = state_order.index(current_state)
+            next_idx = min(current_idx + 1, len(state_order) - 1)
+            return state_order[next_idx]
+        
+        # Default fallback
+        return SocraticState.PROBING
     
     def _state_to_hint_level(self, state: SocraticState) -> int:
         """Convert Socratic state to hint level"""
@@ -377,24 +422,32 @@ class TutorAgent(BaseAgent):
         """
         3-Layer Grounding System per Thesis.
         
-        Layer 1: Document Grounding (RAG from Chroma)
-        Layer 2: Course KG Grounding (Neo4j)
-        Layer 3: Personal KG Grounding
-        """
-        sources = []
+        Scientific Basis:
+        - HybridRAG: Combines vector-based RAG with KG-based retrieval
+        - TruthfulRAG (2024): KG-based conflict resolution
         
-        # Layer 1: Document Grounding (RAG)
-        doc_context, doc_score = await self._rag_retrieve(query, concept_id)
+        Layer 1: Document Grounding (RAG from Vector Store)
+        Layer 2: Course KG Grounding (Neo4j - structured knowledge)
+        Layer 3: Personal KG Grounding (Neo4j - learner-specific)
+        """
+        import asyncio
+        
+        # FIX Issue 3: Parallel layer execution with asyncio.gather()
+        doc_task = self._rag_retrieve(query, concept_id)
+        kg_task = self._course_kg_retrieve(concept_id)
+        personal_task = self._personal_kg_retrieve(learner_id, concept_id)
+        
+        results = await asyncio.gather(doc_task, kg_task, personal_task)
+        
+        doc_context, doc_score = results[0]
+        kg_context, kg_score = results[1]
+        personal_context, personal_score = results[2]
+        
+        sources = []
         if doc_context:
             sources.append({"layer": "DOCUMENT", "score": doc_score})
-        
-        # Layer 2: Course KG Grounding
-        kg_context, kg_score = await self._course_kg_retrieve(concept_id)
         if kg_context:
             sources.append({"layer": "COURSE_KG", "score": kg_score})
-        
-        # Layer 3: Personal KG Grounding
-        personal_context, personal_score = await self._personal_kg_retrieve(learner_id, concept_id)
         if personal_context:
             sources.append({"layer": "PERSONAL_KG", "score": personal_score})
         
@@ -405,11 +458,17 @@ class TutorAgent(BaseAgent):
             self.W_PERSONAL * personal_score
         )
         
-        # Merge context
+        # Merge context with conflict detection metadata
         merged_context = {
             "document": doc_context,
             "course_kg": kg_context,
-            "personal": personal_context
+            "personal": personal_context,
+            # Add layer scores for potential conflict resolution
+            "_layer_scores": {
+                "document": doc_score,
+                "course_kg": kg_score,
+                "personal": personal_score
+            }
         }
         
         return {
@@ -483,7 +542,18 @@ class TutorAgent(BaseAgent):
                     "similar_concepts": result[0].get("similar_concepts", []),
                     "alternative_paths": result[0].get("alternative_paths", [])
                 }
-                score = 0.9 if context["definition"] else 0.5
+                
+                # FIX Issue 1: Dynamic score based on data completeness
+                # Score reflects how much structured knowledge we have
+                score_factors = [
+                    0.3 if context["definition"] else 0.0,  # Definition is critical
+                    0.2 if context["examples"] else 0.0,     # Examples help learning
+                    0.2 if context["misconceptions"] else 0.0,  # Anti-hallucination
+                    0.15 if context["prerequisites"] else 0.0,  # Context
+                    0.15 if context["similar_concepts"] else 0.0  # Related knowledge
+                ]
+                score = sum(score_factors)
+                
                 return context, score
             
             return {}, 0.0
@@ -565,14 +635,13 @@ Keep response SHORT (2-4 sentences max).
             response = await self.llm.acomplete(prompt + "\n\n" + user_message)
             response_text = response.text.strip()
             
-            # Extract follow-up question if present
+            # FIX Issue 2: Improved follow-up question extraction
+            # Use regex to find the last question in response
+            import re
             follow_up = None
-            if "?" in response_text:
-                sentences = response_text.split(".")
-                for s in sentences:
-                    if "?" in s:
-                        follow_up = s.strip()
-                        break
+            questions = re.findall(r'[^.!?]*\?', response_text)
+            if questions:
+                follow_up = questions[-1].strip()  # Take the last question
             
             return {
                 "success": True,

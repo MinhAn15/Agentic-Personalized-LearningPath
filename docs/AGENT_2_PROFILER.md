@@ -3,7 +3,7 @@
 ## Overview
 
 **File:** `backend/agents/profiler_agent.py`  
-**Purpose:** Constructs and maintains a multidimensional **Learner Profile** (17-dim vector + Personal Knowledge Graph). It acts as the "State Manager" for the personalized learning experience, evolving in real-time based on learner interactions.
+**Purpose:** Constructs and maintains a multidimensional **Learner Profile** (10-dim vector + Personal Knowledge Graph). It acts as the "State Manager" for the personalized learning experience, evolving in real-time based on learner interactions.
 
 ---
 
@@ -13,16 +13,16 @@
 graph TD
     subgraph "1. Intent & Cold Start"
         IN1[/"🗣️ Input: Learner Message (Goal)"/]
-        VEC_STORE[(Vector Store)]
+        G_STORE[("Neo4j Graph (LlamaIndex)")]
         IN1 --> INTENT[Intent Extraction: Goal/Topic/Style]
-        INTENT --> DIAG[Diagnostic Assessment: Hybrid Retrieval]
-        VEC_STORE -.-> DIAG
+        INTENT --> DIAG[Diagnostic Assessment: Graph RAG]
+        G_STORE -.-> DIAG
         DIAG --> OUT1[/"📋 Output: Initial Profile JSON"/]
     end
 
     subgraph "2. Profile Vectorization"
         OUT1 --> VECTOR[Profile Vectorizer]
-        VECTOR --> VEC_OUT[/"Output: 17-Dim Feature Vector"/]
+        VECTOR --> VEC_OUT[/"Output: 10-Dim Feature Vector"/]
     end
 
     subgraph "3. State Persistence (Dual-Layer)"
@@ -67,9 +67,9 @@ graph TD
 | Step | Input | Process | Output |
 |------|-------|---------|--------|
 | **Intent Extraction** | User Message ("I want to learn SQL for my job") | LLM Extracts: Topic (SQL), Purpose (Job), Constraint (Time) | Structured Goal JSON |
-| **Diagnostic** | Topic + Skill Level | **Hybrid Retrieval Strategy**:<br>1. **Vector Search**: Find semantic matches via `_retrieve_vector_candidates` (LlamaIndex).<br>2. **Graph Search**: Find centrality anchors via Cypher (Neo4j).<br>3. **Merge**: Combine Top-5 candidates.<br>4. **Generate**: Dynamic questions via LLM. | Initial `concept_mastery_map` |
+| **Diagnostic** | Topic + Skill Level | **Graph RAG Strategy**:<br>1. **Hybrid Retrieval**: `PropertyGraphIndex` searches Vector + Text + Graph Traversal.<br>2. **Centrality Reranking**: Sort candidates by Neo4j Degree Centrality.<br>3. **Selection**: Pick Top-5 Anchors.<br>4. **Question Gen**: Dynamic LLM generation. | Initial `concept_mastery_map` |
 
-### 2. Profile Vectorization (17-Dimensional)
+### 2. Profile Vectorization (10-Dimensional)
 
 Converts the rich profile object into a mathematical vector for similarity matching (Peer Matching) and difficulty adjustment.
 
@@ -77,6 +77,7 @@ Converts the rich profile object into a mathematical vector for similarity match
 - **Dim 0:** `knowledge_state` (Average Mastery)
 - **Dim 1-4:** `learning_style` (One-hot: Visual/Audit/Read/Kinesthetic)
 - **Dim 5:** `skill_level` (Normalized: 0.2/0.5/0.8)
+- **Dim 6:** `time_available` (Normalized)
 - **Dim 7:** `bloom_avg` (Weighted average of Bloom's Taxonomy level)
 - **Dim 8:** `learning_velocity` (Concepts completed / hour)
 - **Dim 9:** `topic_length` (Normalized scope)
@@ -121,6 +122,6 @@ Agent 2 acts as a reactive state machine, handling events from other agents.
 
 - `execute()`: Main entry point for initial profiling.
 - `_parse_goal_with_intent()`: LLM-based goal structuring.
-- `_vectorize_profile()`: Converts object to 17-dim list.
+- `_vectorize_profile()`: Converts object to 10-dim list.
 - `_on_evaluation_completed()`: Critical event handler for mastery updates.
 - `VersionConflictError`: Raised if Optimistic Locking fails.

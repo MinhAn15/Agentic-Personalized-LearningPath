@@ -1,5 +1,7 @@
 import logging
 import uuid
+import re
+import time  # FIX Issue 6: Move to top of file
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from enum import Enum
@@ -57,6 +59,9 @@ class EvaluatorAgent(BaseAgent):
         Update: Set WHERE mastery to 0.2, flag for remediation
     """
     
+    # FIX Issue 8: Define pattern at class level (compiled once)
+    ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+    
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None, personal_kg=None):
         """
@@ -99,6 +104,10 @@ class EvaluatorAgent(BaseAgent):
             course_kg=course_kg
         )
         
+        # FIX Issue 3+4: Add concept cache with TTL tracking
+        self._concept_cache = {}  # {concept_id: {"data": concept, "timestamp": time}}
+        self._cache_ttl = 3600  # 1 hour TTL
+        
         # Initialize Notification Service
         self.notification_service = InstructorNotificationService()
         
@@ -124,12 +133,14 @@ class EvaluatorAgent(BaseAgent):
             Dict with evaluation results
         """
         try:
-            learner_id = kwargs.get("learner_id")
-            concept_id = kwargs.get("concept_id")
-            learner_response = kwargs.get("learner_response")
-            expected_answer = kwargs.get("expected_answer")
+            # FIX Issue 4: Strip all IDs for consistency
+            learner_id = (kwargs.get("learner_id") or "").strip()
+            concept_id = (kwargs.get("concept_id") or "").strip()
+            learner_response = (kwargs.get("learner_response") or "").strip()
+            expected_answer = (kwargs.get("expected_answer") or "").strip()
             correct_answer_explanation = kwargs.get("correct_answer_explanation", "")
             
+            # Validate required inputs
             if not all([learner_id, concept_id, learner_response]):
                 return {
                     "success": False,
@@ -137,23 +148,69 @@ class EvaluatorAgent(BaseAgent):
                     "agent_id": self.agent_id
                 }
             
-            self.logger.info(f"📊 Evaluating {learner_id} on {concept_id}")
-            
-            # Step 1: Get concept details
-            neo4j = self.state_manager.neo4j
-            concept_result = await neo4j.run_query(
-                "MATCH (c:CourseConcept {concept_id: $concept_id}) RETURN c",
-                concept_id=concept_id
-            )
-            
-            if not concept_result:
+            # Validate ID format (alphanumeric, underscore, hyphen only)
+            if not self.ID_PATTERN.match(learner_id):
                 return {
                     "success": False,
-                    "error": f"Concept not found: {concept_id}",
+                    "error": f"Invalid learner_id format: {learner_id}",
+                    "agent_id": self.agent_id
+                }
+            if not self.ID_PATTERN.match(concept_id):
+                return {
+                    "success": False,
+                    "error": f"Invalid concept_id format: {concept_id}",
                     "agent_id": self.agent_id
                 }
             
-            concept = concept_result[0].get("c", {})
+            # Warn if expected_answer missing (impacts scoring accuracy)
+            if not expected_answer:
+                self.logger.warning(f"No expected_answer provided for {concept_id} - scoring may be less accurate")
+            
+            self.logger.info(f"📊 Evaluating {learner_id} on {concept_id}")
+            
+            # Step 1: Get concept details (with cache + TTL)
+            cache_entry = self._concept_cache.get(concept_id)
+            
+            # FIX Issue 4: Check TTL
+            if cache_entry and (time.time() - cache_entry["timestamp"] < self._cache_ttl):
+                # FIX Issue 5: Return copy to prevent mutation
+                concept = cache_entry["data"].copy()
+                self.logger.debug(f"Concept {concept_id} loaded from cache")
+            else:
+                neo4j = self.state_manager.neo4j
+                # Expanded query to get all concept properties
+                concept_result = await neo4j.run_query(
+                    """
+                    MATCH (c:CourseConcept {concept_id: $concept_id})
+                    OPTIONAL MATCH (c)-[:HAS_PREREQUISITE]->(prereq:CourseConcept)
+                    RETURN c,
+                           c.common_misconceptions as misconceptions,
+                           collect(DISTINCT prereq.concept_id) as prerequisites
+                    """,
+                    concept_id=concept_id
+                )
+                
+                if not concept_result:
+                    return {
+                        "success": False,
+                        "error": f"Concept not found: {concept_id}",
+                        "agent_id": self.agent_id
+                    }
+                
+                concept = concept_result[0].get("c", {})
+                # FIX Issue 7: Only add if not already present
+                if "common_misconceptions" not in concept:
+                    concept["common_misconceptions"] = concept_result[0].get("misconceptions", [])
+                if "prerequisites" not in concept:
+                    concept["prerequisites"] = concept_result[0].get("prerequisites", [])
+                
+                self.logger.debug(f"Concept {concept_id} loaded: {concept.get('name', 'Unknown')}")
+                
+                # FIX Issue 4: Cache with timestamp for TTL
+                self._concept_cache[concept_id] = {
+                    "data": concept.copy(),  # FIX Issue 5: Store copy
+                    "timestamp": time.time()
+                }
             
             # Step 2: Score response
             score_result = await self._score_response(
@@ -170,10 +227,11 @@ class EvaluatorAgent(BaseAgent):
             feedback = None
             
             if score < 0.8:
-                # Step 3: Classify error
+                # Step 3: Classify error (with concept context)
                 error_result = await self._classify_error(
                     learner_response=learner_response,
-                    expected_answer=expected_answer
+                    expected_answer=expected_answer,
+                    concept=concept  # FIX Issue 1: Add concept context
                 )
                 error_type = ErrorType(error_result["error_type"])
                 
@@ -299,18 +357,33 @@ class EvaluatorAgent(BaseAgent):
             response = await self.llm.acomplete(prompt)
             score_text = response.text
             
+            # FIX Issue 6: Log if LLM response is empty
+            if not score_text or not score_text.strip():
+                self.logger.warning(f"Empty LLM response for scoring - using fallback")
+            
             # Parse score from JSON
+            # Note: Could integrate self.scorer (SemanticScorer) for hybrid scoring in future
             try:
-                # Try to extract JSON
-                import re
-                match = re.search(r'"score"\s*:\s*([\d.]+)', score_text)
+                # Try to extract JSON using class-level re module
+                match = re.search(r'"score"\s*:\s*([\d.]+)', score_text or "")
                 if match:
                     score = float(match.group(1))
                 else:
-                    # Fallback: simple comparison
-                    score = 0.8 if learner_response.lower() in expected_answer.lower() else 0.2
+                    # Improved fallback with case-insensitive word overlap
+                    learner_words = set(learner_response.lower().split())
+                    expected_words = set(expected_answer.lower().split())
+                    if expected_words:
+                        overlap = len(learner_words & expected_words) / len(expected_words)
+                        score = min(0.8, overlap)  # Cap at 0.8 for fallback
+                    else:
+                        # FIX Issue 5: Return 0.0 with warning for empty expected_answer
+                        self.logger.warning(f"Cannot score - expected_answer is empty")
+                        score = 0.0  # Cannot evaluate without expected answer
+                        
                 score = max(0.0, min(1.0, score))  # Clamp to 0-1
-            except:
+            except Exception as parse_error:
+                # Log specific exception type
+                self.logger.warning(f"Score parsing error ({type(parse_error).__name__}): {parse_error}")
                 score = 0.0 if learner_response.lower() != expected_answer.lower() else 1.0
             
             return {"success": True, "score": score}
@@ -322,12 +395,16 @@ class EvaluatorAgent(BaseAgent):
     async def _classify_error(
         self,
         learner_response: str,
-        expected_answer: str
+        expected_answer: str,
+        concept: Dict[str, Any] = None  # FIX Issue 1: Add concept parameter
     ) -> Dict[str, Any]:
-        """Classify error type"""
+        """Classify error type with concept context"""
         try:
+            # FIX Issue 1: Include concept name for context
+            concept_name = concept.get("name", "Unknown") if concept else "Unknown"
+            
             prompt = f"""
-            Classify this error:
+            Classify this error for the concept "{concept_name}":
             
             Learner response: {learner_response}
             Expected: {expected_answer}
@@ -348,13 +425,15 @@ class EvaluatorAgent(BaseAgent):
             # Validate
             valid_types = ["CARELESS", "INCOMPLETE", "PROCEDURAL", "CONCEPTUAL"]
             if error_type not in valid_types:
-                error_type = "CONCEPTUAL"  # Default to worst case
+                # FIX Issue 4: Default to CARELESS (less pessimistic)
+                self.logger.warning(f"Invalid error_type '{error_type}' - defaulting to CARELESS")
+                error_type = "CARELESS"
             
             return {"success": True, "error_type": error_type}
         
         except Exception as e:
             self.logger.error(f"Error classification error: {e}")
-            return {"success": False, "error_type": "CONCEPTUAL"}
+            return {"success": False, "error_type": "CARELESS"}  # FIX Issue 4: Changed from CONCEPTUAL
     
     async def _detect_misconception(
         self,
@@ -362,20 +441,25 @@ class EvaluatorAgent(BaseAgent):
         concept: Dict[str, Any],
         error_type: ErrorType
     ) -> Dict[str, Any]:
-        """Detect learner's misconception"""
+        """Detect learner's misconception with reference to known misconceptions"""
         try:
             if error_type == ErrorType.CORRECT:
                 return {"success": True, "misconception": None}
             
             concept_name = concept.get("name", "Unknown")
+            # FIX Issue 2: Get known misconceptions from concept
+            known_misconceptions = concept.get("common_misconceptions", [])
+            misconceptions_str = ", ".join(known_misconceptions) if known_misconceptions else "None known"
             
             prompt = f"""
             What misconception does this learner have?
             
             Concept: {concept_name}
             Learner response: {learner_response}
+            Known common misconceptions for this concept: {misconceptions_str}
             
             Identify the mistaken belief or mental model.
+            If the error matches a known misconception, reference it.
             Return ONLY a short sentence describing the misconception.
             
             Example: "Thinks WHERE joins tables (confuses with JOIN)"
@@ -419,13 +503,36 @@ class EvaluatorAgent(BaseAgent):
             """
             
             response = await self.llm.acomplete(prompt)
-            feedback = response.text.strip()
+            feedback = response.text.strip() if response.text else ""
+            
+            # FIX Issue 5: Check empty LLM response
+            if not feedback:
+                self.logger.warning("Empty LLM feedback - using fallback")
+                feedback = self._get_fallback_feedback(error_type, misconception)
             
             return {"success": True, "feedback": feedback}
         
         except Exception as e:
             self.logger.error(f"Feedback generation error: {e}")
-            return {"success": False, "feedback": "Let's review this concept together."}
+            # FIX Issue 6: Personalized fallback based on error type
+            fallback = self._get_fallback_feedback(error_type, misconception)
+            return {"success": False, "feedback": fallback}
+    
+    def _get_fallback_feedback(self, error_type: ErrorType, misconception: Optional[str]) -> str:
+        """Generate personalized fallback feedback based on error type"""
+        base_messages = {
+            ErrorType.CARELESS: "I noticed a small slip-up. Let's look at this more carefully.",
+            ErrorType.INCOMPLETE: "You're on the right track, but let's add more detail.",
+            ErrorType.PROCEDURAL: "The concept is clear, but let's review the correct steps.",
+            ErrorType.CONCEPTUAL: "Let's take a step back and clarify this concept together.",
+        }
+        
+        feedback = base_messages.get(error_type, "Let's review this concept together.")
+        
+        if misconception:
+            feedback += f" It seems like {misconception}."
+        
+        return feedback
     
     async def _make_path_decision(
         self,
@@ -435,20 +542,42 @@ class EvaluatorAgent(BaseAgent):
         concept_difficulty: int
     ) -> PathDecision:
         """
-        Make decision for next learning action (per Thesis).
+        Make decision for next learning action (per Thesis Table 3.10).
         
-        Decision Logic:
-        - score > 0.85 -> MASTERED or PROCEED
-        - score > 0.6 -> ALTERNATE (try different example)
-        - score < 0.6 + CONCEPTUAL error -> REMEDIATE (go to prerequisites)
-        - else -> RETRY (same concept, new question)
+        Decision Logic with adjustments:
+        - FIX Issue 1: Use current_mastery to adjust MASTERED threshold
+        - FIX Issue 2: Use concept_difficulty for lenient thresholds on hard concepts
+        
+        Base Thresholds:
+        - score >= 0.9 -> MASTERED
+        - score >= 0.8 -> PROCEED
+        - score >= 0.6 -> ALTERNATE
+        - score < 0.6 + CONCEPTUAL -> REMEDIATE
+        - score < 0.6 + Other -> RETRY
         """
         
-        if score >= 0.9:
+        # FIX Issue 2: Adjust thresholds based on concept difficulty (1-5 scale)
+        # Harder concepts (4-5) get slightly lower thresholds
+        difficulty_adjustment = 0.0
+        if concept_difficulty >= 4:
+            difficulty_adjustment = 0.05  # 5% more lenient for hard concepts
+        
+        # FIX Issue 1: Adjust MASTERED threshold based on current mastery
+        # If learner already has high mastery, be slightly more lenient
+        mastery_boost = 0.0
+        if current_mastery >= 0.7:
+            mastery_boost = 0.03  # 3% boost for high-mastery learners
+        
+        # Adjusted thresholds
+        mastered_threshold = 0.9 - difficulty_adjustment - mastery_boost
+        proceed_threshold = 0.8 - difficulty_adjustment
+        alternate_threshold = 0.6 - difficulty_adjustment
+        
+        if score >= mastered_threshold:
             return PathDecision.MASTERED
-        elif score >= 0.8:
+        elif score >= proceed_threshold:
             return PathDecision.PROCEED
-        elif score >= 0.6:
+        elif score >= alternate_threshold:
             # Good enough but not perfect - try different angle
             return PathDecision.ALTERNATE
         else:
@@ -513,10 +642,18 @@ class EvaluatorAgent(BaseAgent):
             self.logger.info(f"TUTOR_ASSESSMENT_READY: Evaluating {learner_id}/{concept_id}")
             
             # Execute evaluation
+            # Support both 'learner_answer' and 'learner_response' for compatibility
+            learner_response = (event.get('learner_response') or event.get('learner_answer') or '').strip()
+            
+            # FIX Issue 6: Check empty response with clear warning
+            if not learner_response:
+                self.logger.warning(f"No learner_response in event for {learner_id}/{concept_id} - skipping evaluation")
+                return
+            
             result = await self.execute(
                 learner_id=learner_id,
                 concept_id=concept_id,
-                learner_response=event.get('learner_answer', ''),
+                learner_response=learner_response,
                 expected_answer=event.get('expected_answer', ''),
                 dialogue_transcript=event.get('dialogue_transcript', [])
             )

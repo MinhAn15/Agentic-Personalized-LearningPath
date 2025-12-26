@@ -14,7 +14,9 @@ from backend.models import (
 )
 from backend.prompts import LEARNER_PROFILER_SYSTEM_PROMPT
 from llama_index.llms.gemini import Gemini
-from llama_index.core import StorageContext, load_index_from_storage
+from llama_index.core import PropertyGraphIndex, StorageContext, load_index_from_storage
+from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+from llama_index.embeddings.gemini import GeminiEmbedding
 from backend.config import get_settings
 import os
 
@@ -64,7 +66,8 @@ class ProfilerAgent(BaseAgent):
         # Per-learner locks for event ordering
         self._learner_locks: Dict[str, asyncio.Lock] = {}
         
-        # Lazy loaded vector index
+        # Lazy loaded Retrievers
+        self._graph_retriever = None
         self._vector_index = None
         
         # Subscribe to events for real-time updates
@@ -219,7 +222,7 @@ class ProfilerAgent(BaseAgent):
             
             self.logger.info(f"Personal KG initialized: {len(initial_mastery)} MasteryNodes + SessionEpisode")
             
-            # Step 7: Cache in Redis
+            # Step 7: Cache in Redis (including profile_vector for Agent 3 LinUCB)
             redis = self.state_manager.redis
             await redis.set(
                 f"profile:{learner_id}",
@@ -230,7 +233,10 @@ class ProfilerAgent(BaseAgent):
                     "topic": profile_data["topic"],
                     "learning_style": profile.preferred_learning_style.value,
                     "skill_level": profile.current_skill_level.value,
-                    "diagnostic_completed": diagnostic_result is not None
+                    "diagnostic_completed": diagnostic_result is not None,
+                    "profile_vector": profile_vector,  # NEW: 10-dim vector for LinUCB
+                    "time_available": profile.time_available,
+                    "hours_per_day": profile_data.get("hours_per_day", 2)
                 },
                 ttl=3600
             )
@@ -345,112 +351,143 @@ Return ONLY valid JSON:
             self.logger.error(f"Goal parsing error: {e}")
             return {"success": False, "error": str(e)}
     
+    def _get_graph_retriever(self):
+        """
+        Lazy load LlamaIndex PropertyGraphIndex (Graph RAG).
+        Connects to existing Neo4j graph.
+        """
+        if self._graph_retriever is None:
+            try:
+                # Initialize Graph Store connected to existing Neo4j
+                graph_store = Neo4jPropertyGraphStore(
+                    username=self.settings.NEO4J_USER,
+                    password=self.settings.NEO4J_PASSWORD,
+                    url=self.settings.NEO4J_URI,
+                )
+                
+                # Create Index wrapper (no build, just load)
+                # Ensure we use Gemini embeddings
+                embed_model = GeminiEmbedding(
+                    model_name="models/embedding-001",
+                    api_key=self.settings.GOOGLE_API_KEY
+                )
+                
+                index = PropertyGraphIndex.from_existing(
+                    property_graph_store=graph_store,
+                    embed_model=embed_model
+                )
+                
+                # Hybrid Retriever: Vector + Keyword + Graph Traversal
+                self._graph_retriever = index.as_retriever(
+                    retriever_mode="hybrid", 
+                    similarity_top_k=10 # Get broader set, then filter by centrality
+                )
+                self.logger.info("Loaded PropertyGraphIndex Retriever (Neo4j)")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to load Graph Retriever: {e}")
+        return self._graph_retriever
+
     def _get_vector_index(self):
-        """Lazy load vector index from storage"""
+        """Lazy load vector index (Fallback)"""
         if self._vector_index is None:
             try:
                 storage_dir = "./storage/vector_index"
                 if os.path.exists(storage_dir):
                     storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
                     self._vector_index = load_index_from_storage(storage_context)
-                    self.logger.info("Loaded VectorStoreIndex for Hybrid Retrieval")
-                else:
-                    self.logger.warning(f"Vector storage not found at {storage_dir}")
             except Exception as e:
-                self.logger.error(f"Failed to load vector index: {e}")
+                self.logger.warning(f"Failed to load fallback vector index: {e}")
         return self._vector_index
-
-    async def _retrieve_vector_candidates(self, topic: str, limit: int = 5) -> List[Dict]:
-        """
-        Step 1 (Hybrid): Component - Semantic Vector Search.
-        Find concepts semantically related to topic (e.g. "Database" -> "SQL").
-        """
-        candidates = []
-        index = self._get_vector_index()
-        
-        if not index:
-            return []
-            
-        try:
-            # Use retriever to find top nodes
-            retriever = index.as_retriever(similarity_top_k=limit)
-            nodes = await retriever.aretrieve(topic)
-            
-            for node in nodes:
-                # Metadata contains concept info
-                candidates.append({
-                    "concept_id": node.metadata.get("concept_id", ""),
-                    "name": node.metadata.get("name", "Unknown"),
-                    "difficulty": node.metadata.get("difficulty", 2),
-                    "score": node.score or 0.0,
-                    "source": "vector"
-                })
-            
-            self.logger.info(f"Vector search found {len(candidates)} candidates for '{topic}'")
-            
-        except Exception as e:
-            self.logger.error(f"Vector retrieval failed: {e}")
-            
-        return candidates
 
     async def _run_diagnostic_assessment(
         self, learner_id: str, topic: str, current_level: str
     ) -> Dict[str, Any]:
         """
-        Diagnostic Assessment Strategy (Hybrid Retrieval Upgrade).
+        Diagnostic Assessment V2 (Robust Hybrid).
         
-        1. Vector Search: Find semantically related concepts.
-        2. Graph Search: Find structurally central concepts in that cluster.
-        3. Merge & Deduplicate.
-        4. Fallback to LLM if both fail.
+        Priority 1: PropertyGraphIndex (Graph RAG) - Best for Semantics+Topology
+        Priority 2: VectorStoreIndex (Local) + Cypher (Graph) - Fallback
+        Priority 3: Raw Cypher - Fallback
+        Priority 4: LLM Generation - Last resort
         """
         try:
-            # 1. Vector Search (Semantic)
-            vector_candidates = await self._retrieve_vector_candidates(topic, limit=5)
+            concepts = []
             
-            # 2. Graph Search (Structural)
-            neo4j = self.state_manager.neo4j
-            graph_candidates = await neo4j.run_query(
-                """
-                MATCH (c:CourseConcept)
-                WHERE toLower(c.name) CONTAINS toLower($topic)
-                   OR any(tag IN c.semantic_tags WHERE toLower(tag) CONTAINS toLower($topic))
-                WITH c, size((c)-[:REQUIRES]->()) + size((c)<-[:REQUIRES]-()) as centrality
-                ORDER BY centrality DESC
-                LIMIT 5
-                RETURN c.concept_id as concept_id, c.name as name, c.difficulty as difficulty
-                """,
-                topic=topic
-            )
+            # 1. Try Graph RAG (PropertyGraphIndex)
+            retriever = self._get_graph_retriever()
+            if retriever:
+                try:
+                    nodes = await retriever.aretrieve(topic)
+                    candidate_ids = [n.metadata.get("concept_id") or n.metadata.get("name") for n in nodes]
+                    
+                    if candidate_ids:
+                        # Centrality Reranking
+                        neo4j = self.state_manager.neo4j
+                        concepts = await neo4j.run_query(
+                            """
+                            MATCH (c:CourseConcept)
+                            WHERE c.concept_id IN $ids OR c.name IN $ids
+                            WITH c, size((c)-[:REQUIRES]->()) + size((c)<-[:REQUIRES]-()) as centrality
+                            ORDER BY centrality DESC
+                            LIMIT 5
+                            RETURN c.concept_id as concept_id, c.name as name, c.difficulty as difficulty
+                            """,
+                            ids=candidate_ids
+                        )
+                except Exception as e:
+                     self.logger.warning(f"Graph RAG failed, trying fallback: {e}")
             
-            # 3. Merge Strategies
-            # We want high centrality (Graph) AND high relevance (Vector)
-            # Strategy: Take all Graph candidates, add Vector ones if not present, up to limit 5
+            # 2. Fallback: VectorStoreIndex + Cypher (If Graph RAG empty)
+            if not concepts:
+                index = self._get_vector_index()
+                if index:
+                    try:
+                        retriever = index.as_retriever(similarity_top_k=5)
+                        nodes = await retriever.aretrieve(topic)
+                        candidate_ids = [n.metadata.get("concept_id") or n.metadata.get("name") for n in nodes]
+                        
+                        if candidate_ids:
+                             neo4j = self.state_manager.neo4j
+                             concepts = await neo4j.run_query(
+                                """
+                                MATCH (c:CourseConcept)
+                                WHERE c.concept_id IN $ids OR c.name IN $ids
+                                WITH c, size((c)-[:REQUIRES]->()) + size((c)<-[:REQUIRES]-()) as centrality
+                                ORDER BY centrality DESC
+                                LIMIT 5
+                                RETURN c.concept_id as concept_id, c.name as name, c.difficulty as difficulty
+                                """,
+                                ids=candidate_ids
+                            )
+                    except Exception as e:
+                        self.logger.warning(f"Vector fallback failed: {e}")
             
-            combined_map = {}
-            
-            # Priority 1: Graph Candidates (High Centrality = Anchors)
-            for cand in graph_candidates:
-                cid = cand.get("concept_id") or cand.get("name")
-                combined_map[cid] = cand
-                
-            # Priority 2: Vector Candidates (High Semantic Relevance)
-            for cand in vector_candidates:
-                cid = cand.get("concept_id") or cand.get("name")
-                if cid not in combined_map:
-                    combined_map[cid] = cand
-            
-            # Convert back to list, limit to 5
-            concepts = list(combined_map.values())[:5]
+            # 3. Fallback: Raw Cypher (Keyword Search)
+            if not concepts:
+                # Fallback logic...
+                neo4j = self.state_manager.neo4j
+                concepts = await neo4j.run_query(
+                    """
+                    MATCH (c:CourseConcept)
+                    WHERE toLower(c.name) CONTAINS toLower($topic)
+                    WITH c, size((c)-[:REQUIRES]->()) + size((c)<-[:REQUIRES]-()) as centrality
+                    ORDER BY centrality DESC
+                    LIMIT 5
+                    RETURN c.concept_id as concept_id, c.name as name, c.difficulty as difficulty
+                    """,
+                    topic=topic
+                )
             
             if not concepts:
-                # Fallback: generate questions based on topic via LLM
+                # 4. Ultimate Fallback: LLM Generation
                 concepts = await self._generate_diagnostic_concepts(topic)
+            
+            # ... Rest of logic ...
             
             # Generate diagnostic questions
             questions = await self._generate_diagnostic_questions(concepts, topic)
             
-            # Estimate mastery...
             mastery_estimates = {}
             level_multiplier = {
                 "beginner": 0.1,

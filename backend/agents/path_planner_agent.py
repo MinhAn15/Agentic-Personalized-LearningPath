@@ -68,7 +68,8 @@ class PathPlannerAgent(BaseAgent):
         super().__init__(agent_id, AgentType.PATH_PLANNER, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.rl_engine = RLEngine(strategy=BanditStrategy.UCB)
+        # UPGRADE: Use LinUCB (Contextual Bandit) instead of basic UCB
+        self.rl_engine = RLEngine(strategy=BanditStrategy.LINUCB)
         self.logger = logging.getLogger(f"PathPlannerAgent.{agent_id}")
         
         # Relationship type priorities for each chaining mode
@@ -125,16 +126,58 @@ class PathPlannerAgent(BaseAgent):
                 pipeline.set(f"mab_stats:{cid}", json.dumps(data))
                 
         await pipeline.execute()
+    
+    async def _load_linucb_arms(self, concept_ids: List[str]):
+        """Load LinUCB arm state from Redis (Ridge Regression matrices)."""
+        from backend.core.rl_engine import LinUCBArm
+        
+        redis = self.state_manager.redis
+        pipeline = redis.pipeline()
+        
+        for cid in concept_ids:
+            pipeline.get(f"linucb:{cid}")
+        
+        results = await pipeline.execute()
+        
+        for cid, data_str in zip(concept_ids, results):
+            if data_str:
+                try:
+                    data = json.loads(data_str)
+                    arm = LinUCBArm.from_dict(data)
+                    self.rl_engine.linucb_arms[cid] = arm
+                    self.logger.debug(f"Loaded LinUCB state for {cid} (pulls={arm.pulls})")
+                except Exception as e:
+                    self.logger.warning(f"Failed to load LinUCB state for {cid}: {e}")
+    
+    async def _save_linucb_arms(self, concept_ids: List[str]):
+        """Save LinUCB arm state to Redis."""
+        redis = self.state_manager.redis
+        pipeline = redis.pipeline()
+        
+        for cid in concept_ids:
+            if cid in self.rl_engine.linucb_arms:
+                arm = self.rl_engine.linucb_arms[cid]
+                pipeline.set(f"linucb:{cid}", json.dumps(arm.to_dict()))
+        
+        await pipeline.execute()
+        self.logger.info(f"Saved LinUCB state for {len(concept_ids)} concepts")
 
     async def _on_evaluation_feedback(self, event: Dict[str, Any]):
         """
         Process feedback from Evaluator Agent.
         R = 0.6 * score + 0.4 * completion - penalty
+        
+        Improvements:
+        - Loads LinUCB arm from Redis if not in memory (Issue 1)
+        - Loads context_vector from Redis if not in event (Issue 2)
+        - Syncs in-memory MAB state after Redis update (Issue 3)
+        - Includes retry mechanism for Redis (Issue 5)
         """
+        MAX_RETRIES = 3
+        
         try:
             concept_id = event.get('concept_id')
             score = event.get('score', 0.0)
-            # Infer passed status if not explicitly provided
             passed = event.get('passed', score >= 0.8)
             
             if not concept_id:
@@ -142,42 +185,73 @@ class PathPlannerAgent(BaseAgent):
                 
             # Calculate Reward
             completion_reward = 1.0 if passed else 0.0
-            dropout_penalty = 0.0 # TODO: detect dropout
+            dropout_penalty = 0.0  # TODO: detect dropout from behavior signals
             
             reward = (0.6 * score) + (0.4 * completion_reward) - dropout_penalty
             
-            # Update In-Memory RLEngine (if arm exists)
-            # We might need to ensure arm exists or load it first
-            # But simpler to just update generic key in Redis directly if we are stateless?
-            # Since we maintain self.rl_engine, we update it.
-            
-            if concept_id not in self.rl_engine.arms:
-                 # If we don't have it loaded, we might skip or load-update-save
-                 # Let's simple load-update-save pattern here
-                 await self._load_mab_stats([concept_id])
-                 # If still not in arms (wasn't added), we can't update. 
-                 # But arms are usually added during execute().
-                 # So we might need to add it temporarily.
-                 pass
-
-            # For now, let's just do a Read-Modify-Write cycle on Redis directly
-            # This is safer for concurrency across multiple agent instances
+            # --- UPDATE MAB STATS (with retry) ---
             redis = self.state_manager.redis
             key = f"mab_stats:{concept_id}"
-            data_str = await redis.get(key)
             
-            if data_str:
-                data = json.loads(data_str)
-                pulls = data.get("pulls", 0) + 1
-                total_reward = data.get("total_reward", 0.0) + reward
-            else:
-                pulls = 1
-                total_reward = reward
+            for attempt in range(MAX_RETRIES):
+                try:
+                    data_str = await redis.get(key)
+                    
+                    if data_str:
+                        data = json.loads(data_str)
+                        pulls = data.get("pulls", 0) + 1
+                        total_reward = data.get("total_reward", 0.0) + reward
+                    else:
+                        pulls = 1
+                        total_reward = reward
+                        
+                    await redis.set(key, json.dumps({
+                        "pulls": pulls,
+                        "total_reward": total_reward
+                    }))
+                    
+                    # FIX Issue 3: Sync in-memory MAB state
+                    if concept_id in self.rl_engine.arms:
+                        self.rl_engine.arms[concept_id].set_stats(pulls, total_reward)
+                    
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    if attempt == MAX_RETRIES - 1:
+                        self.logger.error(f"Redis update failed after {MAX_RETRIES} attempts: {e}")
+                        raise
+                    await asyncio.sleep(0.1 * (attempt + 1))  # Exponential backoff
+            
+            # --- UPDATE LINUCB ARM STATE ---
+            # FIX Issue 2: Load context from Redis if not in event
+            context_vector = event.get('context_vector')
+            if not context_vector:
+                # Try to load from saved selection context
+                context_key = f"linucb_context:{concept_id}"
+                context_str = await redis.get(context_key)
+                if context_str:
+                    context_vector = json.loads(context_str)
+                    self.logger.debug(f"Loaded context_vector from Redis for {concept_id}")
+            
+            if context_vector:
+                # FIX Issue 1: Load LinUCB arm from Redis if not in memory
+                if concept_id not in self.rl_engine.linucb_arms:
+                    await self._load_linucb_arms([concept_id])
+                    self.logger.debug(f"Loaded LinUCB arm from Redis for {concept_id}")
                 
-            await redis.set(key, json.dumps({
-                "pulls": pulls,
-                "total_reward": total_reward
-            }))
+                # Now update the arm (create new if still doesn't exist)
+                if concept_id not in self.rl_engine.linucb_arms:
+                    from backend.core.rl_engine import LinUCBArm
+                    self.rl_engine.linucb_arms[concept_id] = LinUCBArm(
+                        concept_id, d=self.rl_engine.context_dim
+                    )
+                
+                arm = self.rl_engine.linucb_arms[concept_id]
+                arm.update(context_vector, reward)
+                await self._save_linucb_arms([concept_id])
+                self.logger.info(f"LinUCB arm updated for {concept_id}")
+            else:
+                self.logger.warning(f"No context_vector available for LinUCB update on {concept_id}")
             
             self.logger.info(f"Feedback processed for {concept_id}: Reward={reward:.2f}")
             
@@ -210,26 +284,59 @@ class PathPlannerAgent(BaseAgent):
                     "agent_id": self.agent_id
                 }
             
-            # Step 2: Get Course KG (concepts + ALL relationship types)
+            # Step 2: Get Course KG (SMART FILTERING - use Personal Subgraph)
             neo4j = self.state_manager.neo4j
+            topic = learner_profile.get("topic", "")
+            
+            # Strategy 1: Start from learner's MasteryNodes, expand to connected concepts
             course_concepts = await neo4j.run_query(
                 """
-                MATCH (c:CourseConcept) 
-                RETURN c.concept_id as concept_id, 
+                // Find concepts the learner already knows (via MasteryNodes)
+                OPTIONAL MATCH (l:Learner {learner_id: $learner_id})-[:HAS_MASTERY]->(m:MasteryNode)-[:MAPS_TO_CONCEPT]->(known:CourseConcept)
+                WITH collect(known) as known_concepts
+                
+                // Expand to connected concepts (neighbors)
+                MATCH (c:CourseConcept)
+                WHERE c IN known_concepts 
+                   OR EXISTS { (c)-[:NEXT|REQUIRES|SIMILAR_TO|IS_PREREQUISITE_OF]->(:CourseConcept) WHERE (c)-[:NEXT|REQUIRES|SIMILAR_TO|IS_PREREQUISITE_OF]->(known_concepts[0]) }
+                   OR (size(known_concepts) = 0 AND (toLower(c.name) CONTAINS toLower($topic) OR any(tag IN coalesce(c.semantic_tags, []) WHERE toLower(tag) CONTAINS toLower($topic))))
+                RETURN DISTINCT c.concept_id as concept_id, 
                        c.name as name, 
                        c.difficulty as difficulty,
                        c.time_estimate as time_estimate
-                """
+                LIMIT 100
+                """,
+                learner_id=learner_id,
+                topic=topic
             )
             
-            # Get ALL relationship types
+            # Fallback: If still no concepts, get most central concepts related to topic
+            if not course_concepts:
+                self.logger.warning(f"No concepts found via Personal KG, falling back to centrality-based selection for topic: {topic}")
+                course_concepts = await neo4j.run_query(
+                    """
+                    MATCH (c:CourseConcept)
+                    WHERE toLower(c.name) CONTAINS toLower($topic)
+                       OR any(tag IN coalesce(c.semantic_tags, []) WHERE toLower(tag) CONTAINS toLower($topic))
+                    WITH c, size((c)-[:REQUIRES]->()) + size((c)<-[:REQUIRES]-()) as centrality
+                    ORDER BY centrality DESC
+                    LIMIT 50
+                    RETURN c.concept_id as concept_id, c.name as name, c.difficulty as difficulty, c.time_estimate as time_estimate
+                    """,
+                    topic=topic
+                )
+            
+            # Get ALL relationship types for the selected concepts
+            concept_ids = [c['concept_id'] for c in course_concepts]
             course_relationships = await neo4j.run_query(
                 """
                 MATCH (a:CourseConcept)-[r]->(b:CourseConcept)
+                WHERE a.concept_id IN $concept_ids AND b.concept_id IN $concept_ids
                 RETURN a.concept_id as source, 
                        b.concept_id as target,
                        type(r) as rel_type
-                """
+                """,
+                concept_ids=concept_ids
             )
             
             if not course_concepts:
@@ -270,10 +377,11 @@ class PathPlannerAgent(BaseAgent):
                 learner_profile
             )
             
-            # Step 8: Calculate success probability
+            # Step 8: Calculate success probability (with live mastery data)
             success_prob = await self._calculate_success_probability(
                 learner_profile,
-                learning_path["path"]
+                learning_path["path"],
+                learning_path.get("current_mastery", {})  # FIX: Use live mastery
             )
             
             result = {
@@ -386,24 +494,30 @@ class PathPlannerAgent(BaseAgent):
             relevant_rel_types = self.CHAIN_RELATIONSHIPS[chain_mode]
             prerequisites = relationship_map.get("REQUIRES", {})
             
-            # --- STRICT MASTERY GATE (Phase 6) ---
-            # If current concept exists and mastery < 0.8, FORCE Remediation.
+            # --- PROBABILISTIC MASTERY GATE (Scientific Upgrade) ---
+            # Replace hard 0.8 threshold with soft probabilistic gate
+            # Allows occasional exploration even at lower scores
             if path:
                 last_concept_id = path[-1]["concept"]
             else:
-                 # If generating fresh path, check the requested 'goal' or context if available
-                 # For now, we assume we are extending from what is passed in or starting fresh.
-                 # If starting fresh, we don't block.
-                 last_concept_id = None
+                last_concept_id = None
 
             if last_concept_id:
                 current_score = current_mastery.get(last_concept_id, 0.0)
-                if current_score < 0.8:
-                    self.logger.warning(f"⛔ MASTERY GATE: Concept {last_concept_id} has score {current_score:.2f} < 0.8. Blocking forward progress.")
-                    # Force ChainingMode to BACKWARD or LATERAL to prevent new concepts
+                
+                # Probabilistic Gate: gate_prob = min(1.0, score / 0.8)
+                # At score 0.8+: 100% pass. At 0.6: 75% pass. At 0.4: 50% pass.
+                import random
+                gate_prob = min(1.0, current_score / 0.8)
+                
+                if random.random() > gate_prob:
+                    # Block forward progress with probability (1 - gate_prob)
+                    self.logger.info(f"🎲 PROBABILISTIC GATE: Score={current_score:.2f}, GateProb={gate_prob:.2f} -> Forcing remediation")
                     if chain_mode not in [ChainingMode.BACKWARD, ChainingMode.LATERAL, ChainingMode.REVIEW]:
                         chain_mode = ChainingMode.BACKWARD
                         relevant_rel_types = self.CHAIN_RELATIONSHIPS[ChainingMode.BACKWARD]
+                else:
+                    self.logger.debug(f"✅ PROBABILISTIC GATE: Score={current_score:.2f}, GateProb={gate_prob:.2f} -> Allowed to proceed")
             # -------------------------------------
 
             visited = set()
@@ -441,13 +555,29 @@ class PathPlannerAgent(BaseAgent):
                 # LOAD MAB STATS FOR CANDIDATES (Stateful Bandit)
                 await self._load_mab_stats(candidates)
                 
-                # Use RL to select from candidates
+                # LOAD LINUCB STATE FOR CANDIDATES (Persistent Ridge Regression)
+                await self._load_linucb_arms(candidates)
+                
+                # Get profile vector for LinUCB (context-aware selection)
+                profile_vector = learner_profile.get("profile_vector", [0.0] * 10)
+                
+                # Build time estimates map for candidates (FIX Issue 3)
+                concept_time_estimates = {}
+                for c in course_concepts:
+                    cid = c.get("concept_id")
+                    if cid in candidates:
+                        diff = c.get("difficulty", 2)
+                        concept_time_estimates[cid] = c.get("time_estimate", diff * 30) / 60
+                
+                # Use RL to select from candidates (LinUCB with context + time filter)
                 next_concept = self.rl_engine.select_concept(
                     learner_mastery=current_mastery,
                     prerequisites=prerequisites,
                     time_available=int(total_hours - hours_used),
                     learning_style=learner_profile.get("preferred_learning_style", "VISUAL"),
-                    candidate_concepts=candidates
+                    candidate_concepts=candidates,
+                    context_vector=profile_vector,
+                    concept_time_estimates=concept_time_estimates  # NEW: Time filtering
                 )
                 
                 if not next_concept:
@@ -486,8 +616,20 @@ class PathPlannerAgent(BaseAgent):
                 # Update tracking
                 visited.add(next_concept)
                 hours_used += time_estimate
-                current_mastery[next_concept] = 0.3
+                # FIX Issue 4: Calculate initial mastery based on difficulty
+                # Harder concepts start with lower mastery expectation
+                initial_mastery = max(0.1, 0.5 - (difficulty * 0.08))
+                current_mastery[next_concept] = initial_mastery
                 day = int(hours_used / hours_per_day) + 1
+                
+                # FIX Feedback Issue 2: Save context_vector for this concept selection
+                # So Feedback Loop can load it if not provided by Evaluator
+                context_key = f"linucb_context:{next_concept}"
+                await self.state_manager.redis.set(
+                    context_key,
+                    json.dumps(profile_vector),
+                    ex=86400  # Expire after 24 hours
+                )
             
             # Determine pacing
             pacing = self._determine_pacing(hours_used, total_hours, len(path))
@@ -496,7 +638,8 @@ class PathPlannerAgent(BaseAgent):
                 "success": True,
                 "path": path,
                 "pacing": pacing,
-                "total_hours": round(hours_used, 1)
+                "total_hours": round(hours_used, 1),
+                "current_mastery": current_mastery  # FIX: Return live mastery for success_prob calc
             }
         
         except Exception as e:
@@ -523,12 +666,19 @@ class PathPlannerAgent(BaseAgent):
                 direct_next = relationship_map.get("NEXT", {}).get(current_concept, [])
                 for next_c in direct_next:
                     candidates.append(next_c)
-                    # Look one more step ahead
+                    # Look one more step ahead (with prerequisite check)
                     second_step = relationship_map.get("NEXT", {}).get(next_c, [])
-                    candidates.extend(second_step)
+                    for step2 in second_step:
+                        # FIX Issue 4: Check prerequisites for step 2
+                        prereqs = prerequisites.get(step2, [])
+                        prereqs_met = all(
+                            current_mastery.get(p, 0) >= 0.7 or p in visited
+                            for p in prereqs
+                        )
+                        if prereqs_met:
+                            candidates.append(step2)
                 
-                # Also include IS_SUB_CONCEPT_OF parent/child depending on graph direction
-                # Here assuming drilling down to harder sub-concepts
+                # Also include IS_SUB_CONCEPT_OF parent/child
                 sub_concepts = relationship_map.get("IS_SUB_CONCEPT_OF", {}).get(current_concept, [])
                 candidates.extend(sub_concepts)
             
@@ -539,19 +689,41 @@ class PathPlannerAgent(BaseAgent):
                         related = relationship_map[rel_type].get(current_concept, [])
                         candidates.extend(related)
         else:
-            # No current concept
+            # No current concept (Cold-start)
             if chain_mode == ChainingMode.REVIEW:
-                # REVIEW mode at start: Pick mastered concepts from long ago
-                # Simulating "long ago" by picking concepts with > 0.8 mastery 
-                # but valid candidates logic below will filter visited.
-                # In real prod, this needs last_accessed_at.
-                candidates = [
-                    cid for cid, m in current_mastery.items() 
-                    if m > 0.8
-                ]
+                # FIX Issue 2: Proper Spaced Repetition with decay
+                # Prioritize concepts with high mastery but not recently accessed
+                # Simulate decay: older mastery = higher priority for review
+                from datetime import datetime, timedelta
+                
+                review_candidates = []
+                for cid, mastery in current_mastery.items():
+                    if mastery > 0.7:  # Only review concepts with decent mastery
+                        # TODO: In production, use actual last_accessed_at from DB
+                        # For now, score based on mastery (lower = needs review more)
+                        review_score = 1.0 - mastery + 0.2  # Add bonus for review
+                        review_candidates.append((cid, review_score))
+                
+                # Sort by review priority (higher score = more urgent review)
+                review_candidates.sort(key=lambda x: x[1], reverse=True)
+                candidates = [c[0] for c in review_candidates[:10]]  # Top 10 for review
+            
             else:
-                # Get all concepts
-                candidates = [c["concept_id"] for c in course_concepts]
+                # FIX Issue 3: Cold-start should return ROOT concepts (no prerequisites)
+                # Not ALL concepts - that defeats Goal-Centric Filtering!
+                root_concepts = []
+                for c in course_concepts:
+                    cid = c["concept_id"]
+                    prereqs = prerequisites.get(cid, [])
+                    if len(prereqs) == 0:  # No prerequisites = root concept
+                        root_concepts.append(cid)
+                
+                if root_concepts:
+                    candidates = root_concepts
+                else:
+                    # Fallback: lowest difficulty concepts
+                    sorted_concepts = sorted(course_concepts, key=lambda x: x.get("difficulty", 2))
+                    candidates = [c["concept_id"] for c in sorted_concepts[:10]]
         
         # Filter: not visited, prerequisites met
         valid_candidates = []
@@ -559,10 +731,10 @@ class PathPlannerAgent(BaseAgent):
             if candidate in visited:
                 continue
             
-            # Check prerequisites
+            # FIX Issue 1: Unify prerequisites threshold to 0.7 (matches rl_engine.py)
             prereqs = prerequisites.get(candidate, [])
             prereqs_met = all(
-                current_mastery.get(p, 0) >= 0.5 or p in visited
+                current_mastery.get(p, 0) >= 0.7 or p in visited
                 for p in prereqs
             )
             
@@ -587,15 +759,25 @@ class PathPlannerAgent(BaseAgent):
         learning_path: List[Dict[str, Any]],
         learner_profile: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """Recommend learning resources for each concept"""
+        """
+        Recommend learning resources for each concept.
+        
+        TODO: In production, query actual resources from Content Management System
+        or Knowledge Graph. Currently returns placeholder resource types.
+        """
         resources = []
         learning_style = learner_profile.get("preferred_learning_style", "VISUAL")
         
         for step in learning_path:
             concept = step["concept"]
+            difficulty = step.get("difficulty", 2)
+            
+            # Use _recommend_content_type for primary resource (consolidate logic)
+            primary_type = self._recommend_content_type(difficulty, learning_style)
             
             resource = {
                 "concept": concept,
+                "primary_type": primary_type,  # Consolidated with path item's recommended_type
                 "recommended_resources": [
                     {
                         "type": "VIDEO",
@@ -621,7 +803,8 @@ class PathPlannerAgent(BaseAgent):
     async def _calculate_success_probability(
         self,
         learner_profile: Dict[str, Any],
-        learning_path: List[Dict[str, Any]]
+        learning_path: List[Dict[str, Any]],
+        current_mastery: Optional[Dict[str, float]] = None  # FIX: Accept live mastery
     ) -> float:
         """
         Calculate probability of completing learning path.
@@ -633,16 +816,22 @@ class PathPlannerAgent(BaseAgent):
             return 0.0
         
         # Component 1: Average mastery (40%)
-        concept_mastery_map = learner_profile.get("concept_mastery_map", {})
+        # FIX: Use current_mastery (live) first, fallback to profile's concept_mastery_map
+        mastery_source = current_mastery if current_mastery else learner_profile.get("concept_mastery_map", {})
         mastery_scores = [
-            concept_mastery_map.get(step['concept'], 0.0)
+            mastery_source.get(step['concept'], 0.0)
             for step in learning_path
         ]
         avg_mastery = sum(mastery_scores) / len(mastery_scores) if mastery_scores else 0.0
         
         # Component 2: Time fit (40%)
         total_hours = sum(s.get("estimated_hours", 0) for s in learning_path)
-        available_hours = learner_profile.get("available_time", 600) / 60  # minutes -> hours
+        
+        # FIX: Align with Agent 2's Profile Schema (Days * Hours/Day)
+        time_days = learner_profile.get("time_available", 30)
+        hours_per_day = learner_profile.get("hours_per_day", 2)
+        available_hours = time_days * hours_per_day
+        
         time_fit = min(1.0, available_hours / total_hours) if total_hours > 0 else 1.0
         
         # Component 3: Difficulty penalty (20%) - penalty above medium difficulty
