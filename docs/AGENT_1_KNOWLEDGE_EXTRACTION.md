@@ -99,6 +99,7 @@ Sequential sub-tasks to minimize LLM cognitive load:
   - **Stage 2 - Deep Comparison:** Runs full 3-way scoring (Semantic, Structural, Contextual) only on the Top-K candidates.
 - **Multi-Factor Scoring Engine:**
   - **Semantic (W=0.6):** Cosine Similarity of `GeminiEmbedding`.
+    - **Signature:** `Name | Context | Description | Tags` (4-Pillar Contextual Embedding).
   - **Structural (W=0.3):** Jaccard Similarity of prerequisite sets.
   - **Contextual (W=0.1):** Overlap of semantic tags.
 - **Threshold:** `0.85` for automatic `MERGE`.

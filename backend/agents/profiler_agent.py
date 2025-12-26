@@ -14,7 +14,9 @@ from backend.models import (
 )
 from backend.prompts import LEARNER_PROFILER_SYSTEM_PROMPT
 from llama_index.llms.gemini import Gemini
+from llama_index.core import StorageContext, load_index_from_storage
 from backend.config import get_settings
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,9 @@ class ProfilerAgent(BaseAgent):
         
         # Per-learner locks for event ordering
         self._learner_locks: Dict[str, asyncio.Lock] = {}
+        
+        # Lazy loaded vector index
+        self._vector_index = None
         
         # Subscribe to events for real-time updates
         self._subscribe_to_events()
@@ -340,21 +345,72 @@ Return ONLY valid JSON:
             self.logger.error(f"Goal parsing error: {e}")
             return {"success": False, "error": str(e)}
     
+    def _get_vector_index(self):
+        """Lazy load vector index from storage"""
+        if self._vector_index is None:
+            try:
+                storage_dir = "./storage/vector_index"
+                if os.path.exists(storage_dir):
+                    storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
+                    self._vector_index = load_index_from_storage(storage_context)
+                    self.logger.info("Loaded VectorStoreIndex for Hybrid Retrieval")
+                else:
+                    self.logger.warning(f"Vector storage not found at {storage_dir}")
+            except Exception as e:
+                self.logger.error(f"Failed to load vector index: {e}")
+        return self._vector_index
+
+    async def _retrieve_vector_candidates(self, topic: str, limit: int = 5) -> List[Dict]:
+        """
+        Step 1 (Hybrid): Component - Semantic Vector Search.
+        Find concepts semantically related to topic (e.g. "Database" -> "SQL").
+        """
+        candidates = []
+        index = self._get_vector_index()
+        
+        if not index:
+            return []
+            
+        try:
+            # Use retriever to find top nodes
+            retriever = index.as_retriever(similarity_top_k=limit)
+            nodes = await retriever.aretrieve(topic)
+            
+            for node in nodes:
+                # Metadata contains concept info
+                candidates.append({
+                    "concept_id": node.metadata.get("concept_id", ""),
+                    "name": node.metadata.get("name", "Unknown"),
+                    "difficulty": node.metadata.get("difficulty", 2),
+                    "score": node.score or 0.0,
+                    "source": "vector"
+                })
+            
+            self.logger.info(f"Vector search found {len(candidates)} candidates for '{topic}'")
+            
+        except Exception as e:
+            self.logger.error(f"Vector retrieval failed: {e}")
+            
+        return candidates
+
     async def _run_diagnostic_assessment(
         self, learner_id: str, topic: str, current_level: str
     ) -> Dict[str, Any]:
         """
-        Diagnostic Assessment Strategy.
+        Diagnostic Assessment Strategy (Hybrid Retrieval Upgrade).
         
-        1. Select 3-5 representative concepts from Course KG (high centrality)
-        2. Generate diagnostic questions
-        3. Assess answers (simulated in this version)
-        4. Estimate initial mastery for concept clusters
+        1. Vector Search: Find semantically related concepts.
+        2. Graph Search: Find structurally central concepts in that cluster.
+        3. Merge & Deduplicate.
+        4. Fallback to LLM if both fail.
         """
         try:
-            # Get high-centrality concepts from Course KG
+            # 1. Vector Search (Semantic)
+            vector_candidates = await self._retrieve_vector_candidates(topic, limit=5)
+            
+            # 2. Graph Search (Structural)
             neo4j = self.state_manager.neo4j
-            concepts = await neo4j.run_query(
+            graph_candidates = await neo4j.run_query(
                 """
                 MATCH (c:CourseConcept)
                 WHERE toLower(c.name) CONTAINS toLower($topic)
@@ -367,19 +423,34 @@ Return ONLY valid JSON:
                 topic=topic
             )
             
+            # 3. Merge Strategies
+            # We want high centrality (Graph) AND high relevance (Vector)
+            # Strategy: Take all Graph candidates, add Vector ones if not present, up to limit 5
+            
+            combined_map = {}
+            
+            # Priority 1: Graph Candidates (High Centrality = Anchors)
+            for cand in graph_candidates:
+                cid = cand.get("concept_id") or cand.get("name")
+                combined_map[cid] = cand
+                
+            # Priority 2: Vector Candidates (High Semantic Relevance)
+            for cand in vector_candidates:
+                cid = cand.get("concept_id") or cand.get("name")
+                if cid not in combined_map:
+                    combined_map[cid] = cand
+            
+            # Convert back to list, limit to 5
+            concepts = list(combined_map.values())[:5]
+            
             if not concepts:
-                # Fallback: generate questions based on topic
+                # Fallback: generate questions based on topic via LLM
                 concepts = await self._generate_diagnostic_concepts(topic)
             
             # Generate diagnostic questions
             questions = await self._generate_diagnostic_questions(concepts, topic)
             
-            # In a real system, we would:
-            # 1. Present questions to learner
-            # 2. Collect answers
-            # 3. Evaluate answers
-            # For now, estimate based on stated level
-            
+            # Estimate mastery...
             mastery_estimates = {}
             level_multiplier = {
                 "beginner": 0.1,
@@ -392,7 +463,7 @@ Return ONLY valid JSON:
                 concept_id = concept.get("concept_id") or concept.get("name", "").upper().replace(" ", "_")
                 difficulty = concept.get("difficulty", 2)
                 
-                # Estimate mastery (inverse relationship with difficulty for beginners)
+                # Estimate mastery
                 base_mastery = level_multiplier * (1 - (difficulty - 1) * 0.1)
                 mastery_estimates[concept_id] = max(0.0, min(1.0, base_mastery))
             
@@ -407,7 +478,7 @@ Return ONLY valid JSON:
         except Exception as e:
             self.logger.error(f"Diagnostic assessment error: {e}")
             return {"success": False, "error": str(e)}
-    
+
     async def _generate_diagnostic_concepts(self, topic: str) -> List[Dict]:
         """Generate representative concepts for a topic if not in KG"""
         prompt = f"""

@@ -416,12 +416,23 @@ class EntityResolver:
         return intersection / union if union > 0 else 0.0
     
     def _get_concept_text(self, concept: Dict[str, Any]) -> str:
-        """Get text representation of concept for similarity"""
-        name = concept.get("name", "")
-        description = concept.get("description", "")
-        learning_objective = concept.get("learning_objective", "")
+        """
+        Get text representation of concept for similarity (Semantic Signature).
         
-        return f"{name}. {description}. {learning_objective}".strip()
+        Format: "Name | Context | Description | Tags"
+        Reasoning: Including 'context' and 'tags' dramatically improves disambiguation 
+        power of the embedding vector compared to just Name+Desc.
+        """
+        name = concept.get("name", "")
+        context = concept.get("context", "") # CRITICAL for distinguishing domains
+        description = concept.get("description", "")
+        
+        # Tags provide "keyword-like" anchoring for the vector
+        tags = " ".join(concept.get("semantic_tags", []) or [])
+        
+        # We use pipe separator to hint the model about field boundaries
+        # though modern embeddings handle sentence flow well, this structure is robust
+        return f"{name} | {context} | {description} | {tags}".strip()
     
     def _build_prereq_map(self, relationships: List[Dict[str, Any]]) -> Dict[str, Set[str]]:
         """Build map of concept_id -> set of prerequisites"""

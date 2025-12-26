@@ -1,88 +1,126 @@
-# Agent 2: Profiler Agent
+# Agent 2: Learner Profiler Agent
 
 ## Overview
 
 **File:** `backend/agents/profiler_agent.py`  
-**Purpose:** Builds and maintains 17-dimensional Learner Profile with real-time event updates.
+**Purpose:** Constructs and maintains a multidimensional **Learner Profile** (17-dim vector + Personal Knowledge Graph). It acts as the "State Manager" for the personalized learning experience, evolving in real-time based on learner interactions.
 
 ---
 
-## 🏗️ Architecture (Phase 7 Refinement)
+## 🏗️ Detailed Architecture & Pipeline
 
 ```mermaid
-flowchart TD
-    subgraph Input
-        GOAL[User Goal]
-        HIST[Assessment History]
-        BEHAVIOR[Clickstream/Time]
+graph TD
+    subgraph "1. Intent & Cold Start"
+        IN1[/"🗣️ Input: Learner Message (Goal)"/]
+        VEC_STORE[(Vector Store)]
+        IN1 --> INTENT[Intent Extraction: Goal/Topic/Style]
+        INTENT --> DIAG[Diagnostic Assessment: Hybrid Retrieval]
+        VEC_STORE -.-> DIAG
+        DIAG --> OUT1[/"📋 Output: Initial Profile JSON"/]
     end
 
-    subgraph "Core Profiling Engine"
-        COLD[Cold-Start Handler]
-        BLOOM[Bloom Tracker]
-        VECTOR[Profile Vectorizer]
+    subgraph "2. Profile Vectorization"
+        OUT1 --> VECTOR[Profile Vectorizer]
+        VECTOR --> VEC_OUT[/"Output: 17-Dim Feature Vector"/]
     end
 
-    subgraph "Dynamic State"
-        P_KG[(Personal KG)]
-        L_PROF[Learner Profile JSON]
+    subgraph "3. State Persistence (Dual-Layer)"
+        VEC_OUT --> POSTGRES[(PostgreSQL: Structured Data)]
+        VEC_OUT --> REDIS[(Redis: Hot State / Locks)]
+        VEC_OUT --> NEO4J_INIT[Personal KG Initialization]
+        NEO4J_INIT --> NEO_OUT[/"Output: :Learner & :MasteryNode"/]
     end
 
-    GOAL --> COLD
-    COLD -- "Anchor Concepts" --> DIAG[Diagnostic Test]
-    DIAG --> L_PROF
+    subgraph "4. Real-Time Event Handling"
+        EVENT1(EVALUATION_COMPLETED) --> H_EVAL[Update Mastery & Bloom Level]
+        EVENT2(PACE_CHECK_TRIGGERED) --> H_PACE[Update Velocity & Difficulty]
+        EVENT3(ARTIFACT_CREATED) --> H_ART[Track Note Taking]
+        
+        H_EVAL --> LOCK{Per-Learner Lock}
+        H_PACE --> LOCK
+        H_ART --> LOCK
+        
+        LOCK --> STATE_UPD[Atomic State Update]
+        STATE_UPD --> PUB(Emit: PROFILE_ADVANCED)
+    end
+    
+    subgraph "Data Stores"
+        PG[(Postgres: LProfiles)]
+        RD[(Redis: Cache)]
+        N4J[(Neo4j: Personal KG)]
+    end
 
-    HIST --> BLOOM
-    BLOOM -- "Update Velocity" --> L_PROF
-
-    L_PROF --> VECTOR
-    VECTOR --> MATCH[Peer Matching]
+    POSTGRES -.-> PG
+    REDIS -.-> RD
+    NEO4J_INIT -.-> N4J
+    STATE_UPD -.-> RD
+    STATE_UPD -.-> N4J
 ```
 
 ---
 
-## 🧠 Business Logic & Mechanisms
+## 🧠 Core Technical Mechanisms (Deep Dive)
 
-### 1. Cold-Start Heuristic (Anchor Concepts)
-Solves the "New Learner Problem" by intelligently seeding the profile.
-- **Problem:** No history to make recommendations.
-- **Logic:**
-    1. Select 5 **Anchor Concepts** from Course KG (Nodes with highest Degree Centrality).
-    2. Administer a mini-diagnostic test on these anchors.
-    3. Result determines initial `current_level` (Beginner/Intermediate/Advanced) and `concept_mastery_map`.
+### 1. Intent Extraction & Cold-Start
 
-### 2. Bloom Taxonomy Tracking
-Differentiates between "Rote Memorization" and "Deep Understanding".
-- **Problem:** A score of 0.8 could mean 80% on multiple choice (Remembering), not necessarily understanding.
-- **Logic:**
-    - Track mastery individually for each Bloom Level:
-        - `mastery_remember`: 0.9
-        - `mastery_analyze`: 0.3
-    - **Action:** If `analyze < 0.4`, the Profiler signals the Tutor to switch to `SocraticState.PROBING` to force deeper thinking.
+| Step | Input | Process | Output |
+|------|-------|---------|--------|
+| **Intent Extraction** | User Message ("I want to learn SQL for my job") | LLM Extracts: Topic (SQL), Purpose (Job), Constraint (Time) | Structured Goal JSON |
+| **Diagnostic** | Topic + Skill Level | **Hybrid Retrieval Strategy**:<br>1. **Vector Search**: Find semantic matches via `_retrieve_vector_candidates` (LlamaIndex).<br>2. **Graph Search**: Find centrality anchors via Cypher (Neo4j).<br>3. **Merge**: Combine Top-5 candidates.<br>4. **Generate**: Dynamic questions via LLM. | Initial `concept_mastery_map` |
 
-### 3. Dynamic Interest Decay
-Ensures the profile stays relevant to the learner's *current* focus.
-- **Logic:** Apply a time-decay factor ($\lambda = 0.95$) to `focused_tags`.
-- **Effect:** Interests from 3 months ago fade out unless reinforced.
+### 2. Profile Vectorization (17-Dimensional)
+
+Converts the rich profile object into a mathematical vector for similarity matching (Peer Matching) and difficulty adjustment.
+
+**Key Dimensions:**
+- **Dim 0:** `knowledge_state` (Average Mastery)
+- **Dim 1-4:** `learning_style` (One-hot: Visual/Audit/Read/Kinesthetic)
+- **Dim 5:** `skill_level` (Normalized: 0.2/0.5/0.8)
+- **Dim 7:** `bloom_avg` (Weighted average of Bloom's Taxonomy level)
+- **Dim 8:** `learning_velocity` (Concepts completed / hour)
+- **Dim 9:** `topic_length` (Normalized scope)
+
+### 3. Personal KG Initialization (Dual-KG Layer 3)
+
+Instead of just storing a JSON profile, Agent 2 initializes a private subgraph for the learner in Neo4j.
+
+| Entity Type | Cypher Pattern | Purpose |
+|-------------|----------------|---------|
+| `:Learner` | `(l:Learner {learner_id: ...})` | Root node for the learner. |
+| `:MasteryNode` | `(l)-[:HAS_MASTERY]->(m)-[:MAPS_TO_CONCEPT]->(c)` | Bridge node linking Learner to Course Concepts. Stores `score`, `bloom_level`. |
+| `:SessionEpisode` | `(l)-[:HAS_SESSION]->(s)` | Tracks active learning sessions. |
+
+### 4. Real-Time Event Handling (Async State Machine)
+
+Agent 2 acts as a reactive state machine, handling events from other agents.
+
+#### Event: `EVALUATION_COMPLETED`
+- **Source:** Agent 5 (Evaluator)
+- **Trigger:** Learner finishes a quiz/test.
+- **Process:**
+  1. Acquire **Async Lock** (`learner_id`) to prevent race conditions.
+  2. Update `concept_mastery_map` with new score.
+  3. **Bloom Logic:** Calculate Bloom Level using multi-signal formula:
+     $$Bloom = 0.6 \times Score + 0.25 \times Difficulty + 0.15 \times QuestionType$$
+  4. **Interest Decay:** Apply $\lambda = 0.95$ to fade old tags.
+  5. **Optimistic Locking:** Increment `version` to ensure consistency.
+
+#### Event: `PACE_CHECK_TRIGGERED`
+- **Source:** System Timer / Agent 3
+- **Trigger:** Periodic check of learning speed.
+- **Process:**
+  1. Calculate `learning_velocity = concepts_done / hours_spent`.
+  2. **Auto-Adjust:**
+     - If `velocity > 1.2` (Too fast) → Set `difficulty_next = HARD`.
+     - If `velocity < 0.8` (Too slow) → Set `difficulty_next = EASY`.
 
 ---
 
-## 📋 17-Dimensional Profile Structure
+## 🔧 Developer Reference
 
-| Dimension | Field | Description |
-| :--- | :--- | :--- |
-| 1-3 | ID, Name, Goal | Basic identity and objective |
-| 4 | `current_level` | Beginner/Intermediate/Advanced |
-| 5 | `preferred_style` | Visual/Textual/Kinesthetic |
-| 7 | `learning_velocity` | Dynamic pace estimation |
-| 9 | `concept_mastery_map` | Detailed breakdown of knowledge |
-| 11 | `error_patterns` | Recurring taxonomies of mistakes |
-| 16 | `profile_version` | Optimistic locking for concurrency |
-
----
-
-## 🔧 Event Handlers
-
-- `_on_evaluation_completed`: Updates mastery (dim 9, 10, 11, 15) when Evaluator finishes.
-- `_on_pace_check`: Recalculates learning velocity (dim 7).
-- `_on_artifact_created`: Tracks notes and summaries generated by Agent 6.
+- `execute()`: Main entry point for initial profiling.
+- `_parse_goal_with_intent()`: LLM-based goal structuring.
+- `_vectorize_profile()`: Converts object to 17-dim list.
+- `_on_evaluation_completed()`: Critical event handler for mastery updates.
+- `VersionConflictError`: Raised if Optimistic Locking fails.
