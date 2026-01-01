@@ -18,6 +18,7 @@ class DocumentStatus(str, Enum):
     PROCESSING = "PROCESSING"     # Currently extracting
     VALIDATED = "VALIDATED"       # Extraction complete, validation passed
     COMMITTED = "COMMITTED"       # Promoted to Course KG
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS" # Some chunks failed, others committed
     FAILED = "FAILED"             # Processing failed
     SKIPPED = "SKIPPED"           # Duplicate checksum, skipped
 
@@ -142,15 +143,16 @@ class DocumentRegistry:
         
         return None
     
-    async def register(self, document_id: str, filename: str, content: str) -> DocumentRecord:
+    async def register(self, document_id: str, filename: str, content: str, force_override: bool = False) -> DocumentRecord:
         """Register new document for processing"""
         checksum = self.compute_checksum(content)
         
         # Check for existing
-        existing = await self.check_exists(checksum)
-        if existing and existing.status in [DocumentStatus.COMMITTED, DocumentStatus.VALIDATED]:
-            existing.status = DocumentStatus.SKIPPED
-            return existing
+        if not force_override:
+            existing = await self.check_exists(checksum)
+            if existing and existing.status in [DocumentStatus.COMMITTED, DocumentStatus.VALIDATED]:
+                existing.status = DocumentStatus.SKIPPED
+                return existing
         
         # Create new record
         record = DocumentRecord(

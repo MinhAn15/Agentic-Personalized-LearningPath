@@ -1,0 +1,21 @@
+/
+├─ system_conventions.md  (Quy ước "CLAUDE.md")
+├─ specs/                 (Nguồn chân lý)
+│  ├─ requirements.md     (Yêu cầu chức năng 6 Agents)
+│  └─ architecture.md     (Luồng dữ liệu & Vai trò)
+├─ context/               (Trí nhớ dự án)
+│  ├─ projectbrief.md     (Mục tiêu luận văn)
+│  ├─ activeContext.md    (Trạng thái hiện tại: Conflict Detection, Zettelkasten)
+│  └─ systemPatterns.md   (Các mẫu thiết kế: 3-Layer Grounding, Feedback Loop)
+└─ .agent/workflows/
+   ├─ load-memory.md
+   └─ spec-check.md
+
+
+
+Để nạp context đầu buổi làm việc: Gõ lệnh:
+/load-memory
+Tác dụng: Agent sẽ đọc toàn bộ files trong context/ để hiểu dự án đang ở đâu.
+Để kiểm tra code so với specs: Gõ lệnh:
+/spec-check
+Tác dụng: Agent sẽ đối chiếu code hiện tại với specs/requirements.md.

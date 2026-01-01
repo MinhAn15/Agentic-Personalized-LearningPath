@@ -14,6 +14,7 @@ Pipeline:
 3. Executor Phase: Extract content based on refined plan
 """
 
+import json
 import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -352,7 +353,6 @@ Return ONLY valid JSON array. No explanations."""
     
     def _parse_json_array(self, text: str) -> List[Dict]:
         """Parse JSON array from LLM response."""
-        import json
         
         # Clean up common LLM response issues
         text = text.strip()
@@ -376,13 +376,12 @@ Return ONLY valid JSON array. No explanations."""
             if start != -1 and end > start:
                 try:
                     return json.loads(text[start:end])
-                except:
+                except json.JSONDecodeError:
                     pass
             return []
     
     def _to_json_string(self, obj: Any) -> str:
         """Convert object to JSON string."""
-        import json
         return json.dumps(obj, indent=2, ensure_ascii=False)
     
     def get_stats(self, chunks: List[SemanticChunk]) -> Dict[str, Any]:
@@ -412,6 +411,10 @@ class SemanticChunker(AgenticChunker):
     
     Note: For new code, use AgenticChunker directly.
     This class requires an LLM instance for the AI pipeline.
+    
+    Deprecated Parameters (kept for backward compatibility):
+    - overlap_size: Ignored in agentic approach
+    - preserve_code_blocks: Handled by AI automatically
     """
     
     def __init__(
@@ -419,9 +422,16 @@ class SemanticChunker(AgenticChunker):
         llm=None,
         max_chunk_size: int = 4000,
         min_chunk_size: int = 500,
-        overlap_size: int = 200,  # Ignored in agentic approach
-        preserve_code_blocks: bool = True  # Handled by AI automatically
+        overlap_size: int = 200,
+        preserve_code_blocks: bool = True
     ):
+        # FIX Issue 3: Log warning for deprecated parameters
+        if overlap_size != 200 or not preserve_code_blocks:
+            logger.warning(
+                "overlap_size and preserve_code_blocks are deprecated in SemanticChunker. "
+                "These are handled automatically by the AI pipeline."
+            )
+        
         if llm is None:
             raise ValueError(
                 "SemanticChunker now requires an LLM instance. "

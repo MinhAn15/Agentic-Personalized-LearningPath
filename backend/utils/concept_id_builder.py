@@ -63,7 +63,7 @@ class ConceptIdBuilder:
     
     Backend builds:
     - sanitized_concept: snake_case version of name
-    - concept_code: {domain}.{context}.{sanitized}
+    - concept_code: {domain}.{sanitized}
     - concept_uuid: UUIDv4
     """
     
@@ -91,7 +91,7 @@ class ConceptIdBuilder:
         
         Args:
             name: Human-readable concept name (e.g., "SELECT Statement")
-            context: Topic context (e.g., "database queries", "sql basics")
+            context: Topic context (stored in metadata, NOT in ID for stability)
             domain: Course/subject domain (e.g., "sql", "python")
             existing_uuid: If merging with existing concept, keep their UUID
             
@@ -107,8 +107,10 @@ class ConceptIdBuilder:
         # Use provided domain or default
         domain_clean = self._sanitize(domain) if domain else self.default_domain
         
-        # Build concept_code
-        concept_code = f"{domain_clean}.{context_clean}.{sanitized}"
+        # FIX Gap 4: ID Stability
+        # Use 2-part ID: {domain}.{name} to avoid duplicates when context varies
+        # Old: {domain}.{context}.{name} -> Unstable
+        concept_code = f"{domain_clean}.{sanitized}"
         
         # Generate or reuse UUID
         concept_uuid = existing_uuid or str(uuid.uuid4())

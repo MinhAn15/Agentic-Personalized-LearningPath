@@ -11,32 +11,48 @@
 
 ```mermaid
 graph TD
-    subgraph "1. Intent & Cold Start"
-        IN1[/"🗣️ Input: Learner Message (Goal)"/]
-        G_STORE[("Neo4j Graph (LlamaIndex)")]
-        IN1 --> INTENT[Intent Extraction: Goal/Topic/Style]
-        INTENT --> DIAG[Diagnostic Assessment: Graph RAG]
+    subgraph "Phase 1: Input & Validation"
+        IN1[/"🗣️ Input: learner_message"/]
+        VAL{Input Validation}
+        IN1 --> VAL
+        VAL -->|Invalid| ERR[/"Error Response"/]
+        VAL -->|Valid| INTENT
+    end
+
+    subgraph "Phase 2: Intent & Cold Start"
+        INTENT[Intent Extraction: Goal/Topic/Style]
+        TOPIC_VAL{Topic Validation}
+        INTENT --> TOPIC_VAL
+        TOPIC_VAL -->|Missing| ERR
+        TOPIC_VAL -->|Valid| DIAG
+        G_STORE[("Neo4j: Course KG")]
+        DIAG[Diagnostic Assessment: Graph RAG]
         G_STORE -.-> DIAG
-        DIAG --> OUT1[/"📋 Output: Initial Profile JSON"/]
+        DIAG --> OUT1[/"📋 Initial Mastery Map"/]
     end
 
-    subgraph "2. Profile Vectorization"
-        OUT1 --> VECTOR[Profile Vectorizer]
-        VECTOR --> VEC_OUT[/"Output: 10-Dim Feature Vector"/]
+    subgraph "Phase 3: Profile Vectorization"
+        OUT1 --> VECTOR[_vectorize_profile: 10-Dim]
+        VECTOR --> VEC_OUT[/"10-Dim Feature Vector"/]
     end
 
-    subgraph "3. State Persistence (Dual-Layer)"
-        VEC_OUT --> POSTGRES[(PostgreSQL: Structured Data)]
-        VEC_OUT --> REDIS[(Redis: Hot State / Locks)]
-        VEC_OUT --> NEO4J_INIT[Personal KG Initialization]
-        NEO4J_INIT --> NEO_OUT[/"Output: :Learner & :MasteryNode"/]
+    subgraph "Phase 4: Dual Persistence"
+        VEC_OUT --> PG_SAVE[PostgreSQL: create_learner]
+        PG_SAVE --> NEO_MERGE["Neo4j: MERGE :Learner"]
+        NEO_MERGE --> MASTERY_BATCH["UNWIND: Batch :MasteryNode"]
+        MASTERY_BATCH --> SESSION[CREATE :SessionEpisode]
+        SESSION --> REDIS_CACHE["Redis: set with TTL"]
     end
 
-    subgraph "4. Real-Time Event Handling"
-        EVENT1(EVALUATION_COMPLETED) --> H_EVAL[Update Mastery & Bloom Level]
-        EVENT2(PACE_CHECK_TRIGGERED) --> H_PACE[Update Velocity & Difficulty]
-        EVENT3(ARTIFACT_CREATED) --> H_ART[Track Note Taking]
-        EVENT4(KG_SYNC_COMPLETED) --> H_KG[Track KG Sync History]
+    subgraph "Phase 5: Event Emit"
+        REDIS_CACHE --> EMIT[/"Emit: LEARNER_PROFILED"/]
+    end
+
+    subgraph "Phase 6: Event Handling"
+        EVENT1(EVALUATION_COMPLETED) --> H_EVAL[Update Mastery + Bloom]
+        EVENT2(PACE_CHECK_TRIGGERED) --> H_PACE[Update Velocity]
+        EVENT3(ARTIFACT_CREATED) --> H_ART[Track Notes]
+        EVENT4(KG_SYNC_COMPLETED) --> H_KG[Track Sync]
         
         H_EVAL --> LOCK{Per-Learner Lock}
         H_PACE --> LOCK
@@ -44,86 +60,130 @@ graph TD
         H_KG --> LOCK
         
         LOCK --> STATE_UPD[Atomic State Update]
-        STATE_UPD --> PUB(Emit: PROFILE_ADVANCED)
     end
     
     subgraph "Data Stores"
-        PG[(Postgres: LProfiles)]
+        PG[(Postgres: learners)]
         RD[(Redis: Cache)]
         N4J[(Neo4j: Personal KG)]
     end
 
-    POSTGRES -.-> PG
-    REDIS -.-> RD
-    NEO4J_INIT -.-> N4J
-    STATE_UPD -.-> RD
-    STATE_UPD -.-> N4J
+    PG_SAVE -.-> PG
+    REDIS_CACHE -.-> RD
+    NEO_MERGE -.-> N4J
+```
+
+---
+
+## 🔧 Class-Level Constants
+
+```python
+REDIS_PROFILE_TTL = 3600      # 1 hour cache expiry
+PROFILE_VECTOR_DIM = 10       # 10-dimensional feature vector
 ```
 
 ---
 
 ## 🧠 Core Technical Mechanisms (Deep Dive)
 
-### 1. Intent Extraction & Cold-Start
+### 1. Input Validation (Phase 1)
+
+| Validation | Check | Action |
+|------------|-------|--------|
+| `learner_message` | Non-empty string | Return error if invalid |
+| `learner_name` | String type | Fallback to "Learner" |
+| `topic` | Exists in profile_data | Return error if missing |
+
+### 2. Intent Extraction & Cold-Start (Phase 2)
 
 | Step | Input | Process | Output |
 |------|-------|---------|--------|
-| **Intent Extraction** | User Message ("I want to learn SQL for my job") | LLM Extracts: Topic (SQL), Purpose (Job), Constraint (Time) | Structured Goal JSON |
-| **Diagnostic** | Topic + Skill Level | **Graph RAG Strategy**:<br>1. **Hybrid Retrieval**: `PropertyGraphIndex` searches Vector + Text + Graph Traversal.<br>2. **Centrality Reranking**: Sort candidates by Neo4j Degree Centrality.<br>3. **Selection**: Pick Top-5 Anchors.<br>4. **Question Gen**: Dynamic LLM generation. | Initial `concept_mastery_map` |
+| **Intent Extraction** | User Message | LLM Extracts: Topic, Purpose, Constraint, Level | Structured Goal JSON |
+| **Diagnostic** | Topic + Level | Graph RAG → Top-5 Anchors → Question Gen | `mastery_estimates` |
+| **Fallback** | Failed diagnostic | Log warning, proceed with empty mastery | Empty `{}` |
 
-### 2. Profile Vectorization (10-Dimensional)
+### 3. Profile Vectorization (10-Dimensional)
 
-Converts the rich profile object into a mathematical vector for similarity matching (Peer Matching) and difficulty adjustment.
+| Dim | Field | Description |
+|-----|-------|-------------|
+| 0 | `knowledge_state` | Average Mastery (0-1) |
+| 1-4 | `learning_style` | One-hot: Visual/Audit/Read/Kinesthetic |
+| 5 | `skill_level` | Normalized: 0.2/0.5/0.8 |
+| 6 | `time_available` | Normalized hours |
+| 7 | `bloom_avg` | Weighted Bloom's Taxonomy |
+| 8 | `learning_velocity` | Concepts/hour |
+| 9 | `topic_length` | Normalized scope |
 
-**Key Dimensions:**
-- **Dim 0:** `knowledge_state` (Average Mastery)
-- **Dim 1-4:** `learning_style` (One-hot: Visual/Audit/Read/Kinesthetic)
-- **Dim 5:** `skill_level` (Normalized: 0.2/0.5/0.8)
-- **Dim 6:** `time_available` (Normalized)
-- **Dim 7:** `bloom_avg` (Weighted average of Bloom's Taxonomy level)
-- **Dim 8:** `learning_velocity` (Concepts completed / hour)
-- **Dim 9:** `topic_length` (Normalized scope)
+### 4. Dual Persistence (Phase 4)
 
-### 3. Personal KG Initialization (Dual-KG Layer 3)
+| Store | Operation | Key Features |
+|-------|-----------|--------------|
+| **PostgreSQL** | `create_learner()` | Structured profile data |
+| **Neo4j** | `MERGE :Learner` | Idempotent upsert with ON CREATE/ON MATCH |
+| **Neo4j** | `UNWIND :MasteryNode` | Batch O(1) creation |
+| **Redis** | `set()` with TTL | Hot cache, `REDIS_PROFILE_TTL` seconds |
 
-Instead of just storing a JSON profile, Agent 2 initializes a private subgraph for the learner in Neo4j.
+**Neo4j Learner Node Pattern:**
+```cypher
+MERGE (l:Learner {learner_id: $learner_id})
+ON CREATE SET l.name = $name, l.created_at = datetime(), ...
+ON MATCH SET l.goal = $goal, l.last_updated = datetime()
+```
+
+### 5. Personal KG Schema
 
 | Entity Type | Cypher Pattern | Purpose |
 |-------------|----------------|---------|
-| `:Learner` | `(l:Learner {learner_id: ...})` | Root node for the learner. |
-| `:MasteryNode` | `(l)-[:HAS_MASTERY]->(m)-[:MAPS_TO_CONCEPT]->(c)` | Bridge node linking Learner to Course Concepts. Stores `score`, `bloom_level`. |
-| `:SessionEpisode` | `(l)-[:HAS_SESSION]->(s)` | Tracks active learning sessions. |
+| `:Learner` | `(l:Learner {learner_id: ...})` | Root node (MERGE ensures no duplicates) |
+| `:MasteryNode` | `(l)-[:HAS_MASTERY]->(m)-[:MAPS_TO_CONCEPT]->(c)` | Bridge to Course Concepts |
+| `:SessionEpisode` | `(l)-[:HAS_SESSION]->(s)` | Learning session tracking |
 
-### 4. Real-Time Event Handling (Async State Machine)
-
-Agent 2 acts as a reactive state machine, handling events from other agents.
+### 6. Real-Time Event Handling
 
 #### Event: `EVALUATION_COMPLETED`
 - **Source:** Agent 5 (Evaluator)
-- **Trigger:** Learner finishes a quiz/test.
 - **Process:**
-  1. Acquire **Async Lock** (`learner_id`) to prevent race conditions.
-  2. Update `concept_mastery_map` with new score.
-  3. **Bloom Logic:** Calculate Bloom Level using multi-signal formula:
-     $$Bloom = 0.6 \times Score + 0.25 \times Difficulty + 0.15 \times QuestionType$$
-  4. **Interest Decay:** Apply $\lambda = 0.95$ to fade old tags.
-  5. **Optimistic Locking:** Increment `version` to ensure consistency.
+  1. Acquire **Async Lock** (`learner_id`)
+  2. Update `concept_mastery_map`
+  3. **Bloom Logic:** $Bloom = 0.6 \times Score + 0.25 \times Difficulty + 0.15 \times QuestionType$
+  4. **Interest Decay:** $\lambda = 0.95$
 
 #### Event: `PACE_CHECK_TRIGGERED`
-- **Source:** System Timer / Agent 3
-- **Trigger:** Periodic check of learning speed.
+- **Source:** Agent 3 / Timer
 - **Process:**
-  1. Calculate `learning_velocity = concepts_done / hours_spent`.
-  2. **Auto-Adjust:**
-     - If `velocity > 1.2` (Too fast) → Set `difficulty_next = HARD`.
-     - If `velocity < 0.8` (Too slow) → Set `difficulty_next = EASY`.
+  1. Calculate `learning_velocity`
+  2. Auto-adjust difficulty
+
+---
+
+## 📤 Outbound Events
+
+| Event | Receiver | Payload Schema |
+|-------|----------|----------------|
+| `LEARNER_PROFILED` | Agent 3 (Planner) | `{learner_id, goal, topic, time_available, initial_mastery}` |
 
 ---
 
 ## 🔧 Developer Reference
 
-- `execute()`: Main entry point for initial profiling.
-- `_parse_goal_with_intent()`: LLM-based goal structuring.
-- `_vectorize_profile()`: Converts object to 10-dim list.
-- `_on_evaluation_completed()`: Critical event handler for mastery updates.
-- `VersionConflictError`: Raised if Optimistic Locking fails.
+### Key Methods
+
+| Method | Purpose |
+|--------|---------|
+| `execute()` | Main entry point for initial profiling |
+| `_parse_goal_with_intent()` | LLM-based goal structuring |
+| `_run_diagnostic_assessment()` | Graph RAG hybrid retrieval |
+| `_vectorize_profile()` | Converts object to 10-dim vector |
+| `_on_evaluation_completed()` | Critical event handler for mastery |
+| `_on_pace_check()` | Velocity-based difficulty adjustment |
+
+### Exceptions
+
+| Exception | When Raised |
+|-----------|-------------|
+| `VersionConflictError` | Optimistic locking fails during concurrent updates |
+
+### ID Generation
+
+- **Format:** `user_{uuid.hex[:12]}` (12 hex chars = 48 bits = 281T unique IDs)
+- **Example:** `user_a1b2c3d4e5f6`

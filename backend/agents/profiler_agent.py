@@ -37,7 +37,7 @@ class DiagnosticState(str, Enum):
 
 class ProfilerAgent(BaseAgent):
     """
-    Learner Profiler Agent - Build and update 17-dimensional Learner Profile.
+    Learner Profiler Agent - Build and update 10-dimensional Learner Profile.
     
     Features (per THESIS Section 3.5.1):
     1. Goal Parsing & Intent Extraction (Topic, Purpose, Constraint, Level)
@@ -52,6 +52,10 @@ class ProfilerAgent(BaseAgent):
     - PACE_CHECK_TRIGGERED: Update learning velocity
     - ARTIFACT_CREATED: Track generated notes
     """
+    
+    # Class-level constants
+    REDIS_PROFILE_TTL = 3600  # 1 hour cache
+    PROFILE_VECTOR_DIM = 10   # 10-dimensional feature vector
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
         super().__init__(agent_id, AgentType.PROFILER, state_manager, event_bus)
@@ -80,12 +84,16 @@ class ProfilerAgent(BaseAgent):
             learner_name = kwargs.get("learner_name", "Learner")
             skip_diagnostic = kwargs.get("skip_diagnostic", False)
             
-            if not learner_message:
+            # Issue 2 Fix: Proper input validation
+            if not learner_message or not isinstance(learner_message, str):
                 return {
                     "success": False,
-                    "error": "learner_message is required",
+                    "error": "learner_message is required and must be a non-empty string",
                     "agent_id": self.agent_id
                 }
+            
+            if not isinstance(learner_name, str) or not learner_name.strip():
+                learner_name = "Learner"  # Default fallback
             
             self.logger.info(f"👤 Profiling learner: {learner_name}")
             
@@ -98,7 +106,17 @@ class ProfilerAgent(BaseAgent):
                 return goal_result
             
             profile_data = goal_result["profile_data"]
-            learner_id = f"user_{uuid.uuid4().hex[:8]}"
+            
+            # Issue 10 Fix: Validate required fields from goal parsing
+            if "topic" not in profile_data or not profile_data["topic"]:
+                return {
+                    "success": False,
+                    "error": "Goal parsing did not extract a valid topic",
+                    "agent_id": self.agent_id
+                }
+            
+            # Issue 9 Fix: Use 12 chars for better uniqueness (48 bits)
+            learner_id = f"user_{uuid.uuid4().hex[:12]}"
             
             # Step 2: Diagnostic Assessment (if not skipped)
             diagnostic_result = None
@@ -113,6 +131,13 @@ class ProfilerAgent(BaseAgent):
                 
                 if diagnostic_result["success"]:
                     initial_mastery = diagnostic_result["mastery_estimates"]
+                else:
+                    # Issue 8 Fix: Log warning for failed diagnostic
+                    self.logger.warning(
+                        f"⚠️ Diagnostic assessment failed for {learner_id}: "
+                        f"{diagnostic_result.get('error', 'Unknown error')}. "
+                        "Proceeding with empty initial mastery."
+                    )
             
             # Step 3: Create learner profile object
             profile = LearnerProfile(
@@ -154,41 +179,63 @@ class ProfilerAgent(BaseAgent):
             )
             
             # Step 6: Initialize Personal KG in Neo4j
+            # Issue 6 Fix: Use MERGE instead of CREATE to prevent duplicate :Learner nodes
             neo4j = self.state_manager.neo4j
-            await neo4j.run_query(
-                """
-                CREATE (l:Learner {
-                    learner_id: $learner_id,
-                    name: $name,
-                    goal: $goal,
-                    topic: $topic,
-                    purpose: $purpose,
-                    skill_level: $skill_level,
-                    learning_style: $learning_style,
-                    created_at: datetime()
-                })
-                """,
-                learner_id=learner_id,
-                name=learner_name,
-                goal=profile.goal,
-                topic=profile_data["topic"],
-                purpose=profile_data.get("purpose", ""),
-                skill_level=profile.current_skill_level.value,
-                learning_style=profile.preferred_learning_style.value
-            )
+            try:
+                await neo4j.run_query(
+                    """
+                    MERGE (l:Learner {learner_id: $learner_id})
+                    ON CREATE SET
+                        l.name = $name,
+                        l.goal = $goal,
+                        l.topic = $topic,
+                        l.purpose = $purpose,
+                        l.skill_level = $skill_level,
+                        l.learning_style = $learning_style,
+                        l.created_at = datetime()
+                    ON MATCH SET
+                        l.goal = $goal,
+                        l.topic = $topic,
+                        l.skill_level = $skill_level,
+                        l.last_updated = datetime()
+                    """,
+                    learner_id=learner_id,
+                    name=learner_name,
+                    goal=profile.goal,
+                    topic=profile_data["topic"],
+                    purpose=profile_data.get("purpose", ""),
+                    skill_level=profile.current_skill_level.value,
+                    learning_style=profile.preferred_learning_style.value
+                )
+            except Exception as neo4j_error:
+                # Issue 7 Fix: Log warning for partial failure (PostgreSQL succeeded but Neo4j failed)
+                self.logger.error(
+                    f"❌ Neo4j Learner node creation failed for {learner_id}: {neo4j_error}. "
+                    "PostgreSQL data exists but Neo4j is inconsistent!"
+                )
+                raise  # Re-raise to trigger main except block
             
-            # Create initial MasteryNode for each concept (Change #4: Dual-KG Layer 3)
-            for concept_id, mastery in initial_mastery.items():
-                mastery_id = f"MASTERY_{learner_id}_{concept_id}"
+            # Issue 1 Fix: Batch create MasteryNodes using UNWIND (O(1) instead of O(N))
+            if initial_mastery:
+                mastery_batch = [
+                    {
+                        "mastery_id": f"MASTERY_{learner_id}_{cid}",
+                        "concept_id": cid,
+                        "mastery_level": level
+                    }
+                    for cid, level in initial_mastery.items()
+                ]
+                
                 await neo4j.run_query(
                     """
                     MATCH (l:Learner {learner_id: $learner_id})
-                    MATCH (c:CourseConcept {concept_id: $concept_id})
+                    UNWIND $batch AS row
+                    MATCH (c:CourseConcept {concept_id: row.concept_id})
                     CREATE (m:MasteryNode {
-                        mastery_id: $mastery_id,
+                        mastery_id: row.mastery_id,
                         learner_id: $learner_id,
-                        concept_id: $concept_id,
-                        level: $mastery_level,
+                        concept_id: row.concept_id,
+                        level: row.mastery_level,
                         bloom_level: 'REMEMBER',
                         created_at: datetime(),
                         last_updated: datetime()
@@ -197,9 +244,7 @@ class ProfilerAgent(BaseAgent):
                     CREATE (m)-[:MAPS_TO_CONCEPT]->(c)
                     """,
                     learner_id=learner_id,
-                    concept_id=concept_id,
-                    mastery_id=mastery_id,
-                    mastery_level=mastery
+                    batch=mastery_batch
                 )
             
             # Create initial SessionEpisode
@@ -238,7 +283,7 @@ class ProfilerAgent(BaseAgent):
                     "time_available": profile.time_available,
                     "hours_per_day": profile_data.get("hours_per_day", 2)
                 },
-                ttl=3600
+                ttl=self.REDIS_PROFILE_TTL  # Issue 4 Fix: Use class constant
             )
             
             # Build response
@@ -267,9 +312,10 @@ class ProfilerAgent(BaseAgent):
             }
             
             # Emit event for planner
+            # Issue 3 Fix: Use UPPERCASE event naming (consistent with Agent 1)
             await self.send_message(
                 receiver="planner",
-                message_type="learner_profiled",
+                message_type="LEARNER_PROFILED",
                 payload={
                     "learner_id": learner_id,
                     "goal": profile.goal,
@@ -580,24 +626,35 @@ Return ONLY valid JSON:
         self, profile: LearnerProfile, profile_data: Dict
     ) -> List[float]:
         """
-        Profile Vectorization.
+        Profile Vectorization (10-Dimensional Feature Vector).
         
-        Creates vector: [KnowledgeState, LearningStyle, GoalEmbedding]
+        Creates vector for Peer Matching and Adaptive Difficulty:
+        - Dim 0: Knowledge State (avg mastery)
+        - Dim 1-4: Learning Style (One-Hot VARK)
+        - Dim 5: Skill Level (Ordinal)
+        - Dim 6: Time Constraint (Normalized)
+        - Dim 7: Bloom's Taxonomy Level (Avg)
+        - Dim 8: Learning Velocity (Normalized)
+        - Dim 9: Topic Scope (Normalized)
+        
+        All values clamped to [0.0, 1.0] range for consistency.
         """
-        # Knowledge State (simplified - would use embeddings in production)
+        # Dim 0: Knowledge State (mean of mastery values)
         mastery_values = [m.mastery_level for m in profile.current_mastery] or [0.0]
-        knowledge_state = sum(mastery_values) / len(mastery_values)
+        knowledge_state = min(sum(mastery_values) / len(mastery_values), 1.0)
         
-        # Learning Style (one-hot encoding)
+        # Dim 1-4: Learning Style (One-Hot VARK encoding)
+        # Issue 5 Fix: Explicit comment for fallback (uniform distribution for unknown style)
         style_map = {
             "VISUAL": [1, 0, 0, 0],
             "AUDITORY": [0, 1, 0, 0],
             "READING": [0, 0, 1, 0],
             "KINESTHETIC": [0, 0, 0, 1]
         }
+        # Fallback: Uniform distribution [0.25, 0.25, 0.25, 0.25] for unknown styles
         learning_style = style_map.get(profile.preferred_learning_style.value, [0.25, 0.25, 0.25, 0.25])
         
-        # Skill Level
+        # Dim 5: Skill Level (Ordinal encoding)
         level_map = {
             "BEGINNER": 0.2,
             "INTERMEDIATE": 0.5,
@@ -605,10 +662,10 @@ Return ONLY valid JSON:
         }
         skill_level = level_map.get(profile.current_skill_level.value, 0.2)
         
-        # Time normalized
-        time_normalized = profile.time_available / 500  # Normalize to 500 mins max
+        # Dim 6: Time Constraint (Issue 1 Fix: Clamped to [0, 1])
+        time_normalized = min(profile.time_available / 500.0, 1.0)
         
-        # Change #5: Bloom's average level
+        # Dim 7: Bloom's Taxonomy Average
         bloom_map = {
             "REMEMBER": 0.1, "UNDERSTAND": 0.3, "APPLY": 0.5,
             "ANALYZE": 0.7, "EVALUATE": 0.85, "CREATE": 1.0
@@ -620,26 +677,29 @@ Return ONLY valid JSON:
                 bloom_values.append(bloom_map.get(bloom_level, 0.1))
         bloom_avg = sum(bloom_values) / len(bloom_values) if bloom_values else 0.0
         
-        # Learning velocity
-        learning_velocity = profile.learning_velocity if hasattr(profile, 'learning_velocity') else 0.0
+        # Dim 8: Learning Velocity (Issue 4 Fix: Normalized to [0, 1] with max=5 concepts/hour)
+        raw_velocity = profile.learning_velocity if hasattr(profile, 'learning_velocity') else 0.0
+        learning_velocity = min(raw_velocity / 5.0, 1.0)  # Max 5 concepts/hour = 1.0
         
-        # Topic features
-        topic_length = len(profile_data.get("topic", "")) / 50
+        # Dim 9: Topic Scope (Issue 1 Fix: Clamped to [0, 1])
+        topic_length = min(len(profile_data.get("topic", "")) / 50.0, 1.0)
         
         # Combine into 10-dimension profile vector
-        # [knowledge_state, visual, auditory, reading, kinesthetic, 
-        #  skill_level, time_norm, bloom_avg, learning_vel, topic_len]
         profile_vector = [
-            knowledge_state,       # dim 0: knowledge state
+            knowledge_state,       # dim 0: knowledge state [0-1]
             *learning_style,       # dim 1-4: learning style one-hot
-            skill_level,           # dim 5: skill level
-            time_normalized,       # dim 6: time
-            bloom_avg,             # dim 7: Bloom's average (NEW)
-            learning_velocity,     # dim 8: learning velocity (NEW)
-            topic_length           # dim 9: topic
+            skill_level,           # dim 5: skill level [0.2/0.5/0.8]
+            time_normalized,       # dim 6: time [0-1]
+            bloom_avg,             # dim 7: Bloom's average [0-1]
+            learning_velocity,     # dim 8: velocity [0-1]
+            topic_length           # dim 9: topic scope [0-1]
         ]
         
-        return profile_vector  # 10 dimensions
+        # Issue 2 Fix: Validate output length matches PROFILE_VECTOR_DIM
+        assert len(profile_vector) == self.PROFILE_VECTOR_DIM, \
+            f"Vector length {len(profile_vector)} != PROFILE_VECTOR_DIM {self.PROFILE_VECTOR_DIM}"
+        
+        return profile_vector
     
     # ==========================================
     # CHANGE #3: REAL-TIME UPDATE HANDLERS

@@ -13,6 +13,8 @@ import json
 import uuid
 import logging
 import os
+import asyncio  # FIX Gap 1: Import asyncio
+from typing import Dict, Any, List, Optional
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from enum import Enum
@@ -31,6 +33,7 @@ from backend.utils.kg_validator import KGValidator, ValidationResult, Validation
 from backend.utils.entity_resolver import EntityResolver, ResolutionResult
 from backend.utils.neo4j_batch_upsert import Neo4jBatchUpserter
 from backend.utils.provenance_manager import ProvenanceManager
+from backend.utils.concept_id_builder import get_concept_id_builder  # FIX Issue 1: Move import to top
 
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
@@ -85,6 +88,24 @@ class KnowledgeExtractionAgent(BaseAgent):
     8. Emit COURSEKG_UPDATED
     """
     
+    # FIX Issue 2: Class-level constants for configuration
+    MERGE_THRESHOLD = 0.85  # Entity resolution merge threshold
+    TOP_K_CANDIDATES = 20  # Number of candidates for entity resolution
+    BATCH_SIZE = 100  # Neo4j batch upsert size
+    CHUNK_MIN_SIZE = 500  # Minimum chunk size
+    CHUNK_MAX_SIZE = 4000  # Maximum chunk size
+    MAX_CONCURRENCY = 5   # FIX Gap 1: Limit parallel LLM calls to prevent throttling
+    
+    # FIX Issue 4: Domain detection as class constant
+    KNOWN_DOMAINS = {
+        "sql": "sql", "database": "sql", "mysql": "sql", "postgresql": "sql",
+        "python": "python", "java": "java", "javascript": "js",
+        "react": "react", "node": "node", "nodejs": "node",
+        "machine": "ml", "learning": "ml", "deep": "dl",
+        "statistics": "stats", "probability": "stats",
+        "algorithm": "algo", "data structure": "ds",
+    }
+    
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
         super().__init__(agent_id, AgentType.KNOWLEDGE_EXTRACTION, state_manager, event_bus)
         
@@ -102,19 +123,19 @@ class KnowledgeExtractionAgent(BaseAgent):
         Settings.llm = self.llm
         self.embedding_model = GeminiEmbedding(
             model_name="models/embedding-001",
-            api_key=get_settings().GOOGLE_API_KEY
+            api_key=self.settings.GOOGLE_API_KEY  # FIX Issue 7: Use self.settings
         )
         Settings.embed_model = self.embedding_model
 
         self.chunker = SemanticChunker(
             llm=self.llm,  # Pass LLM for Pure Agentic Chunking
-            max_chunk_size=4000,
-            min_chunk_size=500
+            max_chunk_size=self.CHUNK_MAX_SIZE,  # FIX Issue 8: Use class constants
+            min_chunk_size=self.CHUNK_MIN_SIZE
         )
         self.validator = KGValidator(strict_mode=False)
         self.entity_resolver = EntityResolver(
             embedding_model=self.embedding_model, # Pass Gemini Embedding
-            merge_threshold=0.85,
+            merge_threshold=self.MERGE_THRESHOLD,  # FIX Issue 6: Use class constants
             use_embeddings=True
         )
         
@@ -127,11 +148,8 @@ class KnowledgeExtractionAgent(BaseAgent):
         # Extraction version for provenance
         self.extraction_version = ExtractionVersion.V3_ENTITY_RESOLUTION
         
-        # Extraction version for provenance
-        self.extraction_version = ExtractionVersion.V3_ENTITY_RESOLUTION
-        
-        # FIX Issue 5: Subscribe to KAG_ANALYSIS_COMPLETED event
-        if event_bus and hasattr(event_bus, 'subscribe'):
+        # Subscribe to inter-agent events
+        if event_bus is not None:
             event_bus.subscribe('KAG_ANALYSIS_COMPLETED', self._on_kag_analysis_completed)
             self.logger.info("Subscribed to KAG_ANALYSIS_COMPLETED")
     
@@ -161,9 +179,10 @@ class KnowledgeExtractionAgent(BaseAgent):
             force_reprocess: bool - Override idempotency check
         """
         try:
+            # FIX Issue 3: Strip input strings
             document_content = kwargs.get("document_content")
-            document_title = kwargs.get("document_title", "Untitled")
-            document_type = kwargs.get("document_type", "LECTURE")
+            document_title = (kwargs.get("document_title") or "Untitled").strip()
+            document_type = (kwargs.get("document_type") or "LECTURE").strip()
             force_reprocess = kwargs.get("force_reprocess", False)
             
             if not document_content:
@@ -178,7 +197,8 @@ class KnowledgeExtractionAgent(BaseAgent):
             doc_record = await self.document_registry.register(
                 document_id=document_id,
                 filename=document_title,
-                content=document_content
+                content=document_content,
+                force_override=force_reprocess  # FIX Issue 5: Pass force flag
             )
             
             if doc_record.status == DocumentStatus.SKIPPED and not force_reprocess:
@@ -214,43 +234,69 @@ class KnowledgeExtractionAgent(BaseAgent):
             )
             
             # ========================================
-            # STEP 3: Per-Chunk Extraction
+            # STEP 3: Per-Chunk Extraction (Parallel)
             # ========================================
+            # FIX Gap 1: Use asyncio.gather for parallel processing
+            
+            semaphore = asyncio.Semaphore(self.MAX_CONCURRENCY)
+            
+            async def semaphore_wrapped_process(chunk, idx, total):
+                async with semaphore:
+                    self.logger.debug(f"Processing chunk {idx+1}/{total} (Parallel): {chunk.source_heading}")
+                    return await self._process_single_chunk(chunk, document_title, document_id)
+
+            tasks = [
+                semaphore_wrapped_process(chunk, i, len(chunks)) 
+                for i, chunk in enumerate(chunks)
+            ]
+            
+            processing_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            failed_chunks = []
             all_concepts = []
             all_relationships = []
             
-            for i, chunk in enumerate(chunks):
-                self.logger.debug(f"Processing chunk {i+1}/{len(chunks)}: {chunk.source_heading}")
-                
-                # Layer 1: Concept extraction
-                chunk_concepts = await self._extract_concepts_from_chunk(chunk, document_title)
-                
-                # Layer 2: Relationship extraction
-                chunk_relationships = await self._extract_relationships_from_chunk(
-                    chunk, chunk_concepts
-                )
-                
-                # Layer 3: Metadata enrichment
-                enriched_concepts = await self._enrich_metadata(chunk_concepts)
-                
-                # Add provenance to each concept
-                for concept in enriched_concepts:
-                    concept["source_document_id"] = document_id
-                    concept["source_chunk_id"] = chunk.chunk_id
-                    concept["extraction_version"] = self.extraction_version.value
-                    concept["extracted_at"] = datetime.now().isoformat()
-                
-                all_concepts.extend(enriched_concepts)
+            for idx, result in enumerate(processing_results):
+                if isinstance(result, Exception):
+                    failed_chunks.append({
+                        "chunk_index": idx,
+                        "error": str(result),
+                        "heading": chunks[idx].source_heading
+                    })
+                    self.logger.error(f"❌ Chunk {idx+1} failed: {result}")
+                    continue
+                    
+                chunk_concepts, chunk_relationships = result
+                all_concepts.extend(chunk_concepts)
                 all_relationships.extend(chunk_relationships)
+            
+            if len(failed_chunks) == len(chunks) and len(chunks) > 0:
+                raise Exception(f"All {len(chunks)} chunks failed processing")
             
             self.logger.info(f"📦 Raw extraction: {len(all_concepts)} concepts, {len(all_relationships)} relationships")
             
             # ========================================
-            # STEP 4: Entity Resolution (In-Memory Cleanup)
+            # STEP 4: Entity Resolution (Scalable)
             # ========================================
-            # Resolve Internal (within batch) and External (vs database)
-            existing_concepts = await self._get_existing_concepts()
-            existing_relationships = await self._get_existing_relationships()
+            # FIX Gap 2: Retrieve only relevant candidates (Top-K / Name-based)
+            # instead of loading the entire graph into memory.
+            
+            new_names = [c.get("name", "") for c in all_concepts if c.get("name")]
+            
+            if new_names:
+                existing_concepts = await self._get_candidate_concepts(new_names)
+                
+                # Get relevant relationships for the candidates + new concepts
+                # We need relationships connected to either set to make structural decisions
+                candidate_ids = [c["concept_id"] for c in existing_concepts]
+                new_ids = [c.get("concept_id") for c in all_concepts if c.get("concept_id")]
+                
+                # Combine relevant IDs for relationship lookup
+                relevant_ids = list(set(candidate_ids + new_ids))
+                existing_relationships = await self._get_candidate_relationships(relevant_ids)
+            else:
+                existing_concepts = []
+                existing_relationships = []
             
             resolution_result = self.entity_resolver.resolve(
                 new_concepts=all_concepts,
@@ -318,11 +364,17 @@ class KnowledgeExtractionAgent(BaseAgent):
                 merge_mapping=resolution_result.merge_mapping
             )
             
+            final_status = DocumentStatus.COMMITTED
+            if failed_chunks:
+                final_status = DocumentStatus.PARTIAL_SUCCESS
+                self.logger.warning(f"⚠️ Processed with {len(failed_chunks)} failed chunks")
+
             await self.document_registry.update_status(
-                document_id, DocumentStatus.COMMITTED,
+                document_id, final_status,
                 concept_count=commit_result["concepts_created"],
                 relationship_count=commit_result["relationships_created"],
-                extracted_concept_ids=[c["concept_id"] for c in all_concepts]
+                extracted_concept_ids=[c["concept_id"] for c in all_concepts],
+                error_message=f"Failed {len(failed_chunks)} chunks" if failed_chunks else None
             )
             
             # ========================================
@@ -354,7 +406,8 @@ class KnowledgeExtractionAgent(BaseAgent):
                 "success": True,
                 "agent_id": self.agent_id,
                 "document_id": document_id,
-                "status": "COMMITTED",
+                "status": final_status.value,
+                "failed_chunks": failed_chunks,
                 "chunking": chunk_stats,
                 "validation": validation_result.to_dict(),
                 "resolution": resolution_result.to_dict(),
@@ -372,6 +425,33 @@ class KnowledgeExtractionAgent(BaseAgent):
                 )
             
             return self._error_response(str(e))
+
+    async def _process_single_chunk(self, chunk, document_title, document_id):
+        """Helper for parallel processing of a single chunk"""
+        try:
+            # Layer 1: Concept extraction
+            chunk_concepts = await self._extract_concepts_from_chunk(chunk, document_title)
+            
+            # Layer 2: Relationship extraction
+            chunk_relationships = await self._extract_relationships_from_chunk(
+                chunk, chunk_concepts
+            )
+            
+            # Layer 3: Metadata enrichment
+            enriched_concepts = await self._enrich_metadata(chunk_concepts)
+            
+            # Add provenance to each concept
+            for concept in enriched_concepts:
+                concept["source_document_id"] = document_id
+                concept["source_chunk_id"] = chunk.chunk_id
+                concept["extraction_version"] = self.extraction_version.value
+                concept["extracted_at"] = datetime.now().isoformat()
+                
+            return enriched_concepts, chunk_relationships
+            
+        except Exception as e:
+            self.logger.error(f"Error processing chunk {chunk.chunk_id}: {e}")
+            raise e
     
     # ===========================================
     # EXTRACTION METHODS
@@ -423,9 +503,9 @@ If no concepts found, return empty array: []
             response = await self.llm.acomplete(prompt)
             raw_concepts = self._parse_json_array(response.text)
             
-            # Build concept IDs using backend logic
-            from backend.utils.concept_id_builder import get_concept_id_builder
-            builder = get_concept_id_builder(domain=self._extract_domain(document_title))
+            # Build concept IDs using backend logic (import is at top of file)
+            domain = await self._extract_domain(document_title, chunk.content)
+            builder = get_concept_id_builder(domain=domain)
             
             for concept in raw_concepts:
                 ids = builder.build_from_llm_output(concept)
@@ -439,25 +519,61 @@ If no concepts found, return empty array: []
             self.logger.error(f"Concept extraction error: {e}")
             return []
     
-    def _extract_domain(self, document_title: str) -> str:
-        """Extract domain from document title for concept_code generation"""
-        # Simple heuristic: first word or known keywords
+    async def _extract_domain(self, document_title: str, document_content: str = "", user_domain: str = None) -> str:
+        """
+        Extract domain from document title for concept_code generation.
+        
+        Strategy:
+        0. Use user_domain if provided.
+        1. Try KNOWN_DOMAINS lookup (fast, cheap).
+        2. If not found, use LLM to classify domain (fallback).
+        """
+        # Step 0: User Input (High Priority)
+        if user_domain:
+            return user_domain.lower().strip()
+            
         title_lower = document_title.lower()
         
-        known_domains = {
-            "sql": "sql", "database": "sql", "mysql": "sql", "postgresql": "sql",
-            "python": "python", "java": "java", "javascript": "js",
-            "react": "react", "node": "node", "nodejs": "node",
-            "machine": "ml", "learning": "ml", "deep": "dl",
-            "statistics": "stats", "probability": "stats",
-            "algorithm": "algo", "data structure": "ds",
-        }
-        
-        for keyword, domain in known_domains.items():
+        # Step 1: Try KNOWN_DOMAINS lookup (fast path)
+        for keyword, domain in self.KNOWN_DOMAINS.items():
             if keyword in title_lower:
                 return domain
         
-        # Default: first word
+        # Step 2: LLM Fallback - classify domain using AI
+        self.logger.info(f"🤖 Domain not in KNOWN_DOMAINS, using LLM classification for: {document_title}")
+        
+        try:
+            # Take first 1000 chars of content for context (if available)
+            content_preview = document_content[:1000] if document_content else ""
+            
+            prompt = f"""Classify this educational document into a domain/subject area.
+
+Document Title: {document_title}
+Content Preview: {content_preview}
+
+Known domains (prefer these if applicable):
+{', '.join(sorted(set(self.KNOWN_DOMAINS.values())))}
+
+Instructions:
+1. If document fits a known domain, return that domain name
+2. If document is a new subject, suggest a short domain name (lowercase, no spaces, max 15 chars)
+3. Domain should be general enough to group related concepts (e.g., "sql" not "select_statement")
+
+Return ONLY the domain name, nothing else. Example: sql
+"""
+            response = await self.llm.acomplete(prompt)
+            llm_domain = response.text.strip().lower().replace(" ", "_")[:15]
+            
+            # Sanitize LLM response
+            domain = ''.join(c for c in llm_domain if c.isalnum() or c == '_')
+            
+            if domain:
+                self.logger.info(f"✅ LLM classified domain: {domain}")
+                return domain
+        except Exception as e:
+            self.logger.warning(f"LLM domain classification failed: {e}")
+        
+        # Step 3: Ultimate fallback - first word of title
         first_word = title_lower.split()[0] if title_lower.split() else "course"
         return first_word[:10].replace(" ", "_")
     
@@ -531,10 +647,16 @@ Return empty array [] if no relationships found.
         if not concepts:
             return []
         
-        concept_names = ", ".join([c.get("name", "") for c in concepts])
+        # FIX Issue 2: Include full concept context for better Bloom level assessment
+        concept_details = "\n".join([
+            f"- {c.get('concept_id')}: {c.get('name', '')} - {c.get('description', '')[:100]}"
+            for c in concepts
+        ])
         
         prompt = f"""
-Add metadata to these concepts: {concept_names}
+Add metadata to these concepts:
+
+{concept_details}
 
 For each concept, add:
 1. bloom_level: REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, or CREATE
@@ -561,6 +683,9 @@ Return JSON object mapping concept_id to metadata:
                 cid = concept.get("concept_id", "")
                 if cid in metadata:
                     concept.update(metadata[cid])
+                else:
+                    # FIX Issue 3: Log warning for missing metadata
+                    self.logger.warning(f"No metadata found for concept: {cid}")
             
             return concepts
         except Exception as e:
@@ -616,31 +741,102 @@ Return JSON object mapping concept_id to metadata:
     # COMMIT METHODS
     # ===========================================
     
-    async def _get_existing_concepts(self) -> List[Dict]:
-        """Get all existing concepts from Course KG"""
+    async def _get_candidate_concepts(self, lookup_names: List[str]) -> List[Dict]:
+        """
+        Get relevant existing concepts based on Fuzzy Fulltext Search.
+        FIX Gap 2: Scalable retrieval + Fuzzy Matching to catch Synonyms.
+        """
+        if not lookup_names:
+            return []
+            
         neo4j = self.state_manager.neo4j
+        
+        # Construct Lucene Query: "name1~0.8 OR name2~0.8 ..."
+        # We sanitize names to prevent Lucene syntax errors
+        sanitized_names = [
+            n.replace('"', '').replace("'", "").replace('~', '') 
+            for n in lookup_names
+            if n
+        ]
+        
+        if not sanitized_names:
+            return []
+            
+        lucene_query = " OR ".join([f'"{n}"~0.8' for n in sanitized_names])
+        
+        try:
+            # Try Fulltext Search
+            result = await neo4j.run_query(
+                """
+                CALL db.index.fulltext.queryNodes("conceptNameIndex", $query) 
+                YIELD node, score
+                RETURN DISTINCT node.concept_id as concept_id,
+                       node.name as name,
+                       node.description as description,
+                       node.difficulty as difficulty,
+                       node.semantic_tags as semantic_tags
+                LIMIT 100
+                """,
+                query=lucene_query
+            )
+            if result:
+                return result
+                
+        except Exception as e:
+            self.logger.warning(f"⚠️ Fulltext Search failed (falling back to legacy filter): {e}")
+        
+        # Fallback to exact/contains match if Index missing or query fails
         result = await neo4j.run_query(
             """
+            UNWIND $names AS lookup_name
             MATCH (c:CourseConcept)
-            RETURN c.concept_id as concept_id,
+            WHERE toLower(c.name) = toLower(lookup_name) 
+               OR toLower(c.name) CONTAINS toLower(lookup_name)
+               OR toLower(lookup_name) CONTAINS toLower(c.name)
+            RETURN DISTINCT c.concept_id as concept_id,
                    c.name as name,
                    c.description as description,
                    c.difficulty as difficulty,
                    c.semantic_tags as semantic_tags
-            """
+            LIMIT 100
+            """,
+            names=lookup_names
         )
         return result if result else []
+
+    async def _ensure_fulltext_index(self):
+        """Ensure Neo4j fulltext index exists"""
+        if self._index_checked:
+            return
+            
+        try:
+            neo4j = self.state_manager.neo4j
+            # Create fulltext index on 'name' property of 'CourseConcept' nodes
+            # Syntax compatible with Neo4j 5.x
+            await neo4j.run_query("""
+                CREATE FULLTEXT INDEX conceptNameIndex IF NOT EXISTS
+                FOR (n:CourseConcept) ON EACH [n.name]
+            """)
+            self._index_checked = True
+            self.logger.info("Checked/Created 'conceptNameIndex' fulltext index")
+        except Exception as e:
+            self.logger.warning(f"Could not create fulltext index: {e}")
     
-    async def _get_existing_relationships(self) -> List[Dict]:
-        """Get all existing relationships from Course KG"""
+    async def _get_candidate_relationships(self, concept_ids: List[str]) -> List[Dict]:
+        """Get existing relationships ONLY for the relevant concepts"""
+        if not concept_ids:
+            return []
+            
         neo4j = self.state_manager.neo4j
         result = await neo4j.run_query(
             """
             MATCH (a:CourseConcept)-[r]->(b:CourseConcept)
+            WHERE a.concept_id IN $ids OR b.concept_id IN $ids
             RETURN a.concept_id as source,
                    b.concept_id as target,
                    type(r) as relationship_type
-            """
+            """,
+            ids=concept_ids
         )
         return result if result else []
     
@@ -736,6 +932,7 @@ Return JSON object mapping concept_id to metadata:
             document_content: str - Document text
             document_title: str - Filename (used for overwrite detection)
             document_type: str - LECTURE, TUTORIAL, etc.
+            domain: str (Optional) - User-provided domain override
         """
         import hashlib
         
@@ -754,6 +951,9 @@ Return JSON object mapping concept_id to metadata:
             document_id = f"doc_{uuid.uuid4().hex[:8]}"
             
             provenance_manager = self._get_provenance_manager()
+            
+            # Ensure Fulltext Index for better Entity Resolution
+            await self._ensure_fulltext_index()
             
             # ========================================
             # STEP 1: Check for existing document (by filename)
@@ -774,6 +974,15 @@ Return JSON object mapping concept_id to metadata:
             if was_overwrite:
                 self.logger.info(f"♻️ Re-upload detected, will overwrite: {existing['doc_id']}")
             
+            # ========================================
+            # STEP 0: Domain Extraction (Dynamic)
+            # ========================================
+            user_domain = kwargs.get("domain")
+            domain_name = await self._extract_domain(document_title, document_content, user_domain)
+            self.logger.info(f"🏷️ Domain identified: {domain_name} (User-provided: {bool(user_domain)})")
+            
+            # Use a builder factory with the domain
+            self.concept_builder = get_concept_id_builder(domain_name)
             # ========================================
             # STEP 2: Semantic Chunking
             # ========================================
@@ -863,17 +1072,20 @@ Return JSON object mapping concept_id to metadata:
             # ========================================
             # STEP 6: Emit COURSEKG_UPDATED event
             # ========================================
+            # Use unified payload schema matching execute()
             await self.send_message(
                 receiver="planner",
                 message_type="COURSEKG_UPDATED",
                 payload={
                     "document_id": document_id,
                     "document_title": document_title,
-                    "was_overwrite": was_overwrite,
-                    "concepts_inserted": result["snapshots"]["concepts_inserted"],
-                    "relationships_inserted": result["snapshots"]["relationships_inserted"],
-                    "concepts_rebuilt": result["canonical"]["concepts_rebuilt"],
-                    "extraction_version": self.extraction_version.value
+                    "concepts_added": result["canonical"]["concepts_rebuilt"],
+                    "concepts_merged": 0,  # Provenance mode doesn't merge, it overwrites
+                    "total_concepts": result["snapshots"]["concepts_inserted"],
+                    "total_relationships": result["snapshots"]["relationships_inserted"],
+                    "extraction_version": self.extraction_version.value,
+                    # Additional provenance info
+                    "was_overwrite": was_overwrite
                 }
             )
             
@@ -952,39 +1164,72 @@ Return JSON object mapping concept_id to metadata:
         Event payload:
         {
             'recommendations': list,
-            'bottleneck_concepts': list
+            'bottleneck_concepts': list of {concept_id, avg_mastery}
         }
         """
         try:
             recommendations = event.get('recommendations', [])
             bottleneck_concepts = event.get('bottleneck_concepts', [])
+            analysis_timestamp = event.get('timestamp', datetime.now().isoformat())
             
             self.logger.info(f"📊 Received KAG analysis: {len(recommendations)} recommendations, {len(bottleneck_concepts)} bottlenecks")
             
-            # Log recommendations for course improvement
-            for rec in recommendations:
-                self.logger.info(f"📋 Recommendation: {rec}")
-            
-            # Flag bottleneck concepts in Course KG for enhanced content
-            if bottleneck_concepts and self.state_manager and hasattr(self.state_manager, 'neo4j'):
+            if self.state_manager and hasattr(self.state_manager, 'neo4j'):
                 neo4j = self.state_manager.neo4j
-                for concept in bottleneck_concepts:
-                    concept_id = concept.get('concept_id')
-                    avg_mastery = concept.get('avg_mastery', 0)
-                    
-                    if concept_id:
-                        await neo4j.run_query(
-                            """
-                            MATCH (c:CourseConcept {concept_id: $concept_id})
-                            SET c.is_bottleneck = true,
-                                c.avg_mastery = $avg_mastery,
-                                c.flagged_at = datetime()
-                            """,
-                            concept_id=concept_id,
-                            avg_mastery=avg_mastery
-                        )
                 
-                self.logger.info(f"🚩 Flagged {len(bottleneck_concepts)} bottleneck concepts in Course KG")
+                # Issue 6 Fix: Persist recommendations to Course KG
+                if recommendations:
+                    for rec in recommendations:
+                        self.logger.info(f"📋 Recommendation: {rec}")
+                    
+                    # Store recommendations as a KAGAnalysis node
+                    await neo4j.run_query("""
+                        CREATE (a:KAGAnalysis {
+                            analysis_id: $analysis_id,
+                            recommendations: $recommendations,
+                            bottleneck_count: $bottleneck_count,
+                            created_at: datetime()
+                        })
+                    """,
+                        analysis_id=f"kag_{analysis_timestamp}",
+                        recommendations=recommendations,
+                        bottleneck_count=len(bottleneck_concepts)
+                    )
+                    self.logger.info(f"💾 Persisted {len(recommendations)} recommendations to KAGAnalysis node")
+                
+                # Issue 7 Fix: Atomic reset + set in single query
+                if bottleneck_concepts:
+                    batch_data = [
+                        {
+                            "concept_id": c.get("concept_id"),
+                            "avg_mastery": c.get("avg_mastery", 0)
+                        }
+                        for c in bottleneck_concepts
+                        if c.get("concept_id")
+                    ]
+                    
+                    if batch_data:
+                        # Atomic: Reset all + Set new in one transaction
+                        await neo4j.run_query("""
+                            // Step 1: Reset all bottleneck flags
+                            MATCH (c:CourseConcept)
+                            WHERE c.is_bottleneck = true
+                            SET c.is_bottleneck = false,
+                                c.bottleneck_cleared_at = datetime()
+                            WITH count(c) AS reset_count
+                            
+                            // Step 2: Set new bottlenecks (in same transaction)
+                            UNWIND $batch AS row
+                            MATCH (c:CourseConcept {concept_id: row.concept_id})
+                            SET c.is_bottleneck = true,
+                                c.avg_mastery = row.avg_mastery,
+                                c.flagged_at = datetime()
+                            RETURN count(c) AS flagged_count
+                        """, batch=batch_data)
+                        
+                        self.logger.info(f"🚩 Flagged {len(batch_data)} bottleneck concepts in Course KG (atomic)")
                 
         except Exception as e:
             self.logger.error(f"Error in _on_kag_analysis_completed: {e}")
+            # Re-raise to notify event bus of failure
+            raise

@@ -24,6 +24,7 @@ class Neo4jBatchUpserter:
     - Single query per batch (not per record)
     - Supports provenance tracking
     - Idempotent MERGE operations
+    - Preserves existing values via COALESCE
     
     Usage:
         upserter = Neo4jBatchUpserter(neo4j_client)
@@ -32,6 +33,14 @@ class Neo4jBatchUpserter:
     
     # Batch size for UNWIND operations
     DEFAULT_BATCH_SIZE = 100
+    
+    # Default values (aligned with KGValidator)
+    DEFAULT_DIFFICULTY = 2
+    DEFAULT_BLOOM_LEVEL = "UNDERSTAND"
+    DEFAULT_TIME_ESTIMATE = 30
+    DEFAULT_CONFIDENCE = 0.8
+    DEFAULT_WEIGHT = 0.8
+    DEFAULT_DEPENDENCY = "MODERATE"
     
     def __init__(self, neo4j_client, batch_size: int = None):
         """
@@ -72,16 +81,16 @@ class Neo4jBatchUpserter:
         for i in range(0, len(concepts), self.batch_size):
             batch = concepts[i:i + self.batch_size]
             
-            # Prepare batch data
+            # Prepare batch data using class constants
             batch_data = []
             for concept in batch:
                 batch_data.append({
                     "concept_id": concept.get("concept_id"),
                     "name": concept.get("name", ""),
                     "description": concept.get("description", ""),
-                    "difficulty": concept.get("difficulty", 2),
-                    "bloom_level": concept.get("bloom_level", "UNDERSTAND"),
-                    "time_estimate": concept.get("time_estimate", 30),
+                    "difficulty": concept.get("difficulty", self.DEFAULT_DIFFICULTY),
+                    "bloom_level": concept.get("bloom_level", self.DEFAULT_BLOOM_LEVEL),
+                    "time_estimate": concept.get("time_estimate", self.DEFAULT_TIME_ESTIMATE),
                     "semantic_tags": concept.get("semantic_tags", []),
                     "focused_tags": concept.get("focused_tags", []),
                     "learning_objective": concept.get("learning_objective", ""),
@@ -90,7 +99,7 @@ class Neo4jBatchUpserter:
                     "source_document_id": source_document_id
                 })
             
-            # UNWIND batch upsert with provenance list
+            # UNWIND batch upsert with COALESCE to preserve existing values
             query = """
             UNWIND $batch AS row
             MERGE (c:CourseConcept {concept_id: row.concept_id})
@@ -109,15 +118,19 @@ class Neo4jBatchUpserter:
                 c.created_at = datetime(),
                 c.updated_at = datetime()
             ON MATCH SET
-                c.name = row.name,
-                c.description = row.description,
-                c.difficulty = row.difficulty,
-                c.bloom_level = row.bloom_level,
-                c.time_estimate = row.time_estimate,
-                c.semantic_tags = row.semantic_tags,
-                c.focused_tags = row.focused_tags,
-                c.learning_objective = row.learning_objective,
-                c.examples = row.examples,
+                c.name = COALESCE(row.name, c.name),
+                c.description = CASE WHEN size(row.description) > size(c.description) 
+                                     THEN row.description ELSE c.description END,
+                c.difficulty = COALESCE(row.difficulty, c.difficulty),
+                c.bloom_level = COALESCE(row.bloom_level, c.bloom_level),
+                c.time_estimate = COALESCE(row.time_estimate, c.time_estimate),
+                c.semantic_tags = CASE WHEN size(row.semantic_tags) > 0 
+                                       THEN row.semantic_tags ELSE c.semantic_tags END,
+                c.focused_tags = CASE WHEN size(row.focused_tags) > 0 
+                                      THEN row.focused_tags ELSE c.focused_tags END,
+                c.learning_objective = COALESCE(row.learning_objective, c.learning_objective),
+                c.examples = CASE WHEN size(row.examples) > 0 
+                                  THEN row.examples ELSE c.examples END,
                 c.extraction_version = row.extraction_version,
                 c.source_document_ids = CASE 
                     WHEN row.source_document_id IN c.source_document_ids 
@@ -156,7 +169,7 @@ class Neo4jBatchUpserter:
         source_document_id: str
     ) -> Dict[str, Any]:
         """
-        Batch upsert relationships.
+        Batch upsert relationships with SPR spec fields.
         
         Args:
             relationships: List of relationship dictionaries
@@ -164,6 +177,8 @@ class Neo4jBatchUpserter:
                 - target: target concept_id
                 - relationship_type: one of 7 types
                 - confidence: 0-1 score
+                - weight: 0-1 importance (SPR spec)
+                - dependency: STRONG/MODERATE/WEAK (SPR spec)
             source_document_id: Document ID for provenance
             
         Returns:
@@ -188,16 +203,19 @@ class Neo4jBatchUpserter:
             for i in range(0, len(rels), self.batch_size):
                 batch = rels[i:i + self.batch_size]
                 
+                # Include weight and dependency (SPR spec)
                 batch_data = []
                 for rel in batch:
                     batch_data.append({
                         "source": rel.get("source"),
                         "target": rel.get("target"),
-                        "confidence": rel.get("confidence", 0.8),
+                        "confidence": rel.get("confidence", self.DEFAULT_CONFIDENCE),
+                        "weight": rel.get("weight", self.DEFAULT_WEIGHT),
+                        "dependency": rel.get("dependency", self.DEFAULT_DEPENDENCY),
                         "source_document_id": source_document_id
                     })
                 
-                # Dynamic relationship type in query
+                # Dynamic relationship type in query with full SPR fields
                 query = f"""
                 UNWIND $batch AS row
                 MATCH (s:CourseConcept {{concept_id: row.source}})
@@ -205,10 +223,14 @@ class Neo4jBatchUpserter:
                 MERGE (s)-[r:{rel_type}]->(t)
                 ON CREATE SET
                     r.confidence = row.confidence,
+                    r.weight = row.weight,
+                    r.dependency = row.dependency,
                     r.source_document_ids = [row.source_document_id],
                     r.created_at = datetime()
                 ON MATCH SET
-                    r.confidence = row.confidence,
+                    r.confidence = COALESCE(row.confidence, r.confidence),
+                    r.weight = COALESCE(row.weight, r.weight),
+                    r.dependency = COALESCE(row.dependency, r.dependency),
                     r.source_document_ids = CASE 
                         WHEN row.source_document_id IN r.source_document_ids 
                         THEN r.source_document_ids 
@@ -228,7 +250,7 @@ class Neo4jBatchUpserter:
                     
                 except Exception as e:
                     logger.error(f"Relationship batch upsert error: {e}")
-                    # Continue with other batches
+                    raise  # Standardized: re-raise like upsert_concepts
         
         logger.info(f"✅ Upserted {total_upserted} relationships in {batch_count} batches")
         

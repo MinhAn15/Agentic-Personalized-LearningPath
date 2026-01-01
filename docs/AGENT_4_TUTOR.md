@@ -123,7 +123,30 @@ Special:  REFUTATION → PROBING (verify correction)
 3. RAG (Raw documents) - LOWEST TRUST
 ```
 
-**Conflict Strategy**: If RAG content matches KG `common_misconceptions` → Trust KG.
+### Conflict Detection Mechanism
+
+```python
+# New Feature: Automatic conflict detection between RAG and KG
+CONFLICT_THRESHOLD = 0.6   # Semantic similarity < 0.6 = conflict
+CONFLICT_PENALTY = 0.1     # Reduce confidence when conflict detected
+
+async def _detect_conflict(rag_chunks, kg_definition):
+    # Method 1: LLM-based semantic comparison (primary)
+    # Method 2: Jaccard word similarity (fallback)
+    
+    if similarity < CONFLICT_THRESHOLD:
+        return True, similarity  # Conflict detected
+    return False, similarity
+```
+
+| Scenario | Action |
+| -------- | ------ |
+| RAG matches KG | Use both, full confidence |
+| RAG conflicts with KG | Trust KG, apply confidence penalty |
+| Only RAG available | Use RAG, flag as "low confidence" |
+| Only KG available | Use KG, high confidence |
+
+**Conflict Strategy**: If RAG content contradicts KG definition → Trust KG, log warning, reduce confidence by 0.1.
 
 ### Dynamic Course KG Scoring
 

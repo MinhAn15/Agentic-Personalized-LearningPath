@@ -93,7 +93,11 @@ class KGValidator:
     Validates:
     - Node schema (required fields, valid enums)
     - Relationship integrity (source/target exist)
-    - Graph structure (no self-loops, orphans)
+    - Graph structure (no self-loops, orphans, cycles)
+    
+    Args:
+        strict_mode: If True, ID format warnings become errors.
+                    Default: True for production, False for development.
     """
     
     # Required fields for CourseConcept
@@ -107,8 +111,15 @@ class KGValidator:
         "HAS_ALTERNATIVE_PATH", "SIMILAR_TO", "IS_SUB_CONCEPT_OF"
     ]
     
-    # ID format pattern
-    ID_PATTERN = re.compile(r'^[A-Z0-9_]+$')
+    # Structural relationship types that form DAG (used for cycle detection)
+    CYCLE_CHECK_REL_TYPES = ["REQUIRES", "NEXT", "IS_SUB_CONCEPT_OF"]
+    
+    # ID format pattern - allow both uppercase and mixed case (ConceptIdBuilder compatibility)
+    ID_PATTERN = re.compile(r'^[A-Za-z0-9_]+$')
+    
+    # Value ranges
+    DIFFICULTY_RANGE = (1, 5)
+    TIME_ESTIMATE_RANGE = (15, 120)  # Minutes
     
     def __init__(self, strict_mode: bool = True):
         """
@@ -248,6 +259,31 @@ class KGValidator:
                     node_id=concept_id,
                     field="difficulty",
                     suggested_fix="2"
+                ))
+        
+        # Rule 6: Time estimate range
+        time_estimate = node.get("time_estimate")
+        if time_estimate is not None:
+            try:
+                time_val = int(time_estimate)
+                min_time, max_time = self.TIME_ESTIMATE_RANGE
+                if not min_time <= time_val <= max_time:
+                    issues.append(ValidationIssue(
+                        rule="VALID_RANGE",
+                        severity=ValidationSeverity.WARNING,
+                        message=f"Time estimate {time_val} out of range [{min_time}-{max_time}]",
+                        node_id=concept_id,
+                        field="time_estimate",
+                        suggested_fix="30"
+                    ))
+            except (ValueError, TypeError):
+                issues.append(ValidationIssue(
+                    rule="VALID_TYPE",
+                    severity=ValidationSeverity.WARNING,
+                    message=f"Time estimate should be integer, got: {type(time_estimate).__name__}",
+                    node_id=concept_id,
+                    field="time_estimate",
+                    suggested_fix="30"
                 ))
         
         # Rule 6: Description length
@@ -428,28 +464,38 @@ class KGValidator:
         for node in nodes:
             fixed = node.copy()
             
-            # Fix ID format
+            # Fix ID format (preserve case, only fix spaces and dashes)
             if fixed.get("concept_id"):
-                fixed["concept_id"] = fixed["concept_id"].upper().replace(" ", "_").replace("-", "_")
+                fixed["concept_id"] = fixed["concept_id"].replace(" ", "_").replace("-", "_")
             
             # Fix bloom_level
             if fixed.get("bloom_level") and fixed["bloom_level"].upper() not in self.VALID_BLOOM_LEVELS:
                 fixed["bloom_level"] = "UNDERSTAND"
             
-            # Clamp difficulty
+            # Clamp difficulty using class constant
             if fixed.get("difficulty"):
                 try:
-                    fixed["difficulty"] = max(1, min(5, int(fixed["difficulty"])))
-                except:
+                    min_diff, max_diff = self.DIFFICULTY_RANGE
+                    fixed["difficulty"] = max(min_diff, min(max_diff, int(fixed["difficulty"])))
+                except (ValueError, TypeError):
                     fixed["difficulty"] = 2
+            
+            # Clamp time_estimate using class constant
+            if fixed.get("time_estimate"):
+                try:
+                    min_time, max_time = self.TIME_ESTIMATE_RANGE
+                    fixed["time_estimate"] = max(min_time, min(max_time, int(fixed["time_estimate"])))
+                except (ValueError, TypeError):
+                    fixed["time_estimate"] = 30
             
             fixed_nodes.append(fixed)
         
         # Fix relationships
         valid_ids = {n.get("concept_id") for n in fixed_nodes}
         for rel in relationships:
-            source = rel.get("source", "").upper().replace(" ", "_")
-            target = rel.get("target", "").upper().replace(" ", "_")
+            # Preserve case, only fix spaces
+            source = rel.get("source", "").replace(" ", "_")
+            target = rel.get("target", "").replace(" ", "_")
             
             # Skip invalid references
             if source not in valid_ids or target not in valid_ids:
@@ -487,8 +533,8 @@ class KGValidator:
             tgt = rel.get("target")
             rel_type = rel.get("relationship_type", "")
             
-            # Only consider structural relationships for cycles
-            if src and tgt and rel_type in ["REQUIRES", "NEXT", "IS_SUB_CONCEPT_OF"]:
+            # Only consider structural relationships for cycles (use class constant)
+            if src and tgt and rel_type in self.CYCLE_CHECK_REL_TYPES:
                 adj[src].append((tgt, rel))
         
         visited = set()

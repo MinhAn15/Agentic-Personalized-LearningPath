@@ -69,10 +69,10 @@ class EntityResolver:
     """
     Entity Resolver: Merge duplicate concepts.
     
-    Implements 3-way similarity as per thesis:
-    - Semantic: 50% weight (embedding cosine)
-    - Structural: 25% weight (prerequisite overlap)
-    - Contextual: 25% weight (tag overlap)
+    Implements 3-way similarity:
+    - Semantic: 60% weight (embedding cosine)
+    - Structural: 30% weight (prerequisite overlap)
+    - Contextual: 10% weight (tag overlap)
     """
     
     # Similarity weights (Scientifically balanced for Pedagogical Graphs)
@@ -81,16 +81,20 @@ class EntityResolver:
     W_CONTEXTUAL = 0.10  # Metadata overlap (Tags)
     
     # Thresholds
-    MERGE_THRESHOLD = 0.85        # Combined score for auto-merge
-    HUMAN_REVIEW_THRESHOLD = 0.70 # Suggest for review
+    MERGE_THRESHOLD = 0.85  # Combined score for auto-merge
     
     # Scalability: Two-Stage Resolution Parameters
-    TOP_K_CANDIDATES = 20         # Max candidates to retrieve per concept
+    TOP_K_CANDIDATES = 20   # Max candidates to retrieve per concept
+    
+    # Default confidence values for consistency
+    DEFAULT_CONFIDENCE_EXISTING = 1.0  # Trusted DB concepts
+    DEFAULT_CONFIDENCE_NEW = 0.7       # New extraction
+    DEFAULT_CONFIDENCE_CLUSTER = 0.7   # Cluster members
     
     def __init__(
         self,
         embedding_model: Optional[Any] = None,
-        merge_threshold: float = 0.85,
+        merge_threshold: float = None,  # Use class constant if not provided
         use_embeddings: bool = True
     ):
         """
@@ -98,10 +102,10 @@ class EntityResolver:
         
         Args:
             embedding_model: LlamaIndex/Gemini-compatible embedding model
-            merge_threshold: Similarity threshold for merging
+            merge_threshold: Similarity threshold for merging (default: MERGE_THRESHOLD)
             use_embeddings: Whether to use embeddings for semantic similarity
         """
-        self.merge_threshold = merge_threshold
+        self.merge_threshold = merge_threshold if merge_threshold is not None else self.MERGE_THRESHOLD
         self.use_embeddings = use_embeddings
         self._embedding_model = embedding_model
         self._embedding_cache: Dict[str, np.ndarray] = {}
@@ -109,6 +113,13 @@ class EntityResolver:
         if use_embeddings and embedding_model is None:
             logger.warning("No embedding model provided. Semantic similarity will fallback to Jaccard.")
             self.use_embeddings = False
+    
+    def clear_embedding_cache(self) -> int:
+        """Clear embedding cache to free memory. Returns number of items cleared."""
+        count = len(self._embedding_cache)
+        self._embedding_cache.clear()
+        logger.info(f"Cleared {count} embeddings from cache")
+        return count
     
     def resolve(
         self,
@@ -578,8 +589,8 @@ class EntityResolver:
         times = []
         
         for member in cluster:
-            # Assume default confidence 0.5 if not present (legacy support)
-            conf = float(member.get("confidence", 0.5))
+            # Use class constant for consistency
+            conf = float(member.get("confidence", self.DEFAULT_CONFIDENCE_CLUSTER))
             
             if "difficulty" in member and member["difficulty"]:
                 try:
@@ -628,10 +639,9 @@ class EntityResolver:
         """
         merged = target_concept.copy()
         
-        # Default confidences
-        # Existing DB concepts imply higher confidence (e.g., 1.0) or stored confidence
-        target_conf = float(target_concept.get("confidence", 1.0)) 
-        source_conf = float(source_concept.get("confidence", 0.7)) # New extraction confidence
+        # Default confidences using class constants for consistency
+        target_conf = float(target_concept.get("confidence", self.DEFAULT_CONFIDENCE_EXISTING)) 
+        source_conf = float(source_concept.get("confidence", self.DEFAULT_CONFIDENCE_NEW))
         
         # Resolve Difficulty
         d1 = target_concept.get("difficulty")

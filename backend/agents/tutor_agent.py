@@ -92,6 +92,10 @@ class TutorAgent(BaseAgent):
         self.W_PERSONAL = 0.25  # Personal KG weight
         self.CONFIDENCE_THRESHOLD = 0.5
         
+        # Conflict detection threshold (semantic similarity < this = conflict)
+        self.CONFLICT_THRESHOLD = 0.6
+        self.CONFLICT_PENALTY = 0.1  # Reduce confidence when conflict detected
+        
         # Event subscriptions
         if event_bus and hasattr(event_bus, 'subscribe'):
             event_bus.subscribe('PATH_PLANNED', self._on_path_planned)
@@ -458,6 +462,35 @@ class TutorAgent(BaseAgent):
             self.W_PERSONAL * personal_score
         )
         
+        # ===== CONFLICT DETECTION (New Feature) =====
+        conflict_detected = False
+        conflict_info = None
+        
+        # Check RAG vs Course KG conflict
+        if doc_context and kg_context:
+            is_conflict, similarity = await self._detect_conflict(
+                doc_context.get("retrieved_chunks", []),
+                kg_context.get("definition", "")
+            )
+            
+            if is_conflict:
+                conflict_detected = True
+                conflict_info = {
+                    "type": "RAG_VS_KG",
+                    "similarity": similarity,
+                    "resolution": "TRUST_KG",  # Trust hierarchy: KG > RAG
+                    "rag_content": doc_context.get("retrieved_chunks", [])[:1],
+                    "kg_content": kg_context.get("definition", "")
+                }
+                
+                # Apply confidence penalty for conflict
+                confidence = max(0.0, confidence - self.CONFLICT_PENALTY)
+                
+                self.logger.warning(
+                    f"⚠️ CONFLICT detected (similarity={similarity:.2f}). "
+                    f"Using KG as trusted source. Confidence reduced to {confidence:.2f}"
+                )
+        
         # Merge context with conflict detection metadata
         merged_context = {
             "document": doc_context,
@@ -468,14 +501,97 @@ class TutorAgent(BaseAgent):
                 "document": doc_score,
                 "course_kg": kg_score,
                 "personal": personal_score
+            },
+            # Conflict metadata
+            "_conflict": {
+                "detected": conflict_detected,
+                "info": conflict_info
             }
         }
         
         return {
             "context": merged_context,
             "confidence": confidence,
-            "sources": sources
+            "sources": sources,
+            "conflict_detected": conflict_detected,
+            "conflict_info": conflict_info
         }
+    
+    async def _detect_conflict(
+        self,
+        rag_chunks: list,
+        kg_definition: str
+    ) -> tuple:
+        """
+        Detect conflict between RAG results and Knowledge Graph definition.
+        
+        Uses semantic similarity to identify when RAG provides information
+        that contradicts the curated KG content.
+        
+        Returns:
+            tuple: (is_conflict: bool, similarity_score: float)
+        
+        Scientific Basis:
+            - TruthfulRAG (2024): KG-based conflict resolution
+            - Trust Hierarchy: KG > RAG when conflict detected
+        """
+        import numpy as np
+        
+        # Skip if either source is empty
+        if not rag_chunks or not kg_definition:
+            return False, 1.0
+        
+        try:
+            # Combine RAG chunks into single text
+            rag_text = " ".join(rag_chunks[:3]) if isinstance(rag_chunks, list) else str(rag_chunks)
+            
+            # Use LLM to check semantic alignment
+            if hasattr(self, 'llm') and self.llm:
+                # Method 1: LLM-based conflict detection (more accurate)
+                conflict_check_prompt = f"""
+                Compare these two statements and determine if they CONFLICT (contradict each other).
+                
+                Statement A (RAG): {rag_text[:500]}
+                Statement B (KG): {kg_definition[:500]}
+                
+                Reply with JSON: {{"conflict": true/false, "similarity": 0.0-1.0, "reason": "..."}}
+                """
+                
+                response = await self.llm.generate(conflict_check_prompt)
+                
+                try:
+                    import json
+                    result = json.loads(response)
+                    is_conflict = result.get("conflict", False)
+                    similarity = result.get("similarity", 0.8)
+                    
+                    if is_conflict:
+                        self.logger.info(f"LLM detected conflict: {result.get('reason', 'N/A')}")
+                    
+                    return is_conflict, similarity
+                except json.JSONDecodeError:
+                    pass
+            
+            # Method 2: Simple word overlap fallback
+            rag_words = set(rag_text.lower().split())
+            kg_words = set(kg_definition.lower().split())
+            
+            if not kg_words:
+                return False, 1.0
+            
+            # Jaccard similarity as simple measure
+            intersection = len(rag_words & kg_words)
+            union = len(rag_words | kg_words)
+            similarity = intersection / union if union > 0 else 0.0
+            
+            # Low similarity might indicate conflict
+            is_conflict = similarity < self.CONFLICT_THRESHOLD
+            
+            return is_conflict, similarity
+            
+        except Exception as e:
+            self.logger.error(f"Conflict detection error: {e}")
+            return False, 1.0  # Assume no conflict on error
     
     async def _rag_retrieve(self, query: str, concept_id: str) -> tuple:
         """Layer 1: Retrieve from local LlamaIndex vector store"""
