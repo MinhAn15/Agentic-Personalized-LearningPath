@@ -62,6 +62,13 @@ class EvaluatorAgent(BaseAgent):
     # FIX Issue 8: Define pattern at class level (compiled once)
     ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
     
+    # Path decision adjustment constants (configurable)
+    DIFFICULTY_ADJUSTMENT = 0.05  # 5% more lenient for hard concepts (difficulty >= 4)
+    MASTERY_BOOST = 0.03  # 3% boost for high-mastery learners (mastery >= 0.7)
+    
+    # FIX Issue 5: Mastery update weight constant
+    MASTERY_WEIGHT = 0.6  # New score is 60% of update
+    
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None, personal_kg=None):
         """
@@ -297,25 +304,37 @@ class EvaluatorAgent(BaseAgent):
             }
             
             # Step 8: Emit events
+            event_payload = {
+                "learner_id": learner_id,
+                "concept_id": concept_id,
+                "score": score,
+                "decision": decision.value,
+                "new_mastery": new_mastery
+            }
+            
+            # FIX: Debug log for event payload
+            self.logger.debug(f"Emitting EVALUATION_COMPLETED: {event_payload}")
+            
+            # FIX Issue 9-10: Use EVALUATION_COMPLETED to match subscriber events
             await self.send_message(
                 receiver="path_planner",
-                message_type="evaluation_complete",
-                payload={
-                    "learner_id": learner_id,
-                    "concept_id": concept_id,
-                    "score": score,
-                    "decision": decision.value,
-                    "new_mastery": new_mastery
-                }
+                message_type="EVALUATION_COMPLETED",
+                payload=event_payload
             )
             
             if score < 0.4:
+                # FIX Issue 1: Fetch actual attempts from learner profile
+                attempts = 1
+                if learner_profile:
+                    concept_history = learner_profile.get("concept_attempts", {})
+                    attempts = concept_history.get(concept_id, {}).get("attempts", 1)
+                
                 # Trigger Instructor Alert for Critical Failure
                 await self.notification_service.notify_failure(
                     learner_id=learner_id,
                     concept_id=concept_id,
                     score=score,
-                    attempts=1 # TODO: Fetch actual attempts from personal KG
+                    attempts=attempts
                 )
 
             self.logger.info(f"✅ Evaluation complete: {error_type.value} ({score:.1%})")
@@ -324,6 +343,21 @@ class EvaluatorAgent(BaseAgent):
         
         except Exception as e:
             self.logger.error(f"❌ Evaluation failed: {e}")
+            
+            # FIX Issue 3: Emit error event so path_planner knows evaluation failed
+            try:
+                await self.send_message(
+                    receiver="path_planner",
+                    message_type="EVALUATION_FAILED",
+                    payload={
+                        "learner_id": kwargs.get("learner_id"),
+                        "concept_id": kwargs.get("concept_id"),
+                        "error": str(e)
+                    }
+                )
+            except Exception:
+                pass  # Best effort - don't fail silently
+            
             return {
                 "success": False,
                 "error": str(e),
@@ -556,38 +590,45 @@ class EvaluatorAgent(BaseAgent):
         - score < 0.6 + Other -> RETRY
         """
         
-        # FIX Issue 2: Adjust thresholds based on concept difficulty (1-5 scale)
+        # Adjust thresholds based on concept difficulty (1-5 scale)
         # Harder concepts (4-5) get slightly lower thresholds
         difficulty_adjustment = 0.0
         if concept_difficulty >= 4:
-            difficulty_adjustment = 0.05  # 5% more lenient for hard concepts
+            difficulty_adjustment = self.DIFFICULTY_ADJUSTMENT
         
-        # FIX Issue 1: Adjust MASTERED threshold based on current mastery
+        # Adjust MASTERED threshold based on current mastery
         # If learner already has high mastery, be slightly more lenient
         mastery_boost = 0.0
         if current_mastery >= 0.7:
-            mastery_boost = 0.03  # 3% boost for high-mastery learners
+            mastery_boost = self.MASTERY_BOOST
         
         # Adjusted thresholds
         mastered_threshold = 0.9 - difficulty_adjustment - mastery_boost
         proceed_threshold = 0.8 - difficulty_adjustment
         alternate_threshold = 0.6 - difficulty_adjustment
         
+        # Determine decision
         if score >= mastered_threshold:
-            return PathDecision.MASTERED
+            decision = PathDecision.MASTERED
         elif score >= proceed_threshold:
-            return PathDecision.PROCEED
+            decision = PathDecision.PROCEED
         elif score >= alternate_threshold:
-            # Good enough but not perfect - try different angle
-            return PathDecision.ALTERNATE
+            decision = PathDecision.ALTERNATE
         else:
             # Low score - check error type
             if error_type == ErrorType.CONCEPTUAL:
-                # Fundamental misunderstanding - need prerequisites
-                return PathDecision.REMEDIATE
+                decision = PathDecision.REMEDIATE
             else:
-                # Careless/Incomplete/Procedural - retry with new question
-                return PathDecision.RETRY
+                decision = PathDecision.RETRY
+        
+        # FIX Issue 4: Log decision and adjusted thresholds
+        self.logger.debug(
+            f"Path decision: {decision.value} | "
+            f"score={score:.2f}, thresholds=[M:{mastered_threshold:.2f}, P:{proceed_threshold:.2f}, A:{alternate_threshold:.2f}] | "
+            f"adjustments=[difficulty:{difficulty_adjustment:.2f}, mastery_boost:{mastery_boost:.2f}]"
+        )
+        
+        return decision
     
     async def _update_learner_mastery(
         self,
@@ -596,11 +637,16 @@ class EvaluatorAgent(BaseAgent):
         score: float,
         current_mastery: float
     ) -> float:
-        """Update learner's mastery level"""
+        """Update learner's mastery level using weighted moving average"""
         try:
-            # Weighted average of current mastery and new score
-            weight = 0.6  # New score is 60% of update
-            new_mastery = (current_mastery * (1 - weight)) + (score * weight)
+            # Weighted average using class constant
+            new_mastery = (current_mastery * (1 - self.MASTERY_WEIGHT)) + (score * self.MASTERY_WEIGHT)
+            
+            # FIX Issue 4: Debug log for mastery update
+            self.logger.debug(
+                f"Mastery update: {learner_id}/{concept_id} | "
+                f"current={current_mastery:.2f}, score={score:.2f} -> new={new_mastery:.2f}"
+            )
             
             # Save to database
             await self.save_state(

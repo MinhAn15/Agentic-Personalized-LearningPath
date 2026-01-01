@@ -129,6 +129,11 @@ class KnowledgeExtractionAgent(BaseAgent):
         
         # Extraction version for provenance
         self.extraction_version = ExtractionVersion.V3_ENTITY_RESOLUTION
+        
+        # FIX Issue 5: Subscribe to KAG_ANALYSIS_COMPLETED event
+        if event_bus and hasattr(event_bus, 'subscribe'):
+            event_bus.subscribe('KAG_ANALYSIS_COMPLETED', self._on_kag_analysis_completed)
+            self.logger.info("Subscribed to KAG_ANALYSIS_COMPLETED")
     
     def _get_batch_upserter(self) -> Neo4jBatchUpserter:
         """Get or create batch upserter (lazy initialization)"""
@@ -934,3 +939,52 @@ Return JSON object mapping concept_id to metadata:
             self.logger.error(f"❌ [RAG] Vector persistence failed: {e}")
             # Don't fail the whole pipeline, just log
 
+    # ==========================================
+    # EVENT HANDLERS
+    # ==========================================
+    
+    async def _on_kag_analysis_completed(self, event: Dict[str, Any]):
+        """
+        Handle KAG_ANALYSIS_COMPLETED event from KAG Agent.
+        
+        Uses analysis recommendations to improve Course KG.
+        
+        Event payload:
+        {
+            'recommendations': list,
+            'bottleneck_concepts': list
+        }
+        """
+        try:
+            recommendations = event.get('recommendations', [])
+            bottleneck_concepts = event.get('bottleneck_concepts', [])
+            
+            self.logger.info(f"📊 Received KAG analysis: {len(recommendations)} recommendations, {len(bottleneck_concepts)} bottlenecks")
+            
+            # Log recommendations for course improvement
+            for rec in recommendations:
+                self.logger.info(f"📋 Recommendation: {rec}")
+            
+            # Flag bottleneck concepts in Course KG for enhanced content
+            if bottleneck_concepts and self.state_manager and hasattr(self.state_manager, 'neo4j'):
+                neo4j = self.state_manager.neo4j
+                for concept in bottleneck_concepts:
+                    concept_id = concept.get('concept_id')
+                    avg_mastery = concept.get('avg_mastery', 0)
+                    
+                    if concept_id:
+                        await neo4j.run_query(
+                            """
+                            MATCH (c:CourseConcept {concept_id: $concept_id})
+                            SET c.is_bottleneck = true,
+                                c.avg_mastery = $avg_mastery,
+                                c.flagged_at = datetime()
+                            """,
+                            concept_id=concept_id,
+                            avg_mastery=avg_mastery
+                        )
+                
+                self.logger.info(f"🚩 Flagged {len(bottleneck_concepts)} bottleneck concepts in Course KG")
+                
+        except Exception as e:
+            self.logger.error(f"Error in _on_kag_analysis_completed: {e}")

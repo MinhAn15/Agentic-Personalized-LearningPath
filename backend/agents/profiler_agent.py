@@ -651,7 +651,11 @@ Return ONLY valid JSON:
             self.event_bus.subscribe("EVALUATION_COMPLETED", self._on_evaluation_completed)
             self.event_bus.subscribe("PACE_CHECK_TRIGGERED", self._on_pace_check)
             self.event_bus.subscribe("ARTIFACT_CREATED", self._on_artifact_created)
-            self.logger.info("Subscribed to EVALUATION_COMPLETED, PACE_CHECK_TRIGGERED, ARTIFACT_CREATED")
+            # FIX Issue 6: Subscribe to KG_SYNC_COMPLETED from KAG Agent
+            self.event_bus.subscribe("KG_SYNC_COMPLETED", self._on_kg_sync_completed)
+            # FIX Issue 3 (Phase 5): Subscribe to ARTIFACT_GENERATION_FAILED from KAG Agent
+            self.event_bus.subscribe("ARTIFACT_GENERATION_FAILED", self._on_artifact_generation_failed)
+            self.logger.info("Subscribed to EVALUATION_COMPLETED, PACE_CHECK_TRIGGERED, ARTIFACT_CREATED, KG_SYNC_COMPLETED, ARTIFACT_GENERATION_FAILED")
     
     def _get_learner_lock(self, learner_id: str) -> asyncio.Lock:
         """Get per-learner lock for event ordering"""
@@ -865,6 +869,108 @@ Return ONLY valid JSON:
                 
             except Exception as e:
                 self.logger.error(f"Error in _on_artifact_created: {e}")
+    
+    async def _on_kg_sync_completed(self, event: Dict[str, Any]):
+        """
+        Handle KG_SYNC_COMPLETED event from KAG Agent.
+        
+        Updates profile to reflect KG sync status.
+        
+        Event payload:
+        {
+            'learner_id': str,
+            'sync_count': int,
+            'timestamp': str
+        }
+        """
+        learner_id = event.get('learner_id')
+        if not learner_id:
+            return
+        
+        async with self._get_learner_lock(learner_id):
+            try:
+                sync_count = event.get('sync_count', 0)
+                timestamp = event.get('timestamp', datetime.now().isoformat())
+                
+                redis = self.state_manager.redis
+                profile_data = await redis.get(f"profile:{learner_id}")
+                
+                if not profile_data:
+                    return
+                
+                # Update KG sync tracking
+                if 'kg_sync_history' not in profile_data:
+                    profile_data['kg_sync_history'] = []
+                
+                profile_data['kg_sync_history'].append({
+                    'sync_count': sync_count,
+                    'timestamp': timestamp
+                })
+                
+                # Keep only last 50 sync records
+                profile_data['kg_sync_history'] = profile_data['kg_sync_history'][-50:]
+                
+                # Update last sync timestamp
+                profile_data['last_kg_sync'] = timestamp
+                
+                # Save
+                profile_data['version'] = profile_data.get('version', 0) + 1
+                await redis.set(f"profile:{learner_id}", profile_data, ttl=1800)
+                
+                self.logger.debug(f"KG sync recorded for {learner_id}: {sync_count} items")
+                
+            except Exception as e:
+                self.logger.error(f"Error in _on_kg_sync_completed: {e}")
+    
+    async def _on_artifact_generation_failed(self, event: Dict[str, Any]):
+        """
+        Handle ARTIFACT_GENERATION_FAILED event from KAG Agent.
+        
+        Tracks failed artifact generation attempts in profile.
+        
+        Event payload:
+        {
+            'learner_id': str,
+            'concept_id': str,
+            'reason': str
+        }
+        """
+        learner_id = event.get('learner_id')
+        if not learner_id:
+            return
+        
+        async with self._get_learner_lock(learner_id):
+            try:
+                concept_id = event.get('concept_id', 'unknown')
+                reason = event.get('reason', 'Unknown error')
+                
+                redis = self.state_manager.redis
+                profile_data = await redis.get(f"profile:{learner_id}")
+                
+                if not profile_data:
+                    return
+                
+                # Track failed generations
+                if 'artifact_failures' not in profile_data:
+                    profile_data['artifact_failures'] = []
+                
+                profile_data['artifact_failures'].append({
+                    'concept_id': concept_id,
+                    'reason': reason,
+                    'timestamp': datetime.now().isoformat()
+                })
+                
+                # Keep only last 20 failure records
+                profile_data['artifact_failures'] = profile_data['artifact_failures'][-20:]
+                
+                # Save
+                profile_data['version'] = profile_data.get('version', 0) + 1
+                await redis.set(f"profile:{learner_id}", profile_data, ttl=1800)
+                
+                self.logger.warning(f"Artifact generation failed for {learner_id}/{concept_id}: {reason}")
+                
+            except Exception as e:
+                self.logger.error(f"Error in _on_artifact_generation_failed: {e}")
     
     def _estimate_bloom_level(self, score: float, difficulty: int, question_type: str) -> str:
         """

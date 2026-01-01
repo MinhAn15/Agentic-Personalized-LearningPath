@@ -171,6 +171,19 @@ score = min(0.8, overlap)
 | **REMEDIATE** | < 0.6 + CONCEPTUAL | Go back to prerequisites |
 | **RETRY** | < 0.6 + (CARELESS/INCOMPLETE/PROCEDURAL) | Same concept, new question |
 
+### Threshold Adjustments
+
+```python
+# Class-level constants
+DIFFICULTY_ADJUSTMENT = 0.05  # 5% more lenient for hard concepts (difficulty >= 4)
+MASTERY_BOOST = 0.03  # 3% boost for high-mastery learners (mastery >= 0.7)
+```
+
+| Condition | Adjustment |
+| --------- | ---------- |
+| `concept_difficulty >= 4` | Lower all thresholds by 5% |
+| `current_mastery >= 0.7` | Lower MASTERED threshold by 3% |
+
 ---
 
 ## 📋 Mastery Tracking
@@ -235,7 +248,8 @@ new_mastery = (current_mastery * 0.4) + (score * 0.6)
 | Event | Direction | Description |
 | ----- | --------- | ----------- |
 | `TUTOR_ASSESSMENT_READY` | Inbound | Listen for Tutor's assessment request |
-| `evaluation_complete` | Outbound | Notify Path Planner of result |
+| `EVALUATION_COMPLETED` | Outbound | Notify Path Planner of result |
+| `EVALUATION_FAILED` | Outbound | Notify Path Planner of evaluation error |
 | `INSTRUCTOR_ALERT` | Outbound | Notify instructor of critical failure (score < 0.4) |
 
 ---

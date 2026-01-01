@@ -36,10 +36,12 @@ graph TD
         EVENT1(EVALUATION_COMPLETED) --> H_EVAL[Update Mastery & Bloom Level]
         EVENT2(PACE_CHECK_TRIGGERED) --> H_PACE[Update Velocity & Difficulty]
         EVENT3(ARTIFACT_CREATED) --> H_ART[Track Note Taking]
+        EVENT4(KG_SYNC_COMPLETED) --> H_KG[Track KG Sync History]
         
         H_EVAL --> LOCK{Per-Learner Lock}
         H_PACE --> LOCK
         H_ART --> LOCK
+        H_KG --> LOCK
         
         LOCK --> STATE_UPD[Atomic State Update]
         STATE_UPD --> PUB(Emit: PROFILE_ADVANCED)

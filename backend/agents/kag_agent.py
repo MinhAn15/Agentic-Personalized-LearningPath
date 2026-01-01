@@ -1,5 +1,8 @@
 import logging
 import uuid
+import re
+import json
+import asyncio
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 from statistics import mean, stdev
@@ -52,6 +55,24 @@ class KAGAgent(BaseAgent):
     6. Generate recommendations for course improvement
     """
     
+    # FIX Issue 2+3: Class-level constants for validation and configuration
+    ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+    MIN_LEARNERS_FOR_ANALYSIS = 5  # Minimum learners for system analysis
+    
+    # FIX Issue 8: Mastery threshold based on Bloom's research (80-90%)
+    MASTERY_THRESHOLD = 0.8  # Score >= 0.8 = ATOMIC_NOTE, < 0.8 = MISCONCEPTION_NOTE
+    
+    # FIX Issue 4 (Phase 4): Pattern identification thresholds
+    DIFFICULT_THRESHOLD = 0.4  # Concepts with avg_mastery < 0.4 are difficult
+    EASY_THRESHOLD = 0.8  # Concepts with avg_mastery > 0.8 are easy
+    
+    # FIX Issue 6 (Phase 4): Struggle rate thresholds for recommendations
+    PRIORITY_STRUGGLE_THRESHOLD = 0.6  # High priority intervention needed
+    MODERATE_STRUGGLE_THRESHOLD = 0.3  # Moderate intervention needed
+    
+    # FIX Issue 7 (Phase 4): Struggle mastery threshold for statistics
+    STRUGGLE_MASTERY_THRESHOLD = 0.5  # Learners with mastery < 0.5 are struggling
+    
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None):
         super().__init__(agent_id, AgentType.KAG, state_manager, event_bus)
@@ -76,6 +97,10 @@ class KAGAgent(BaseAgent):
             neo4j_driver=state_manager.neo4j if state_manager else None
         )
         
+        # FIX Issue 12: Warn if neo4j driver is missing
+        if not state_manager or not hasattr(state_manager, 'neo4j') or not state_manager.neo4j:
+            self.logger.warning("KGSynchronizer initialized without neo4j driver - KG operations may fail")
+        
         # Event subscriptions
         if event_bus and hasattr(event_bus, 'subscribe'):
             event_bus.subscribe('EVALUATION_COMPLETED', self._on_evaluation_completed)
@@ -85,6 +110,9 @@ class KAGAgent(BaseAgent):
         """Main execution method."""
         try:
             action = kwargs.get("action", "analyze")
+            
+            # FIX Issue 7: Log action for debugging
+            self.logger.debug(f"Executing action: {action}")
             
             if action == "generate_artifact":
                 return await self._generate_artifact(**kwargs)
@@ -101,6 +129,22 @@ class KAGAgent(BaseAgent):
         
         except Exception as e:
             self.logger.error(f"❌ KAG execution failed: {e}")
+            
+            # FIX Issue 5: Emit error event so other agents know execution failed
+            try:
+                # FIX Issue 11: Use uppercase event name convention
+                await self.send_message(
+                    receiver="all",
+                    message_type="KAG_EXECUTION_FAILED",
+                    payload={
+                        "action": kwargs.get("action", "analyze"),
+                        "learner_id": kwargs.get("learner_id"),
+                        "error": str(e)
+                    }
+                )
+            except Exception:
+                pass  # Best effort
+            
             return {
                 "success": False,
                 "error": str(e),
@@ -120,14 +164,27 @@ class KAGAgent(BaseAgent):
             concept_id: str
             session_data: Dict with question, answer, feedback, etc.
         """
-        learner_id = kwargs.get("learner_id")
-        concept_id = kwargs.get("concept_id")
+        # FIX Issue 1+4: Strip and validate IDs consistently
+        learner_id = (kwargs.get("learner_id") or "").strip()
+        concept_id = (kwargs.get("concept_id") or "").strip()
         session_data = kwargs.get("session_data", {})
         
         if not all([learner_id, concept_id]):
             return {
                 "success": False,
                 "error": "learner_id and concept_id required"
+            }
+        
+        # FIX Issue 2: Validate ID format
+        if not self.ID_PATTERN.match(learner_id):
+            return {
+                "success": False,
+                "error": f"Invalid learner_id format: {learner_id}"
+            }
+        if not self.ID_PATTERN.match(concept_id):
+            return {
+                "success": False,
+                "error": f"Invalid concept_id format: {concept_id}"
             }
         
         self.logger.info(f"📝 Generating artifact for {learner_id} on {concept_id}")
@@ -163,17 +220,18 @@ class KAGAgent(BaseAgent):
             "success": True,
             "agent_id": self.agent_id,
             "note_id": note_id,
-            "artifact_type": atomic_note["type"],
-            "content_preview": atomic_note["content"][:100] + "...",
+            "artifact_type": atomic_note.get("type", "ATOMIC"),
+            # FIX Issue 4: Use .get() for safe dict access
+            "content_preview": (atomic_note.get("content", "")[:100] + "...") if atomic_note.get("content") else "",
             "related_notes": len(related_notes),
             "tags": tags,
             "timestamp": datetime.now().isoformat()
         }
         
-        # Emit event
+        # FIX Issue 1: Use uppercase event name convention
         await self.send_message(
             receiver="profiler",
-            message_type="artifact_created",
+            message_type="ARTIFACT_CREATED",
             payload={
                 "learner_id": learner_id,
                 "concept_id": concept_id,
@@ -198,8 +256,8 @@ class KAGAgent(BaseAgent):
         # Extract source context (e.g., tutor session ID)
         source_context = session_data.get("source_context", "unknown_session")
         
-        # Determine note type
-        if score < 0.5:
+        # FIX Issue 8: Use class constant for mastery threshold (based on Bloom's research)
+        if score < self.MASTERY_THRESHOLD:
             note_type = ArtifactType.MISCONCEPTION_NOTE
         else:
             note_type = ArtifactType.ATOMIC_NOTE
@@ -246,7 +304,9 @@ Return ONLY valid JSON:
                     "common_mistake": "",
                     "connections": []
                 }
-        except:
+        # FIX Issue 2+3: Proper exception handling with logging
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            self.logger.warning(f"JSON parse error for atomic note: {type(e).__name__}: {e}")
             note_data = {
                 "key_insight": f"Learning about {concept_id}",
                 "personal_example": answer[:200] if answer else "",
@@ -281,8 +341,13 @@ Return ONLY valid JSON:
     
     async def _find_related_notes(
         self, learner_id: str, atomic_note: Dict
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Dict]:
         """Find related notes in learner's Personal KG"""
+        # FIX Issue 6: Check neo4j is available
+        if not self.state_manager or not hasattr(self.state_manager, 'neo4j') or not self.state_manager.neo4j:
+            self.logger.warning("Neo4j not available - cannot find related notes")
+            return []
+        
         neo4j = self.state_manager.neo4j
         
         # Find notes with similar tags or connected concepts
@@ -362,8 +427,9 @@ Return ONLY valid JSON:
             learner_id=learner_id,
             note_id=note_id,
             concept_id=concept_id,
-            type=atomic_note["type"],
-            content=atomic_note["content"],
+            # FIX Issue 5: Use .get() for safe dict access
+            type=atomic_note.get("type", "ATOMIC"),
+            content=atomic_note.get("content", ""),
             key_insight=atomic_note.get("key_insight", ""),
             personal_example=atomic_note.get("personal_example", ""),
             common_mistake=atomic_note.get("common_mistake", ""),
@@ -376,21 +442,38 @@ Return ONLY valid JSON:
     async def _create_note_links(
         self, note_id: str, related_notes: List[Dict]
     ) -> None:
-        """Create links between notes"""
+        """Create links between notes using parallel execution"""
+        if not related_notes:
+            return
+        
+        # FIX Issue 6: Check neo4j is available
+        if not self.state_manager or not hasattr(self.state_manager, 'neo4j') or not self.state_manager.neo4j:
+            self.logger.warning("Neo4j not available - cannot create note links")
+            return
+        
         neo4j = self.state_manager.neo4j
         
-        for related in related_notes:
-            related_id = related.get("note_id")
-            if related_id:
-                await neo4j.run_query(
-                    """
-                    MATCH (n1:NoteNode {note_id: $note_id})
-                    MATCH (n2:NoteNode {note_id: $related_id})
-                    MERGE (n1)-[:LINKS_TO]->(n2)
-                    """,
-                    note_id=note_id,
-                    related_id=related_id
-                )
+        # FIX Issue 7+9: Use asyncio.gather for parallel execution (asyncio imported at top)
+        
+        async def link_note(related_id: str):
+            await neo4j.run_query(
+                """
+                MATCH (n1:NoteNode {note_id: $note_id})
+                MATCH (n2:NoteNode {note_id: $related_id})
+                MERGE (n1)-[:LINKS_TO]->(n2)
+                """,
+                note_id=note_id,
+                related_id=related_id
+            )
+        
+        tasks = [
+            link_note(related.get("note_id"))
+            for related in related_notes
+            if related.get("note_id")
+        ]
+        
+        if tasks:
+            await asyncio.gather(*tasks)
     
     # ==========================================
     # 2. DUAL-KG SYNCHRONIZATION
@@ -403,20 +486,30 @@ Return ONLY valid JSON:
         - Course KG: Read-only reference
         - Personal KG: Update mastery, misconceptions, notes
         """
-        learner_id = kwargs.get("learner_id")
+        # FIX Issue 4: Consistent validation with _generate_artifact
+        learner_id = (kwargs.get("learner_id") or "").strip()
         updates = kwargs.get("updates", {})
         
         if not learner_id:
             return {"success": False, "error": "learner_id required"}
         
+        if not self.ID_PATTERN.match(learner_id):
+            return {"success": False, "error": f"Invalid learner_id format: {learner_id}"}
+        
         self.logger.info(f"🔄 Syncing Personal KG for {learner_id}")
+        
+        # FIX Issue 1: Check neo4j is available
+        if not self.state_manager or not hasattr(self.state_manager, 'neo4j') or not self.state_manager.neo4j:
+            self.logger.warning("Neo4j not available - cannot sync KG")
+            return {"success": False, "error": "Neo4j not available"}
         
         neo4j = self.state_manager.neo4j
         sync_count = 0
         
-        # Sync mastery levels
+        # FIX Issue 2: Parallel mastery updates with asyncio.gather
         mastery_updates = updates.get("mastery", {})
-        for concept_id, level in mastery_updates.items():
+        
+        async def update_mastery(concept_id: str, level: float):
             await neo4j.run_query(
                 """
                 MATCH (l:Learner {learner_id: $learner_id})
@@ -428,11 +521,30 @@ Return ONLY valid JSON:
                 concept_id=concept_id,
                 level=level
             )
-            sync_count += 1
         
-        # Sync misconceptions
+        mastery_tasks = [
+            update_mastery(concept_id, level)
+            for concept_id, level in mastery_updates.items()
+        ]
+        
+        # FIX Issue 4: Add try-except for asyncio.gather with return_exceptions
+        mastery_errors = 0
+        if mastery_tasks:
+            try:
+                results = await asyncio.gather(*mastery_tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, Exception):
+                        self.logger.warning(f"Mastery sync error: {result}")
+                        mastery_errors += 1
+                    else:
+                        sync_count += 1
+            except Exception as e:
+                self.logger.error(f"Mastery sync failed: {e}")
+        
+        # FIX Issue 3: Parallel misconception creates with asyncio.gather
         misconceptions = updates.get("misconceptions", [])
-        for misconception in misconceptions:
+        
+        async def create_misconception(misconception: Dict):
             error_id = f"error_{uuid.uuid4().hex[:8]}"
             await neo4j.run_query(
                 """
@@ -453,15 +565,48 @@ Return ONLY valid JSON:
                 description=misconception.get("description", ""),
                 error_type=misconception.get("error_type", "CONCEPTUAL")
             )
-            sync_count += 1
         
-        return {
+        misconception_tasks = [
+            create_misconception(m)
+            for m in misconceptions
+            if m.get("concept_id")
+        ]
+        
+        misconception_errors = 0
+        if misconception_tasks:
+            try:
+                results = await asyncio.gather(*misconception_tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, Exception):
+                        self.logger.warning(f"Misconception sync error: {result}")
+                        misconception_errors += 1
+                    else:
+                        sync_count += 1
+            except Exception as e:
+                self.logger.error(f"Misconception sync failed: {e}")
+        
+        result = {
             "success": True,
             "agent_id": self.agent_id,
             "learner_id": learner_id,
             "sync_count": sync_count,
+            "errors": mastery_errors + misconception_errors,
             "timestamp": datetime.now().isoformat()
         }
+        
+        # FIX Issue 5: Emit KG_SYNC_COMPLETED event
+        if sync_count > 0:
+            await self.send_message(
+                receiver="profiler",
+                message_type="KG_SYNC_COMPLETED",
+                payload={
+                    "learner_id": learner_id,
+                    "sync_count": sync_count,
+                    "timestamp": result["timestamp"]
+                }
+            )
+        
+        return result
     
     # ==========================================
     # 3. SYSTEM LEARNING & ANALYSIS
@@ -477,7 +622,8 @@ Return ONLY valid JSON:
         - Generate recommendations
         """
         analysis_depth = kwargs.get("analysis_depth", "shallow")
-        min_learners = kwargs.get("min_learners", 5)
+        # FIX Issue 6: Use class constant for min_learners default
+        min_learners = kwargs.get("min_learners", self.MIN_LEARNERS_FOR_ANALYSIS)
         
         self.logger.info(f"📊 Starting KAG analysis (depth={analysis_depth})")
         
@@ -523,10 +669,10 @@ Return ONLY valid JSON:
             "timestamp": datetime.now().isoformat()
         }
         
-        # Emit event for course improvement
+        # FIX Issue 1: Use uppercase event name convention
         await self.send_message(
             receiver="knowledge_extraction",
-            message_type="kag_analysis_complete",
+            message_type="KAG_ANALYSIS_COMPLETED",
             payload={
                 "recommendations": recommendations,
                 "bottleneck_concepts": patterns.get("difficult_concepts", [])
@@ -539,6 +685,11 @@ Return ONLY valid JSON:
     
     async def _retrieve_all_learner_graphs(self) -> List[Dict[str, Any]]:
         """Retrieve all learner Personal KGs"""
+        # FIX Issue 2: Check neo4j is available
+        if not self.state_manager or not hasattr(self.state_manager, 'neo4j') or not self.state_manager.neo4j:
+            self.logger.warning("Neo4j not available - cannot retrieve learner graphs")
+            return []
+        
         neo4j = self.state_manager.neo4j
         
         result = await neo4j.run_query(
@@ -586,13 +737,14 @@ Return ONLY valid JSON:
             masteries = data.get("masteries", [])
             
             if masteries:
+                # FIX Issue 7: Use class constant for struggle threshold
                 statistics[concept_id] = {
                     "avg_mastery": mean(masteries),
                     "std_dev": stdev(masteries) if len(masteries) > 1 else 0,
                     "min_mastery": min(masteries),
                     "max_mastery": max(masteries),
                     "num_learners": len(masteries),
-                    "struggle_rate": len([m for m in masteries if m < 0.5]) / len(masteries)
+                    "struggle_rate": len([m for m in masteries if m < self.STRUGGLE_MASTERY_THRESHOLD]) / len(masteries)
                 }
         
         return statistics
@@ -616,7 +768,8 @@ Return ONLY valid JSON:
             avg_mastery = stats.get("avg_mastery", 0)
             struggle_rate = stats.get("struggle_rate", 0)
             
-            if avg_mastery < 0.4:
+            # FIX Issue 4: Use class constants for thresholds
+            if avg_mastery < self.DIFFICULT_THRESHOLD:
                 patterns["difficult_concepts"].append({
                     "concept_id": concept_id,
                     "avg_mastery": avg_mastery,
@@ -627,7 +780,7 @@ Return ONLY valid JSON:
                     f"{struggle_rate:.0%} struggle"
                 )
             
-            elif avg_mastery > 0.8:
+            elif avg_mastery > self.EASY_THRESHOLD:
                 patterns["easy_concepts"].append({
                     "concept_id": concept_id,
                     "avg_mastery": avg_mastery
@@ -645,6 +798,11 @@ Return ONLY valid JSON:
         self, difficult_concepts: List[Dict]
     ) -> Dict[str, Any]:
         """Analyze how prerequisites affect difficult concepts"""
+        # FIX Issue 3: Check neo4j is available
+        if not self.state_manager or not hasattr(self.state_manager, 'neo4j') or not self.state_manager.neo4j:
+            self.logger.warning("Neo4j not available - cannot analyze prerequisites")
+            return {}
+        
         neo4j = self.state_manager.neo4j
         impacts = {}
         
@@ -677,7 +835,8 @@ Return ONLY valid JSON:
             concept_id = difficult.get("concept_id")
             struggle_rate = difficult.get("struggle_rate", 0)
             
-            if struggle_rate > 0.6:
+            # FIX Issue 6: Use class constants for struggle thresholds
+            if struggle_rate > self.PRIORITY_STRUGGLE_THRESHOLD:
                 recommendations.append(
                     f"📚 PRIORITY: Strengthen {concept_id} prerequisites - {struggle_rate:.0%} struggle rate"
                 )
@@ -687,7 +846,7 @@ Return ONLY valid JSON:
                 recommendations.append(
                     f"🎯 Add interactive practice exercises for {concept_id}"
                 )
-            elif struggle_rate > 0.3:
+            elif struggle_rate > self.MODERATE_STRUGGLE_THRESHOLD:
                 recommendations.append(
                     f"📖 Add more examples for {concept_id}"
                 )
@@ -730,11 +889,16 @@ Return ONLY valid JSON:
         }
         """
         try:
-            learner_id = event.get('learner_id')
-            concept_id = event.get('concept_id')
+            # FIX Issue 8: Consistent validation with _generate_artifact
+            learner_id = (event.get('learner_id') or "").strip()
+            concept_id = (event.get('concept_id') or "").strip()
             
             if not learner_id or not concept_id:
                 self.logger.warning("Missing learner_id or concept_id in event")
+                return
+            
+            if not self.ID_PATTERN.match(learner_id) or not self.ID_PATTERN.match(concept_id):
+                self.logger.warning(f"Invalid ID format in event: {learner_id}, {concept_id}")
                 return
             
             self.logger.info(f"EVALUATION_COMPLETED: Generating artifact for {learner_id}/{concept_id}")
@@ -753,6 +917,16 @@ Return ONLY valid JSON:
             
             if not note_dict:
                 self.logger.warning("Note generation failed")
+                # FIX Issue 2: Emit failure event for tracking
+                await self.send_message(
+                    receiver="profiler",
+                    message_type="ARTIFACT_GENERATION_FAILED",
+                    payload={
+                        "learner_id": learner_id,
+                        "concept_id": concept_id,
+                        "reason": "Note generation returned None"
+                    }
+                )
                 return
             
             # Sync to Personal KG
@@ -772,22 +946,32 @@ Return ONLY valid JSON:
                     'APPLY'  # Default Bloom level
                 )
                 
-                # Emit ARTIFACT_CREATED event
-                if self.event_bus:
-                    await self.event_bus.publish(
-                        sender=self.agent_id,
-                        receiver="all",
-                        message_type='ARTIFACT_CREATED',
-                        payload={
-                            'learner_id': learner_id,
-                            'concept_id': concept_id,
-                            'note_id': note_dict['note_id'],
-                            'artifact_type': note_dict['type'],
-                            'links_created': links_created
-                        }
-                    )
+                # FIX Issue 1: Use standardized send_message API
+                await self.send_message(
+                    receiver="profiler",
+                    message_type="ARTIFACT_CREATED",
+                    payload={
+                        'learner_id': learner_id,
+                        'concept_id': concept_id,
+                        'note_id': note_dict['note_id'],
+                        'artifact_type': note_dict['type'],
+                        'links_created': links_created
+                    }
+                )
                 
                 self.logger.info(f"Created artifact {note_dict['note_id']} with {links_created} links")
+            else:
+                # FIX Issue 4: Handle sync failure
+                self.logger.warning(f"KG sync failed for note {note_dict.get('note_id')}")
+                await self.send_message(
+                    receiver="profiler",
+                    message_type="ARTIFACT_GENERATION_FAILED",
+                    payload={
+                        "learner_id": learner_id,
+                        "concept_id": concept_id,
+                        "reason": "KG sync failed"
+                    }
+                )
         
         except Exception as e:
             self.logger.exception(f"Error handling EVALUATION_COMPLETED: {e}")
