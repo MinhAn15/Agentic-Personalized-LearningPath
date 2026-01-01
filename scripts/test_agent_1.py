@@ -15,6 +15,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Agent1_TestRunner")
 
+# ==========================================
+# HOTFIX: MOCK SIBLING AGENTS TO AVOID IMPORT ERRORS
+# This allows running Agent 1 tests without installing dependencies for Agent 2, 3, etc.
+# ==========================================
+sys.modules["backend.agents.profiler_agent"] = MagicMock()
+sys.modules["backend.agents.path_planner_agent"] = MagicMock()
+sys.modules["backend.agents.tutor_agent"] = MagicMock()
+sys.modules["backend.agents.evaluator_agent"] = MagicMock()
+sys.modules["backend.agents.kag_agent"] = MagicMock()
+# Mock entire packages inside backend.agents if needed, but file-level mock is usually enough
+
 class MockStateManager:
     def __init__(self):
         self.neo4j = AsyncMock()
@@ -33,6 +44,13 @@ class MockStateManager:
 class MockEventBus:
     async def publish(self, *args, **kwargs):
         logger.info(f"event_bus.publish called with: {kwargs}")
+
+    def subscribe(self, message_type, handler):
+        logger.info(f"event_bus.subscribe called for: {message_type}")
+    
+    def subscribe_sync(self, message_type, handler):
+        # Fallback if agent uses sync subscription (unlikely but safe to have)
+        pass
 
 async def run_real_mode(document_content, document_title):
     """Run with REAL database connections defined in .env"""
@@ -66,7 +84,7 @@ async def run_real_mode(document_content, document_title):
         }
         
         logger.info("🚀 Executing Agent 1 (Real Mode)...")
-        result = await agent.execute(payload)
+        result = await agent.execute(**payload) # Fix: Unpack kwargs
         
         print("\n" + "="*50)
         print("✅ EXECUTION RESULT (Real Mode)")
@@ -119,7 +137,7 @@ async def run_mock_mode(document_content, document_title):
     }
     
     logger.info("🚀 Executing Agent 1 (Mock Mode)...")
-    result = await agent.execute(payload)
+    result = await agent.execute(**payload) # Fix: Unpack kwargs
     
     print("\n" + "="*50)
     print("✅ EXECUTION RESULT (Mock Mode)")

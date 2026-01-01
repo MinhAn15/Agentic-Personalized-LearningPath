@@ -20,45 +20,45 @@ Agent 1 is the "Librarian". It takes raw files (PDFs, Videos, Text) and converts
 ### Step 1: Input Ingestion & Registry Check
 *   **Component**: `DocumentRegistry`
 *   **Logic**:
-    1.  Calculate SHA-256 checksum of file content.
-    2.  Check Redis/DB if checksum exists.
-    3.  If exists and `force_reprocess=False` -> **SKIP** (Return "SKIPPED").
-    4.  Else -> Register new document attempt.
+    1.  Calculates checksum.
+    2.  Checks Registry.
+    3.  **Dynamic Domain**: If `domain` is provided by user, it overrides auto-classification.
+    4.  If existing & valid -> SKIP.
 
 ### Step 2: Semantic Chunking (AI-Driven)
 *   **Component**: `SemanticChunker`
 *   **Logic**:
-    1.  **Architect**: LLM identifies logical boundaries (Intro, Concept A, Concept B).
-    2.  **Refiner**: LLM critiques boundaries for context consistency.
-    3.  **Executor**: Maps logical boundaries to exact text offsets.
-*   **Output**: List of `SemanticChunk` objects.
+    *   LLM-based segmentation (Intro, Sections).
+*   **Output**: SemanticChunks.
 
 ### Step 3: 3-Layer Extraction
 *   **Component**: `_process_chunk_layers`
 *   **Logic**:
-    *   **Layer 1 (Concepts)**: Extract main entities + `concept_id` generation.
-    *   **Layer 2 (Relationships)**: Identify connections (`IS_PREREQUISITE_OF`, `SIMILAR_TO`).
-    *   **Layer 3 (Metadata)**: Bloom's Level, Estimated Time, Tags.
+    *   **Layer 1 (Concepts)**: Key Concept Extraction + Stable ID generation (`{domain}.{name}`).
+    *   **Layer 2 (Relationships)**: Prerequisite/Similarity detection.
+    *   **Layer 3 (Metadata)**: Bloom's Level, Tags.
+*   **Performance**: Parallel processing with `asyncio.gather` (Limit 5).
 
 ### Step 4: Component Validation
 *   **Component**: `KGValidator`
 *   **Logic**:
-    *   Check 14 Rules (e.g., "No circular prerequisites", "Concept must have description").
-    *   If invalid -> Attempt **Auto-Fix** or discard.
+    *   14-Rule validation (Consistency check).
 
 ### Step 5: Entity Resolution
 *   **Component**: `EntityResolver`
 *   **Logic**:
-    1.  **Embed**: Vectorize extracted concept names/definitions.
-    2.  **Cluster**: Group similar concepts (e.g., "Inner Join" vs "INNER JOIN").
-    3.  **Merge**: Combine duplicates into a single canonical concept.
+    1.  **Candidate Retrieval**:
+        *   Uses **Neo4j Fulltext Search** (`conceptNameIndex`) with Fuzzy Matching (`~0.8`) to find existing concepts.
+        *   Fallback to `CONTAINS` if index missing.
+    2.  **Filter**: Identifies potential duplicates or synonyms.
+    3.  **Merge**: Unifies new concept with existing canonical node.
 
 ### Step 6: Staging & Persistence
 *   **Component**: `Neo4jBatchUpserter`
 *   **Logic**:
-    1.  Write valid concepts to `StagingConcept` nodes.
-    2.  Run Cypher queries to Promote Staging -> `CourseConcept`.
-    3.  Create Vector Index entries.
+    *   Batch writes to Staging nodes.
+    *   Promotes to `CourseConcept`.
+    *   Creates Vector Index.
 
 ### Step 7: Finalization
 *   **Event**: Emit `COURSEKG_UPDATED`.
