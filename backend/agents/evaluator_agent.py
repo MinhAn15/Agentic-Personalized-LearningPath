@@ -16,6 +16,15 @@ from backend.models.evaluation import (
     ErrorType, PathDecision, Misconception, EvaluationResult
 )
 from backend.config import get_settings
+from backend.core.constants import (
+    EVAL_MASTERY_WEIGHT,
+    EVAL_DIFFICULTY_ADJUSTMENT,
+    EVAL_MASTERY_BOOST,
+    THRESHOLD_MASTERED,
+    THRESHOLD_PROCEED,
+    THRESHOLD_ALTERNATE,
+    THRESHOLD_ALERT
+)
 from llama_index.llms.gemini import Gemini
 from backend.services.instructor_notification import InstructorNotificationService
 
@@ -62,12 +71,12 @@ class EvaluatorAgent(BaseAgent):
     # FIX Issue 8: Define pattern at class level (compiled once)
     ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
     
-    # Path decision adjustment constants (configurable)
-    DIFFICULTY_ADJUSTMENT = 0.05  # 5% more lenient for hard concepts (difficulty >= 4)
-    MASTERY_BOOST = 0.03  # 3% boost for high-mastery learners (mastery >= 0.7)
+    # Path decision adjustment constants (Now from constants.py)
+    DIFFICULTY_ADJUSTMENT = EVAL_DIFFICULTY_ADJUSTMENT
+    MASTERY_BOOST = EVAL_MASTERY_BOOST
     
     # FIX Issue 5: Mastery update weight constant
-    MASTERY_WEIGHT = 0.6  # New score is 60% of update
+    MASTERY_WEIGHT = EVAL_MASTERY_WEIGHT
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None, personal_kg=None):
@@ -322,7 +331,7 @@ class EvaluatorAgent(BaseAgent):
                 payload=event_payload
             )
             
-            if score < 0.4:
+            if score < THRESHOLD_ALERT:
                 # FIX Issue 1: Fetch actual attempts from learner profile
                 attempts = 1
                 if learner_profile:
@@ -603,9 +612,9 @@ class EvaluatorAgent(BaseAgent):
             mastery_boost = self.MASTERY_BOOST
         
         # Adjusted thresholds
-        mastered_threshold = 0.9 - difficulty_adjustment - mastery_boost
-        proceed_threshold = 0.8 - difficulty_adjustment
-        alternate_threshold = 0.6 - difficulty_adjustment
+        mastered_threshold = THRESHOLD_MASTERED - difficulty_adjustment - mastery_boost
+        proceed_threshold = THRESHOLD_PROCEED - difficulty_adjustment
+        alternate_threshold = THRESHOLD_ALTERNATE - difficulty_adjustment
         
         # Determine decision
         if score >= mastered_threshold:

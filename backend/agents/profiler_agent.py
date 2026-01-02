@@ -15,7 +15,13 @@ from backend.models import (
 from backend.prompts import LEARNER_PROFILER_SYSTEM_PROMPT
 from llama_index.llms.gemini import Gemini
 from llama_index.core import PropertyGraphIndex, StorageContext, load_index_from_storage
-from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+# Fix Gap 3: Lazy import Neo4jPropertyGraphStore to prevent crash if dependency missing
+try:
+    from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+    NEO4J_AVAILABLE = True
+except ImportError:
+    Neo4jPropertyGraphStore = None
+    NEO4J_AVAILABLE = False
 from llama_index.embeddings.gemini import GeminiEmbedding
 from backend.config import get_settings
 import os
@@ -67,8 +73,8 @@ class ProfilerAgent(BaseAgent):
         )
         self.logger = logging.getLogger(f"ProfilerAgent.{agent_id}")
         
-        # Per-learner locks for event ordering
-        self._learner_locks: Dict[str, asyncio.Lock] = {}
+        # Fix Gap 1: Removed local locks in favor of Redis Distributed Lock
+        # self._learner_locks: Dict[str, asyncio.Lock] = {}
         
         # Lazy loaded Retrievers
         self._graph_retriever = None
@@ -404,6 +410,10 @@ Return ONLY valid JSON:
         """
         if self._graph_retriever is None:
             try:
+                if not NEO4J_AVAILABLE:
+                    self.logger.warning("Neo4j Graph Store dependency missing. Graph RAG disabled.")
+                    return None
+
                 # Initialize Graph Store connected to existing Neo4j
                 graph_store = Neo4jPropertyGraphStore(
                     username=self.settings.NEO4J_USER,
@@ -438,7 +448,8 @@ Return ONLY valid JSON:
         """Lazy load vector index (Fallback)"""
         if self._vector_index is None:
             try:
-                storage_dir = "./storage/vector_index"
+                # Fix Gap 2: Configurable path instead of hardcoded
+                storage_dir = os.getenv("VECTOR_INDEX_PATH", "./storage/vector_index")
                 if os.path.exists(storage_dir):
                     storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
                     self._vector_index = load_index_from_storage(storage_context)
@@ -717,11 +728,7 @@ Return ONLY valid JSON:
             self.event_bus.subscribe("ARTIFACT_GENERATION_FAILED", self._on_artifact_generation_failed)
             self.logger.info("Subscribed to EVALUATION_COMPLETED, PACE_CHECK_TRIGGERED, ARTIFACT_CREATED, KG_SYNC_COMPLETED, ARTIFACT_GENERATION_FAILED")
     
-    def _get_learner_lock(self, learner_id: str) -> asyncio.Lock:
-        """Get per-learner lock for event ordering"""
-        if learner_id not in self._learner_locks:
-            self._learner_locks[learner_id] = asyncio.Lock()
-        return self._learner_locks[learner_id]
+    # Removed _get_learner_lock (Local) in favor of Redis Lock
     
     async def _on_evaluation_completed(self, event: Dict[str, Any]):
         """
@@ -738,8 +745,30 @@ Return ONLY valid JSON:
         if not learner_id:
             return
         
-        async with self._get_learner_lock(learner_id):
-            try:
+        # FIX Gap 1: Distributed Lock (Redis) to prevent race conditions in multi-replica env
+        redis_lock = self.state_manager.redis.lock(
+            name=f"lock:learner:{learner_id}",
+            timeout=10,          # Lock expiration (seconds)
+            blocking_timeout=5   # Wait time
+        )
+        
+        # Acquire lock
+        try:
+            acquired = await redis_lock.acquire()
+        except AttributeError:
+             # Fallback for sync redis client if async not detected properly
+             # Note: If passing sync redis to async agent, this blocks. 
+             # Ideally state_manager.redis is aioredis.
+             try:
+                acquired = redis_lock.acquire()
+             except:
+                acquired = False
+
+        if not acquired:
+             self.logger.warning(f"Could not acquire lock for {learner_id}, skipping update.")
+             return
+
+        try:
                 concept_id = event['concept_id']
                 score = event['score']  # 0-1
                 misconceptions = event.get('misconceptions', [])
@@ -840,8 +869,14 @@ Return ONLY valid JSON:
                     'new_bloom': bloom_level
                 })
                 
-            except Exception as e:
-                self.logger.error(f"Error in _on_evaluation_completed: {e}")
+        except Exception as e:
+            self.logger.error(f"Error in _on_evaluation_completed: {e}")
+        finally:
+            if acquired:
+                try:
+                    await redis_lock.release()
+                except:
+                    pass
     
     async def _on_pace_check(self, event: Dict[str, Any]):
         """Update learning_velocity when pace check triggered"""
@@ -849,8 +884,20 @@ Return ONLY valid JSON:
         if not learner_id:
             return
         
-        async with self._get_learner_lock(learner_id):
-            try:
+        # FIX Gap 1: Distributed Lock
+        redis_lock = self.state_manager.redis.lock(name=f"lock:learner:{learner_id}", timeout=10)
+        acquired = False
+        try:
+            if asyncio.iscoroutinefunction(redis_lock.acquire):
+                acquired = await redis_lock.acquire()
+            else:
+                acquired = redis_lock.acquire()
+        except:
+            acquired = False
+
+        if not acquired: return
+
+        try:
                 pace_ratio = event.get('pace_ratio', 1.0)
                 hours_spent = event.get('hours_spent', 1.0)
                 
@@ -891,8 +938,13 @@ Return ONLY valid JSON:
                         payload={'learner_id': learner_id, 'velocity': profile_data['learning_velocity']}
                     )
                 
-            except Exception as e:
-                self.logger.error(f"Error in _on_pace_check: {e}")
+        except Exception as e:
+            self.logger.error(f"Error in _on_pace_check: {e}")
+        finally:
+            if acquired:
+                try: await redis_lock.release()
+                except: pass
+
     
     async def _on_artifact_created(self, event: Dict[str, Any]):
         """Track generated notes in profile"""
@@ -900,8 +952,20 @@ Return ONLY valid JSON:
         if not learner_id:
             return
         
-        async with self._get_learner_lock(learner_id):
-            try:
+        # FIX Gap 1: Distributed Lock
+        redis_lock = self.state_manager.redis.lock(name=f"lock:learner:{learner_id}", timeout=10)
+        acquired = False
+        try:
+            if asyncio.iscoroutinefunction(redis_lock.acquire):
+                acquired = await redis_lock.acquire()
+            else:
+                acquired = redis_lock.acquire()
+        except:
+            acquired = False
+
+        if not acquired: return
+
+        try:
                 artifact_id = event['artifact_id']
                 concept_id = event.get('concept_id', '')
                 
@@ -927,8 +991,12 @@ Return ONLY valid JSON:
                 profile_data['version'] = profile_data.get('version', 0) + 1
                 await redis.set(f"profile:{learner_id}", profile_data, ttl=1800)
                 
-            except Exception as e:
-                self.logger.error(f"Error in _on_artifact_created: {e}")
+        except Exception as e:
+            self.logger.error(f"Error in _on_artifact_created: {e}")
+        finally:
+            if acquired:
+                try: await redis_lock.release()
+                except: pass
     
     async def _on_kg_sync_completed(self, event: Dict[str, Any]):
         """
@@ -947,8 +1015,20 @@ Return ONLY valid JSON:
         if not learner_id:
             return
         
-        async with self._get_learner_lock(learner_id):
-            try:
+        # FIX Gap 1: Distributed Lock
+        redis_lock = self.state_manager.redis.lock(name=f"lock:learner:{learner_id}", timeout=10)
+        acquired = False
+        try:
+            if asyncio.iscoroutinefunction(redis_lock.acquire):
+                acquired = await redis_lock.acquire()
+            else:
+                acquired = redis_lock.acquire()
+        except:
+            acquired = False
+
+        if not acquired: return
+
+        try:
                 sync_count = event.get('sync_count', 0)
                 timestamp = event.get('timestamp', datetime.now().isoformat())
                 
@@ -979,8 +1059,12 @@ Return ONLY valid JSON:
                 
                 self.logger.debug(f"KG sync recorded for {learner_id}: {sync_count} items")
                 
-            except Exception as e:
-                self.logger.error(f"Error in _on_kg_sync_completed: {e}")
+        except Exception as e:
+            self.logger.error(f"Error in _on_kg_sync_completed: {e}")
+        finally:
+            if acquired:
+                try: await redis_lock.release()
+                except: pass
     
     async def _on_artifact_generation_failed(self, event: Dict[str, Any]):
         """
@@ -999,8 +1083,20 @@ Return ONLY valid JSON:
         if not learner_id:
             return
         
-        async with self._get_learner_lock(learner_id):
-            try:
+        # FIX Gap 1: Distributed Lock
+        redis_lock = self.state_manager.redis.lock(name=f"lock:learner:{learner_id}", timeout=10)
+        acquired = False
+        try:
+            if asyncio.iscoroutinefunction(redis_lock.acquire):
+                acquired = await redis_lock.acquire()
+            else:
+                acquired = redis_lock.acquire()
+        except:
+            acquired = False
+
+        if not acquired: return
+
+        try:
                 concept_id = event.get('concept_id', 'unknown')
                 reason = event.get('reason', 'Unknown error')
                 
@@ -1029,8 +1125,12 @@ Return ONLY valid JSON:
                 
                 self.logger.warning(f"Artifact generation failed for {learner_id}/{concept_id}: {reason}")
                 
-            except Exception as e:
-                self.logger.error(f"Error in _on_artifact_generation_failed: {e}")
+        except Exception as e:
+            self.logger.error(f"Error in _on_artifact_generation_failed: {e}")
+        finally:
+            if acquired:
+                try: await redis_lock.release()
+                except: pass
     
     def _estimate_bloom_level(self, score: float, difficulty: int, question_type: str) -> str:
         """

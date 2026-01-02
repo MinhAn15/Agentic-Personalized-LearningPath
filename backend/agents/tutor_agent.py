@@ -1,14 +1,21 @@
 import logging
-import random  # FIX: Move import to top (Issue 2)
+import random  # FIX Issue 2: Moved import to top
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from enum import Enum
 
 from backend.core.base_agent import BaseAgent, AgentType
-from backend.core.grounding_manager import GroundingManager, GroundingContext
 from backend.core.harvard_enforcer import Harvard7Enforcer
 from backend.models.dialogue import DialogueState, DialoguePhase, ScaffoldingLevel, UserIntent
 from backend.config import get_settings
+from backend.core.constants import (
+    TUTOR_W_DOC,
+    TUTOR_W_KG,
+    TUTOR_W_PERSONAL,
+    TUTOR_CONFIDENCE_THRESHOLD,
+    TUTOR_CONFLICT_THRESHOLD,
+    TUTOR_CONFLICT_PENALTY
+)
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
 from llama_index.core import StorageContext, load_index_from_storage, Settings
@@ -86,15 +93,15 @@ class TutorAgent(BaseAgent):
         # Dialogue states per (learner_id, concept_id)
         self.dialogue_states: Dict[Tuple[str, str], DialogueState] = {}
         
-        # Confidence weights for 3-layer grounding
-        self.W_DOC = 0.4   # Document grounding weight
-        self.W_KG = 0.35   # Course KG weight
-        self.W_PERSONAL = 0.25  # Personal KG weight
-        self.CONFIDENCE_THRESHOLD = 0.5
+        # Confidence weights for 3-layer grounding (Now from constants)
+        self.W_DOC = TUTOR_W_DOC
+        self.W_KG = TUTOR_W_KG
+        self.W_PERSONAL = TUTOR_W_PERSONAL
+        self.CONFIDENCE_THRESHOLD = TUTOR_CONFIDENCE_THRESHOLD
         
         # Conflict detection threshold (semantic similarity < this = conflict)
-        self.CONFLICT_THRESHOLD = 0.6
-        self.CONFLICT_PENALTY = 0.1  # Reduce confidence when conflict detected
+        self.CONFLICT_THRESHOLD = TUTOR_CONFLICT_THRESHOLD
+        self.CONFLICT_PENALTY = TUTOR_CONFLICT_PENALTY
         
         # Event subscriptions
         if event_bus and hasattr(event_bus, 'subscribe'):

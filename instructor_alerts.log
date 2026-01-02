@@ -1,0 +1,2 @@
+{"type": "CRITICAL_FAILURE", "timestamp": "2026-01-02T23:52:49.745692", "learner_id": "learner1", "concept_id": "SQL_WHERE", "score": 0.2, "attempts": 1, "message": "Learner learner1 failed SQL_WHERE with score 0.20 (Attempt #1). Intervention recommended."}
+{"type": "CRITICAL_FAILURE", "timestamp": "2026-01-02T23:57:10.730763", "learner_id": "learner1", "concept_id": "SQL_WHERE", "score": 0.2, "attempts": 1, "message": "Learner learner1 failed SQL_WHERE with score 0.20 (Attempt #1). Intervention recommended."}

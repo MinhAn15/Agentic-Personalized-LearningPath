@@ -7,8 +7,51 @@ Per THESIS Section 3.1.x
 # MASTERY THRESHOLDS
 # ============================================================================
 MASTERY_PROCEED_THRESHOLD = 0.8  # Evaluator: "PROCEED" if score >= 0.8
-MASTERY_PREREQUISITE_THRESHOLD = 0.5  # Can start concept if prereq mastery >= 0.5
+MASTERY_PREREQUISITE_THRESHOLD = 0.7  # Can start concept if prereq mastery >= 0.7 (Updated per logic)
 MASTERY_REMEDIATE_THRESHOLD = 0.3  # Trigger REMEDIATE if score < 0.3
+
+# ============================================================================
+# TUTOR AGENT
+# ============================================================================
+# Agent 4: Tutor Agent
+TUTOR_W_DOC = 0.4
+TUTOR_W_KG = 0.35
+TUTOR_W_PERSONAL = 0.25
+TUTOR_CONFIDENCE_THRESHOLD = 0.5
+TUTOR_CONFLICT_THRESHOLD = 0.6
+TUTOR_CONFLICT_PENALTY = 0.1
+
+# ============================================================================
+# EVALUATOR AGENT
+# ============================================================================
+# Agent 5: Evaluator Agent
+EVAL_MASTERY_WEIGHT = 0.6  # Score weight for WMA
+EVAL_DIFFICULTY_ADJUSTMENT = 0.05
+EVAL_MASTERY_BOOST = 0.03
+
+# Decision Thresholds
+THRESHOLD_MASTERED = 0.9
+THRESHOLD_PROCEED = 0.8
+THRESHOLD_ALTERNATE = 0.6
+THRESHOLD_ALERT = 0.4
+
+# ============================================================================
+# KAG AGENT
+# ============================================================================
+# Agent 6: KAG Agent
+KAG_MIN_LEARNERS = 5
+KAG_MASTERY_THRESHOLD = 0.8  # Bloom's 2-Sigma (Atomic Note vs Misconception)
+KAG_DIFFICULT_THRESHOLD = 0.4  # Avg mastery < 0.4 = Difficult
+KAG_EASY_THRESHOLD = 0.8       # Avg mastery > 0.8 = Easy
+KAG_PRIORITY_STRUGGLE_THRESHOLD = 0.6  # > 60% struggle = Priority
+KAG_MODERATE_STRUGGLE_THRESHOLD = 0.3  # > 30% struggle = Moderate
+KAG_STRUGGLE_MASTERY_THRESHOLD = 0.5   # Mastery < 0.5 counts as struggle
+
+# GATE
+GATE_FULL_PASS_SCORE = 0.8  # Probabilistic Gate: 100% pass if score >= this
+
+# REVIEW
+REVIEW_CHANCE = 0.1  # 10% chance to trigger REVIEW mode on new session
 
 # ============================================================================
 # TIME ESTIMATION

@@ -2,11 +2,13 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
+import json
 
 from backend.core.base_agent import BaseAgent, AgentType
 from backend.core.rl_engine import RLEngine, BanditStrategy
 from backend.core.constants import (
     CHAIN_RELATIONSHIPS,
+    MASTERY_PROCEED_THRESHOLD,
     MASTERY_PREREQUISITE_THRESHOLD,
     CONCEPT_BASE_TIME,
     DIFFICULTY_MULTIPLIER,
@@ -16,10 +18,15 @@ from backend.core.constants import (
     PACING_MODERATE_THRESHOLD,
     SUCCESS_PROB_MASTERY_WEIGHT,
     SUCCESS_PROB_TIME_WEIGHT,
-    SUCCESS_PROB_DIFFICULTY_WEIGHT
+    SUCCESS_PROB_DIFFICULTY_WEIGHT,
+    # Fix 2: Import Config Constants
+    GATE_FULL_PASS_SCORE,
+    REVIEW_CHANCE
 )
 from backend.models import LearnerProfile
 from backend.config import get_settings
+import random  # Explicit import for cleaner usage
+import asyncio # For lock handling
 
 logger = logging.getLogger(__name__)
 
@@ -178,82 +185,104 @@ class PathPlannerAgent(BaseAgent):
         try:
             concept_id = event.get('concept_id')
             score = event.get('score', 0.0)
-            passed = event.get('passed', score >= 0.8)
+            passed = event.get('passed', score >= MASTERY_PROCEED_THRESHOLD)
             
             if not concept_id:
                 return
+            
+            # Fix 1: Distributed Lock (Gap 1)
+            # Lock by concept_id to protect LinUCB global state
+            redis_lock = self.state_manager.redis.lock(name=f"lock:concept:{concept_id}", timeout=5)
+            acquired = False
+            try:
+                if asyncio.iscoroutinefunction(redis_lock.acquire):
+                    acquired = await redis_lock.acquire()
+                else:
+                    acquired = redis_lock.acquire()
+            except:
+                acquired = False
+
+            if not acquired:
+                self.logger.warning(f"Could not acquire lock for concept {concept_id}, skipping feedback update.")
+                return
+
+            try:
+                # Calculate Reward
+                completion_reward = 1.0 if passed else 0.0
+                dropout_penalty = 0.0  # TODO: detect dropout from behavior signals
                 
-            # Calculate Reward
-            completion_reward = 1.0 if passed else 0.0
-            dropout_penalty = 0.0  # TODO: detect dropout from behavior signals
-            
-            reward = (0.6 * score) + (0.4 * completion_reward) - dropout_penalty
-            
-            # --- UPDATE MAB STATS (with retry) ---
-            redis = self.state_manager.redis
-            key = f"mab_stats:{concept_id}"
-            
-            for attempt in range(MAX_RETRIES):
-                try:
-                    data_str = await redis.get(key)
-                    
-                    if data_str:
-                        data = json.loads(data_str)
-                        pulls = data.get("pulls", 0) + 1
-                        total_reward = data.get("total_reward", 0.0) + reward
-                    else:
-                        pulls = 1
-                        total_reward = reward
+                reward = (0.6 * score) + (0.4 * completion_reward) - dropout_penalty
+                
+                # --- UPDATE MAB STATS (with retry) ---
+                redis = self.state_manager.redis
+                key = f"mab_stats:{concept_id}"
+                
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        data_str = await redis.get(key)
                         
-                    await redis.set(key, json.dumps({
-                        "pulls": pulls,
-                        "total_reward": total_reward
-                    }))
-                    
-                    # FIX Issue 3: Sync in-memory MAB state
-                    if concept_id in self.rl_engine.arms:
-                        self.rl_engine.arms[concept_id].set_stats(pulls, total_reward)
-                    
-                    break  # Success, exit retry loop
-                    
-                except Exception as e:
-                    if attempt == MAX_RETRIES - 1:
-                        self.logger.error(f"Redis update failed after {MAX_RETRIES} attempts: {e}")
-                        raise
-                    await asyncio.sleep(0.1 * (attempt + 1))  # Exponential backoff
-            
-            # --- UPDATE LINUCB ARM STATE ---
-            # FIX Issue 2: Load context from Redis if not in event
-            context_vector = event.get('context_vector')
-            if not context_vector:
-                # Try to load from saved selection context
-                context_key = f"linucb_context:{concept_id}"
-                context_str = await redis.get(context_key)
-                if context_str:
-                    context_vector = json.loads(context_str)
-                    self.logger.debug(f"Loaded context_vector from Redis for {concept_id}")
-            
-            if context_vector:
-                # FIX Issue 1: Load LinUCB arm from Redis if not in memory
-                if concept_id not in self.rl_engine.linucb_arms:
-                    await self._load_linucb_arms([concept_id])
-                    self.logger.debug(f"Loaded LinUCB arm from Redis for {concept_id}")
+                        if data_str:
+                            data = json.loads(data_str)
+                            pulls = data.get("pulls", 0) + 1
+                            total_reward = data.get("total_reward", 0.0) + reward
+                        else:
+                            pulls = 1
+                            total_reward = reward
+                            
+                        await redis.set(key, json.dumps({
+                            "pulls": pulls,
+                            "total_reward": total_reward
+                        }))
+                        
+                        # FIX Issue 3: Sync in-memory MAB state
+                        if concept_id in self.rl_engine.arms:
+                            self.rl_engine.arms[concept_id].set_stats(pulls, total_reward)
+                        
+                        break  # Success, exit retry loop
+                        
+                    except Exception as e:
+                        if attempt == MAX_RETRIES - 1:
+                            self.logger.error(f"Redis update failed after {MAX_RETRIES} attempts: {e}")
+                            raise
+                        await asyncio.sleep(0.1 * (attempt + 1))  # Exponential backoff
                 
-                # Now update the arm (create new if still doesn't exist)
-                if concept_id not in self.rl_engine.linucb_arms:
-                    from backend.core.rl_engine import LinUCBArm
-                    self.rl_engine.linucb_arms[concept_id] = LinUCBArm(
-                        concept_id, d=self.rl_engine.context_dim
-                    )
+                # --- UPDATE LINUCB ARM STATE ---
+                # FIX Issue 2: Load context from Redis if not in event
+                context_vector = event.get('context_vector')
+                if not context_vector:
+                    # Try to load from saved selection context
+                    context_key = f"linucb_context:{concept_id}"
+                    context_str = await redis.get(context_key)
+                    if context_str:
+                        context_vector = json.loads(context_str)
+                        self.logger.debug(f"Loaded context_vector from Redis for {concept_id}")
                 
-                arm = self.rl_engine.linucb_arms[concept_id]
-                arm.update(context_vector, reward)
-                await self._save_linucb_arms([concept_id])
-                self.logger.info(f"LinUCB arm updated for {concept_id}")
-            else:
-                self.logger.warning(f"No context_vector available for LinUCB update on {concept_id}")
-            
-            self.logger.info(f"Feedback processed for {concept_id}: Reward={reward:.2f}")
+                if context_vector:
+                    # FIX Issue 1: Load LinUCB arm from Redis if not in memory
+                    if concept_id not in self.rl_engine.linucb_arms:
+                        await self._load_linucb_arms([concept_id])
+                        self.logger.debug(f"Loaded LinUCB arm from Redis for {concept_id}")
+                    
+                    # Now update the arm (create new if still doesn't exist)
+                    if concept_id not in self.rl_engine.linucb_arms:
+                        from backend.core.rl_engine import LinUCBArm
+                        self.rl_engine.linucb_arms[concept_id] = LinUCBArm(
+                            concept_id, d=self.rl_engine.context_dim
+                        )
+                    
+                    arm = self.rl_engine.linucb_arms[concept_id]
+                    arm.update(context_vector, reward)
+                    await self._save_linucb_arms([concept_id])
+                    self.logger.info(f"LinUCB arm updated for {concept_id}")
+                else:
+                    self.logger.warning(f"No context_vector available for LinUCB update on {concept_id}")
+                
+                self.logger.info(f"Feedback processed for {concept_id}: Reward={reward:.2f}")
+
+            finally:
+                if acquired:
+                    try: await redis_lock.release()
+                    except: pass
             
         except Exception as e:
             self.logger.error(f"Error processing feedback: {e}")
@@ -464,8 +493,7 @@ class PathPlannerAgent(BaseAgent):
             # Start of session or unknown state
             # Simple heuristic: 10% chance to trigger REVIEW mode for Spaced Repetition
             # In production, this would check 'last_reviewed_at' decay
-            import random
-            if random.random() < 0.1:
+            if random.random() < REVIEW_CHANCE:
                 return ChainingMode.REVIEW
             return ChainingMode.FORWARD
     
@@ -507,8 +535,7 @@ class PathPlannerAgent(BaseAgent):
                 
                 # Probabilistic Gate: gate_prob = min(1.0, score / 0.8)
                 # At score 0.8+: 100% pass. At 0.6: 75% pass. At 0.4: 50% pass.
-                import random
-                gate_prob = min(1.0, current_score / 0.8)
+                gate_prob = min(1.0, current_score / GATE_FULL_PASS_SCORE)
                 
                 if random.random() > gate_prob:
                     # Block forward progress with probability (1 - gate_prob)
@@ -672,7 +699,7 @@ class PathPlannerAgent(BaseAgent):
                         # FIX Issue 4: Check prerequisites for step 2
                         prereqs = prerequisites.get(step2, [])
                         prereqs_met = all(
-                            current_mastery.get(p, 0) >= 0.7 or p in visited
+                            current_mastery.get(p, 0) >= MASTERY_PREREQUISITE_THRESHOLD or p in visited
                             for p in prereqs
                         )
                         if prereqs_met:

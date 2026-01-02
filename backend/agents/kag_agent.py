@@ -15,6 +15,15 @@ from backend.models.artifacts import (
     ArtifactType, AtomicNote, MisconceptionNote, ArtifactState
 )
 from backend.config import get_settings
+from backend.core.constants import (
+    KAG_MIN_LEARNERS,
+    KAG_MASTERY_THRESHOLD,
+    KAG_DIFFICULT_THRESHOLD,
+    KAG_EASY_THRESHOLD,
+    KAG_PRIORITY_STRUGGLE_THRESHOLD,
+    KAG_MODERATE_STRUGGLE_THRESHOLD,
+    KAG_STRUGGLE_MASTERY_THRESHOLD
+)
 from llama_index.llms.gemini import Gemini
 
 logger = logging.getLogger(__name__)
@@ -57,21 +66,22 @@ class KAGAgent(BaseAgent):
     
     # FIX Issue 2+3: Class-level constants for validation and configuration
     ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
-    MIN_LEARNERS_FOR_ANALYSIS = 5  # Minimum learners for system analysis
+    # KAG Configuration (Loaded from constants.py)
+    MIN_LEARNERS_FOR_ANALYSIS = KAG_MIN_LEARNERS
     
     # FIX Issue 8: Mastery threshold based on Bloom's research (80-90%)
-    MASTERY_THRESHOLD = 0.8  # Score >= 0.8 = ATOMIC_NOTE, < 0.8 = MISCONCEPTION_NOTE
+    MASTERY_THRESHOLD = KAG_MASTERY_THRESHOLD
     
     # FIX Issue 4 (Phase 4): Pattern identification thresholds
-    DIFFICULT_THRESHOLD = 0.4  # Concepts with avg_mastery < 0.4 are difficult
-    EASY_THRESHOLD = 0.8  # Concepts with avg_mastery > 0.8 are easy
+    DIFFICULT_THRESHOLD = KAG_DIFFICULT_THRESHOLD
+    EASY_THRESHOLD = KAG_EASY_THRESHOLD
     
     # FIX Issue 6 (Phase 4): Struggle rate thresholds for recommendations
-    PRIORITY_STRUGGLE_THRESHOLD = 0.6  # High priority intervention needed
-    MODERATE_STRUGGLE_THRESHOLD = 0.3  # Moderate intervention needed
+    PRIORITY_STRUGGLE_THRESHOLD = KAG_PRIORITY_STRUGGLE_THRESHOLD
+    MODERATE_STRUGGLE_THRESHOLD = KAG_MODERATE_STRUGGLE_THRESHOLD
     
     # FIX Issue 7 (Phase 4): Struggle mastery threshold for statistics
-    STRUGGLE_MASTERY_THRESHOLD = 0.5  # Learners with mastery < 0.5 are struggling
+    STRUGGLE_MASTERY_THRESHOLD = KAG_STRUGGLE_MASTERY_THRESHOLD
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None):
