@@ -75,8 +75,14 @@ class EvaluatorAgent(BaseAgent):
     DIFFICULTY_ADJUSTMENT = EVAL_DIFFICULTY_ADJUSTMENT
     MASTERY_BOOST = EVAL_MASTERY_BOOST
     
-    # FIX Issue 5: Mastery update weight constant
+    # FIX Issue 5: Mastery update weight constant (Legacy, kept for compatibility)
     MASTERY_WEIGHT = EVAL_MASTERY_WEIGHT
+    
+    # SCIENTIFIC FIX: Bayesian Knowledge Tracing (BKT) Parameters
+    # Source: Corbett & Anderson (1994)
+    P_LEARN = 0.1      # Probability of learning after one attempt
+    P_GUESS = 0.25     # Probability of guessing correctly without knowing
+    P_SLIP = 0.10      # Probability of making a mistake despite knowing
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None, personal_kg=None):
@@ -377,24 +383,54 @@ class EvaluatorAgent(BaseAgent):
         self,
         learner_response: str,
         expected_answer: str,
-        explanation: str
+        explanation: str,
+        target_bloom_level: int = 2  # Default: UNDERSTAND
     ) -> Dict[str, Any]:
-        """Score learner response (0-1)"""
+        """
+        Score learner response with Bloom's Taxonomy awareness.
+        
+        Scientific Basis: Bloom (1956) - Taxonomy of Educational Objectives
+        
+        Bloom Levels:
+        1 = Remember (Recall facts)
+        2 = Understand (Explain concepts)
+        3 = Apply (Use in new situations)
+        4 = Analyze (Break down, compare)
+        5 = Evaluate (Justify, critique)
+        6 = Create (Design, construct)
+        
+        Scoring Rule: If target is "Apply" (3+), but answer is just "Recall", max score = 0.6.
+        """
         try:
-            prompt = f"""
-            Score this learner response.
+            bloom_level_names = {
+                1: "Remember (recall facts)",
+                2: "Understand (explain meaning)",
+                3: "Apply (use in new situations)",
+                4: "Analyze (compare, contrast, break down)",
+                5: "Evaluate (judge, justify)",
+                6: "Create (design, build)"
+            }
+            target_bloom_name = bloom_level_names.get(target_bloom_level, "Understand")
             
-            Question: (learner is answering about a concept)
+            prompt = f"""
+            Score this learner response with BLOOM'S TAXONOMY awareness.
+            
+            TARGET COGNITIVE LEVEL: {target_bloom_level} - {target_bloom_name}
+            
             Learner response: {learner_response}
             Expected answer: {expected_answer}
             Correct explanation: {explanation}
             
-            Return ONLY a JSON with "score" (0-1 float).
-            0 = completely wrong
-            0.5 = partially correct
-            1 = completely correct
+            SCORING RULES:
+            - If Target Bloom = 1-2 (Remember/Understand): Score primarily on ACCURACY.
+            - If Target Bloom = 3+ (Apply/Analyze/Evaluate/Create): Score on REASONING quality.
+            - If learner provides CORRECT DEFINITION but fails to APPLY it: max score = 0.6.
+            - If learner demonstrates higher-level thinking: bonus up to 1.0.
             
-            Example: {{"score": 0.8}}
+            Return ONLY valid JSON:
+            {{"score": 0.0-1.0, "bloom_achieved": 1-6, "reasoning": "..."}}
+            
+            Example: {{"score": 0.7, "bloom_achieved": 2, "reasoning": "Correct definition but no application shown"}}
             """
             
             response = await self.llm.acomplete(prompt)
@@ -402,37 +438,46 @@ class EvaluatorAgent(BaseAgent):
             
             # FIX Issue 6: Log if LLM response is empty
             if not score_text or not score_text.strip():
-                self.logger.warning(f"Empty LLM response for scoring - using fallback")
+                self.logger.warning(f"Empty LLM response for Bloom scoring - using fallback")
             
-            # Parse score from JSON
-            # Note: Could integrate self.scorer (SemanticScorer) for hybrid scoring in future
+            # Parse JSON response
             try:
-                # Try to extract JSON using class-level re module
-                match = re.search(r'"score"\s*:\s*([\d.]+)', score_text or "")
-                if match:
-                    score = float(match.group(1))
+                # Try to extract score from JSON
+                score_match = re.search(r'"score"\s*:\s*([\d.]+)', score_text or "")
+                bloom_match = re.search(r'"bloom_achieved"\s*:\s*(\d+)', score_text or "")
+                
+                if score_match:
+                    score = float(score_match.group(1))
+                    bloom_achieved = int(bloom_match.group(1)) if bloom_match else target_bloom_level
+                    
+                    # Apply Bloom's penalty: If high target but low achievement, cap score
+                    if target_bloom_level >= 3 and bloom_achieved <= 2:
+                        original_score = score
+                        score = min(0.6, score)
+                        self.logger.debug(
+                            f"Bloom penalty applied: target={target_bloom_level}, achieved={bloom_achieved}, "
+                            f"score={original_score:.2f} -> {score:.2f}"
+                        )
                 else:
-                    # Improved fallback with case-insensitive word overlap
+                    # Fallback: word overlap
                     learner_words = set(learner_response.lower().split())
                     expected_words = set(expected_answer.lower().split())
                     if expected_words:
                         overlap = len(learner_words & expected_words) / len(expected_words)
-                        score = min(0.8, overlap)  # Cap at 0.8 for fallback
+                        score = min(0.8, overlap)
                     else:
-                        # FIX Issue 5: Return 0.0 with warning for empty expected_answer
                         self.logger.warning(f"Cannot score - expected_answer is empty")
-                        score = 0.0  # Cannot evaluate without expected answer
+                        score = 0.0
                         
                 score = max(0.0, min(1.0, score))  # Clamp to 0-1
             except Exception as parse_error:
-                # Log specific exception type
-                self.logger.warning(f"Score parsing error ({type(parse_error).__name__}): {parse_error}")
+                self.logger.warning(f"Bloom score parsing error ({type(parse_error).__name__}): {parse_error}")
                 score = 0.0 if learner_response.lower() != expected_answer.lower() else 1.0
             
             return {"success": True, "score": score}
         
         except Exception as e:
-            self.logger.error(f"Scoring error: {e}")
+            self.logger.error(f"Bloom scoring error: {e}")
             return {"success": False, "score": 0.0}
     
     async def _classify_error(
@@ -646,15 +691,44 @@ class EvaluatorAgent(BaseAgent):
         score: float,
         current_mastery: float
     ) -> float:
-        """Update learner's mastery level using weighted moving average"""
+        """
+        Update learner's mastery level using Bayesian Knowledge Tracing (BKT).
+        
+        Scientific Basis: Corbett & Anderson (1994)
+        
+        BKT models knowledge as a hidden state. The update uses:
+        - P(Know|Correct) = P(Correct|Know) * P(Know) / P(Correct)
+        - P(Know|Incorrect) = P(Incorrect|Know) * P(Know) / P(Incorrect)
+        - Then applies learning gain: P(Know) += (1 - P(Know)) * P_LEARN
+        """
         try:
-            # Weighted average using class constant
-            new_mastery = (current_mastery * (1 - self.MASTERY_WEIGHT)) + (score * self.MASTERY_WEIGHT)
+            prior_mastery = current_mastery
+            is_correct = score >= 0.8  # Threshold for "correct"
             
-            # FIX Issue 4: Debug log for mastery update
+            # Bayesian Update
+            if is_correct:
+                # P(Correct|Know) = 1 - P_SLIP; P(Correct|NotKnow) = P_GUESS
+                p_correct = (1 - self.P_SLIP) * prior_mastery + self.P_GUESS * (1 - prior_mastery)
+                if p_correct > 0:
+                    posterior = ((1 - self.P_SLIP) * prior_mastery) / p_correct
+                else:
+                    posterior = prior_mastery
+            else:
+                # P(Incorrect|Know) = P_SLIP; P(Incorrect|NotKnow) = 1 - P_GUESS
+                p_incorrect = self.P_SLIP * prior_mastery + (1 - self.P_GUESS) * (1 - prior_mastery)
+                if p_incorrect > 0:
+                    posterior = (self.P_SLIP * prior_mastery) / p_incorrect
+                else:
+                    posterior = prior_mastery
+            
+            # Apply learning gain (even after incorrect, some learning occurs)
+            new_mastery = posterior + (1 - posterior) * self.P_LEARN
+            new_mastery = max(0.0, min(1.0, new_mastery))  # Clamp to [0, 1]
+            
+            # Debug log for BKT update
             self.logger.debug(
-                f"Mastery update: {learner_id}/{concept_id} | "
-                f"current={current_mastery:.2f}, score={score:.2f} -> new={new_mastery:.2f}"
+                f"BKT update: {learner_id}/{concept_id} | "
+                f"prior={prior_mastery:.2f}, correct={is_correct} -> posterior={new_mastery:.2f}"
             )
             
             # Save to database
@@ -666,7 +740,7 @@ class EvaluatorAgent(BaseAgent):
             return new_mastery
         
         except Exception as e:
-            self.logger.error(f"Mastery update error: {e}")
+            self.logger.error(f"BKT mastery update error: {e}")
             return current_mastery
     
     # ==========================================

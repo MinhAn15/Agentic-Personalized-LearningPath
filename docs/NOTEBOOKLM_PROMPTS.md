@@ -32,16 +32,21 @@ Use these prompts in **Google NotebookLM** (or similar tools) after uploading th
 **Target Paper**: *Corbett & Anderson (1994). "Knowledge Tracing..."*
 
 **Context (Paste this into Chat)**:
-> "I implemented a simplified BKT (Bayesian Knowledge Tracing) for my Learner Profiler.
-> - State: `mastery_level` (0.0 to 1.0) for each concept.
-> - Update Rule: When a learner answers correctly, I apply an Exponential Moving Average (EMA) with $\alpha=0.4$: $New = New * 0.4 + Old * 0.6$.
-> - Observation: I track 'Concept Decay' over time using Ebbinghaus curves."
+> "I implemented Bayesian Knowledge Tracing (BKT) for my Learner Profiler.
+> - **BKT Parameters** (class-level constants):
+>   - `P_LEARN = 0.1` (Probability of learning after one attempt)
+>   - `P_GUESS = 0.25` (Probability of guessing correctly without knowledge)
+>   - `P_SLIP = 0.10` (Probability of making a mistake despite knowing)
+> - **Update Rule** (Bayes' theorem):
+>   - If Correct: `P(Know|Correct) = ((1 - P_SLIP) * P(Know)) / P(Correct)`
+>   - If Incorrect: `P(Know|Incorrect) = (P_SLIP * P(Know)) / P(Incorrect)`
+>   - Then: `P(Know) += (1 - P(Know)) * P_LEARN`"
 
 **Prompt**:
-> "Analyze this simplified BKT implementation against the formal Hidden Markov Model described in the paper.
-> 1. Is using an Exponential Moving Average (EMA) a valid approximation for the Bayesian update rule $P(L_n | Action)$?
-> 2. The paper distinguishes between 'Slip' (knowns it but errors) and 'Guess' (doesn't know but correct). My EMA doesn't explicitly separate these. How strictly does this limit my model's accuracy according to the research?
-> 3. Suggest a formula from the paper to adjust my `mastery_level` based on the 'Guess' probability."
+> "Analyze this BKT implementation against the formal Hidden Markov Model.
+> 1. Are my parameter values (`P_LEARN=0.1`, `P_GUESS=0.25`, `P_SLIP=0.10`) reasonable defaults based on the research literature?
+> 2. I apply learning gain AFTER the Bayesian update. The paper shows `P(L_n) = P(L_{n-1}) + (1 - P(L_{n-1})) * P(T)`. Is my formula mathematically equivalent?
+> 3. What experiments or calibration methods from the paper would help me tune these parameters for different subject domains (e.g., math vs programming)?"
 
 ---
 

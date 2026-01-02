@@ -28,10 +28,15 @@ This document records the theoretical foundations, research papers, and industry
 *   **Application**: Separates the core *Learner Domain Logic* (Mastery updates, Style inference) from external adaptors (API, Database).
 *   **Mechanism**: The `LearnerProfile` is a pure entity isolated from the `Redis` persistence layer, allowing interchangeable storage backends.
 
-### 2. Bayesian Knowledge Tracing (Simplified)
+### 2. Bayesian Knowledge Tracing (BKT)
+
 *   **Source**: *Corbett, A. T., & Anderson, J. R. (1994). "Knowledge tracing: Modeling the acquisition of procedural knowledge."*
-*   **Application**: While not a full Hidden Markov Model, Agent 2 tracks the probability of mastery (`mastery_level`) based on observations (quiz scores).
-*   **Mechanism**: Concepts move from `0.0` to `1.0` mastery based on weighted updates from the Evaluator, preserving the "Markov Property" (next state depends only on current state + input).
+*   **Application**: Models knowledge as a hidden state, updated via Bayesian inference with observations (correct/incorrect responses).
+*   **Mechanism**: Uses BKT parameters:
+    *   `P(Learn) = 0.1` (Probability of learning after one attempt)
+    *   `P(Guess) = 0.25` (Probability of correct answer without knowledge)
+    *   `P(Slip) = 0.10` (Probability of incorrect answer despite knowledge)
+*   **Formula**: `P(Know|Correct) = P(Correct|Know) * P(Know) / P(Correct)` (Bayes' theorem)
 
 ### 3. Distributed Locking (Concurrency Control)
 *   **Source**: *Kleppmann, M. (2017). "Designing Data-Intensive Applications" (Redlock Algorithm).*

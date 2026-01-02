@@ -718,20 +718,32 @@ class PathPlannerAgent(BaseAgent):
         else:
             # No current concept (Cold-start)
             if chain_mode == ChainingMode.REVIEW:
-                # FIX Issue 2: Proper Spaced Repetition with decay
-                # Prioritize concepts with high mastery but not recently accessed
-                # Simulate decay: older mastery = higher priority for review
+                # SCIENTIFIC FIX: Spaced Repetition using Ebbinghaus Exponential Decay
+                # Source: Ebbinghaus (1885), SuperMemo SM-2 Algorithm
+                # Formula: R(t) = e^(-t/S) where S = Stability (higher mastery = slower decay)
                 from datetime import datetime, timedelta
+                import math
                 
                 review_candidates = []
                 for cid, mastery in current_mastery.items():
-                    if mastery > 0.7:  # Only review concepts with decent mastery
-                        # TODO: In production, use actual last_accessed_at from DB
-                        # For now, score based on mastery (lower = needs review more)
-                        review_score = 1.0 - mastery + 0.2  # Add bonus for review
-                        review_candidates.append((cid, review_score))
+                    if mastery > 0.5:  # Only review concepts with decent mastery
+                        # Estimate days since last review (TODO: use actual last_review_date from DB)
+                        # For now, estimate based on mastery level: high mastery = reviewed longer ago
+                        estimated_days = int((1 - mastery) * 30) + 1  # 0.9 mastery = ~4 days, 0.5 = ~16 days
+                        
+                        # Stability: High mastery concepts decay slower
+                        stability = max(1, mastery * 30)  # Days until 50% retention
+                        
+                        # Retention probability using Ebbinghaus formula
+                        retention = math.exp(-estimated_days / stability)
+                        
+                        # Review Priority = Forgetting probability * Mastery (we care more about forgetting good stuff)
+                        # High mastery + Low retention = HIGH priority (about to forget something valuable)
+                        review_priority = (1 - retention) * mastery
+                        
+                        review_candidates.append((cid, review_priority))
                 
-                # Sort by review priority (higher score = more urgent review)
+                # Sort by review priority (higher = more urgent review)
                 review_candidates.sort(key=lambda x: x[1], reverse=True)
                 candidates = [c[0] for c in review_candidates[:10]]  # Top 10 for review
             
