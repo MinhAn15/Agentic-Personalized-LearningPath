@@ -598,6 +598,8 @@ Return ONLY the domain name, nothing else. Example: sql
         ])
         
         prompt = f"""
+# Source: Guo et al. (2024) - LightRAG: "Simple, Fast, Effective Retrieval-Augmented Generation"
+# Implements "Edge-Attribute Thematic Indexing" by extracting keywords/summary on relationships.
 Identify relationships between these concepts:
 
 {concept_list}
@@ -629,6 +631,8 @@ Return ONLY valid JSON array:
     "weight": 0.8,
     "dependency": "STRONG",
     "confidence": 0.9,
+    "keywords": ["database", "prerequisite"],
+    "summary": "To understand B, you must first master A",
     "reasoning": "Brief explanation..."
   }}
 ]

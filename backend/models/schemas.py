@@ -22,7 +22,9 @@ class ConceptRelationship(BaseModel):
     source_concept_id: str
     target_concept_id: str
     relation_type: ConceptRelationType
-    confidence: float = Field(ge=0, le=1)  # 0-1 confidence score
+    confidence: float = Field(ge=0, le=1)
+    keywords: List[str] = Field(default_factory=list)
+    summary: str = ""
 
 class DocumentInput(BaseModel):
     """Input document for knowledge extraction"""

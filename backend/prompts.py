@@ -34,7 +34,9 @@ Output Format (JSON):
       "source_concept_id": "string",
       "target_concept_id": "string",
       "relation_type": "REQUIRES|SIMILAR_TO|IS_SUBCONCEPT_OF|BUILDS_ON",
-      "confidence": 0.0-1.0
+      "confidence": 0.0-1.0,
+      "keywords": ["theme1", "theme2"],
+      "summary": "1-sentence explanation of this connection"
     }
   ]
 }

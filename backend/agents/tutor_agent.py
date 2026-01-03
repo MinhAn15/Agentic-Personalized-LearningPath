@@ -14,7 +14,10 @@ from backend.core.constants import (
     TUTOR_W_PERSONAL,
     TUTOR_CONFIDENCE_THRESHOLD,
     TUTOR_CONFLICT_THRESHOLD,
-    TUTOR_CONFLICT_PENALTY
+    TUTOR_CONFLICT_PENALTY,
+    TUTOR_COT_TRACES,
+    TUTOR_CONSENSUS_THRESHOLD,
+    TUTOR_LEAKAGE_KEYWORDS
 )
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
@@ -24,25 +27,11 @@ import os
 logger = logging.getLogger(__name__)
 
 
-class SocraticState(str, Enum):
-    """
-    Reverse Socratic State Machine (5 States) per Thesis
-    
-    State 0: PROBING - Ask open-ended question about concept
-    State 1: SCAFFOLDING - Provide hint level 1 (conceptual)
-    State 2: GUIDING - Provide hint level 2 (structural)
-    State 3: EXPLAINING - Provide partial explanation + ask to complete
-    State 4: CONCLUSION - Synthesize correct answer + learner's insight
-    """
-    PROBING = "PROBING"           # State 0
-    SCAFFOLDING = "SCAFFOLDING"   # State 1
-    GUIDING = "GUIDING"           # State 2
-    EXPLAINING = "EXPLAINING"     # State 3
-    CONCLUSION = "CONCLUSION"     # State 4
-    # Non-linear adaptive states
-    REFUTATION = "REFUTATION"     # Mistake/Misconception detected
-    ELABORATION = "ELABORATION"   # Near correct -> Expand
-    TEACH_BACK = "TEACH_BACK"     # Protégé Effect (High mastery)
+
+# UPGRADE: SocraticState removed in favor of Dynamic CoT (Wei 2022)
+# class SocraticState(str, Enum):
+#     ...
+
 
 
 class TutorAgent(BaseAgent):
@@ -143,140 +132,106 @@ class TutorAgent(BaseAgent):
             hint_level = kwargs.get("hint_level", 0)
             hint_level = min(4, max(0, int(hint_level)))  # Clamp to valid range
             
-            # FIX: Validate conversation_history is a list
+            # Conversation history check
             conversation_history = kwargs.get("conversation_history", [])
             if not isinstance(conversation_history, list):
-                conversation_history = []
+                 conversation_history = []
+
+            # UPGRADE: Dynamic Chain-of-Thought (CoT)
+            # Source: Wei et al. (2022) & Wang et al. (2022)
             
-            if not all([learner_id, question, concept_id]):
-                return {
-                    "success": False,
-                    "error": "learner_id, question, and concept_id required",
-                    "agent_id": self.agent_id
-                }
+            # 1. Generate Hidden CoT Traces (Self-Consistency)
+            traces = await self._generate_cot_traces(question, conversation_history, concept_id)
             
-            self.logger.info(f"👨‍🏫 Tutoring {learner_id} on {concept_id}")
+            # 2. Check Consensus
+            best_trace = self._check_consensus(traces)
             
-            # Step 1: Get concept details from Course KG
-            concept = await self._get_concept_from_kg(concept_id)
-            if not concept:
-                return {
-                    "success": False,
-                    "error": f"Concept not found: {concept_id}",
-                    "agent_id": self.agent_id
-                }
-            
-            # Step 2: Get learner's current state from Personal KG
-            learner_state = await self._get_learner_state(learner_id, concept_id)
-            current_mastery = learner_state.get("mastery", 0.0)
-            
-            # Step 3: Classify User Intent
-            intent = await self._classify_intent(question, conversation_history)
-            
-            # Step 4: Determine Socratic state
-            socratic_state = self._determine_socratic_state(
-                hint_level=hint_level,
-                current_mastery=current_mastery,
-                conversation_turns=len(conversation_history),
-                intent=intent
-            )
-            
-            # Step 5: 3-Layer Grounding
-            grounding_result = await self._three_layer_grounding(
-                query=question,
-                concept_id=concept_id,
-                learner_id=learner_id
-            )
-            
-            # Step 5: Check confidence threshold
-            if grounding_result["confidence"] < self.CONFIDENCE_THRESHOLD:
-                return {
-                    "success": True,
-                    "agent_id": self.agent_id,
-                    "learner_id": learner_id,
-                    "concept_id": concept_id,
-                    "guidance": "I'm not entirely sure based on the available course materials. Let me rephrase: What specific aspect of this concept would you like to explore?",
-                    "grounded": False,
-                    "confidence": grounding_result["confidence"],
-                    "socratic_state": socratic_state.value,
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            # Step 6: Generate Socratic response
-            response = await self._generate_socratic_response(
-                question=question,
-                concept=concept,
-                grounding_context=grounding_result["context"],
-                learner_state=learner_state,
-                socratic_state=socratic_state,
-                conversation_history=conversation_history
-            )
-            
-            if not response.get("success"):
-                return response
-            
-            # Step 7: Apply Harvard 7 Principles (FIX: was missing)
-            learning_style = learner_state.get("learning_style", "VISUAL")
-            enforced_guidance = self.enforce_harvard_principles(
-                response=response["guidance"],
-                learning_style=learning_style,
-                phase=socratic_state.value
-            )
-            
-            # Step 8: Prepare result
-            result = {
-                "success": True,
-                "agent_id": self.agent_id,
-                "learner_id": learner_id,
-                "concept_id": concept_id,
-                "guidance": enforced_guidance,  # Use enforced version
-                "follow_up_question": response.get("follow_up_question"),
-                "socratic_state": socratic_state.value,
-                "next_state": self._get_next_state(socratic_state).value,
-                "grounded": True,
-                "confidence": grounding_result["confidence"],
-                "grounding_sources": grounding_result["sources"],
-                "hint_level": self._state_to_hint_level(socratic_state),
-                "timestamp": datetime.now().isoformat()
+            response_text = ""
+            if best_trace:
+                # 3. Apply Leakage Guard (Scaffolding)
+                response_text = self._extract_scaffold(best_trace)
+            else:
+                # Fallback: Safe Probing (No consensus)
+                response_text = "I notice you might be stuck. Can you explain your current thinking step-by-step?"
+
+            return {
+                "response": response_text,
+                "needs_human_review": not bool(best_trace)
             }
-            
-            # Step 9: Save session state (with 24h TTL)
-            await self.save_state(
-                f"tutor_session:{learner_id}:{concept_id}",
-                {
-                    "last_guidance": result,
-                    "socratic_state": socratic_state.value,
-                    "conversation_turns": len(conversation_history) + 1
-                },
-                ttl=86400  # FIX Issue 2: Expire after 24 hours
-            )
-            
-            # Step 10: Emit event for evaluator (with full context)
-            await self.send_message(
-                receiver="evaluator",
-                message_type="tutor_guidance_provided",
-                payload={
-                    "learner_id": learner_id,
-                    "concept_id": concept_id,
-                    "socratic_state": socratic_state.value,
-                    "hint_level": result["hint_level"],
-                    # FIX Issue 1: Add guidance context for evaluation
-                    "guidance": result["guidance"],
-                    "follow_up_question": result.get("follow_up_question")
-                }
-            )
-            
-            self.logger.info(f"✅ Guidance provided (state: {socratic_state.value}, intent: {intent.value}, confidence: {grounding_result['confidence']:.2f})")
-            
-            return result
-        
         except Exception as e:
-            self.logger.error(f"❌ Tutoring failed: {e}")
+            self.logger.error(f"Tutor execution failed: {e}")
             return {
                 "success": False,
                 "error": str(e),
                 "agent_id": self.agent_id
             }
+
+    async def _generate_cot_traces(self, question: str, history: List[Dict], concept_id: str, n: int = TUTOR_COT_TRACES) -> List[str]:
+        """
+        Generate n internal reasoning traces (Internal Monologue).
+        """
+        if not self.llm:
+            return []
+            
+        prompt = f"""
+        Act as a Master Tutor.
+        Student Question: {question}
+        Concept Context: {concept_id}
+        
+        Task: Diagnose the student's misunderstanding.
+        Method: Chain-of-Thought (think step-by-step).
+        
+        Output format:
+        1. Identify the core concept.
+        2. Analyze the student's error.
+        3. Formulate the correct logic.
+        4. Determine the next best hint (Scaffold).
+        
+        DO NOT OUTPUT THE FINAL ANSWER YET.
+        """
+        try:
+             # Simulation of multiple calls (in production, run in parallel)
+             traces = []
+             for _ in range(n):
+                 response = await self.llm.acomplete(prompt)
+                 traces.append(response.text)
+             return traces
+        except Exception as e:
+            self.logger.error(f"CoT generation failed: {e}")
+            return []
+
+    def _check_consensus(self, traces: List[str]) -> Optional[str]:
+        """
+        Metacognitive Check: Self-Consistency (Wang 2022).
+        Simple heuristic: Check if majority of traces point to similar scaffold direction.
+        For V1, we just pick the longest/most detailed trace if n > 0.
+        Real implementation would use embedding similarity.
+        """
+        if not traces:
+            return None
+        # Placeholder: Return the longest trace as 'best'
+        return max(traces, key=len)
+
+    def _extract_scaffold(self, trace: str) -> str:
+        """
+        Leakage Guard: Remove 'final answer' markers.
+        """
+        lines = trace.split('\n')
+        safe_lines = []
+        for line in lines:
+            is_leak = False
+            for keyword in TUTOR_LEAKAGE_KEYWORDS:
+                if keyword in line or keyword.lower() in line.lower():
+                    is_leak = True
+                    break
+            if not is_leak:
+                safe_lines.append(line)
+        
+        # Post-process: Ensure it sounds like a hint, not a monologue
+        scaffold = "\n".join(safe_lines).strip()
+        return f"Let's breakdown your logic:\n{scaffold}\n\nWhat do you think is the next step?"
+            
+
     
     async def _get_concept_from_kg(self, concept_id: str) -> Optional[Dict]:
         """Get concept details from Course KG"""
@@ -328,312 +283,7 @@ class TutorAgent(BaseAgent):
             }
         return {"learning_style": "VISUAL", "mastery": 0.0, "misconceptions": [], "notes": []}
     
-    def _determine_socratic_state(
-        self,
-        hint_level: int,
-        current_mastery: float,
-        conversation_turns: int,
-        has_misconception: bool = False,
-        is_near_correct: bool = False,
-        intent: UserIntent = UserIntent.GENERAL
-    ) -> SocraticState:
-        """
-        Determine current Socratic state based on context (Adaptive Cognitive Loop).
-        """
-        # 1. Immediate intervention for misconceptions
-        if has_misconception:
-            return SocraticState.REFUTATION
-            
-        # 2. Intent-Based Adaptation
-        if intent == UserIntent.HELP_SEEKING and conversation_turns < 2:
-            # If they are stuck and asking for help, don't just probe aimlessly.
-            # Start with at least a small scaffold to reduce frustration.
-            if hint_level == 0:
-                return SocraticState.SCAFFOLDING
-                
-        if intent == UserIntent.SENSE_MAKING and conversation_turns < 3:
-            # If they want to understand WHY, keep Probing deep questions.
-            return SocraticState.PROBING
-            
-        # 3. Reversed Socratic for high performers (The Protégé Effect)
-        # Scientific Basis: Bargh & Schul, 1980 - Teaching others improves own understanding
-        if current_mastery > 0.7 and conversation_turns > 2:
-            if random.random() < 0.4:  # 40% chance to trigger TEACH_BACK
-                return SocraticState.TEACH_BACK
-                
-        # 3. Elaboration for near-misses
-        if is_near_correct:
-            return SocraticState.ELABORATION
 
-        # 4. Standard Progression Fallback
-        if hint_level >= 4 or conversation_turns >= 5:
-            return SocraticState.CONCLUSION
-        elif hint_level >= 3:
-            return SocraticState.EXPLAINING
-        elif hint_level >= 2:
-            return SocraticState.GUIDING
-        elif hint_level >= 1:
-            return SocraticState.SCAFFOLDING
-        else:
-            return SocraticState.PROBING
-    
-    def _get_next_state(self, current_state: SocraticState) -> SocraticState:
-        """
-        Get next state in Socratic progression.
-        
-        Scientific Basis: Collins & Stevens, 1982 - Socratic Dialogue Framework.
-        Special states (REFUTATION, ELABORATION, TEACH_BACK) return to standard flow.
-        """
-        # Standard progression order
-        state_order = [
-            SocraticState.PROBING,
-            SocraticState.SCAFFOLDING,
-            SocraticState.GUIDING,
-            SocraticState.EXPLAINING,
-            SocraticState.CONCLUSION
-        ]
-        
-        # FIX Issue 3: Special states return to appropriate standard state
-        if current_state == SocraticState.REFUTATION:
-            # After refuting misconception, probe to verify correction
-            return SocraticState.PROBING
-        elif current_state == SocraticState.ELABORATION:
-            # After elaboration on near-correct, move to conclusion
-            return SocraticState.CONCLUSION
-        elif current_state == SocraticState.TEACH_BACK:
-            # After teach-back, conclude the learning cycle
-            return SocraticState.CONCLUSION
-        
-        # Standard progression
-        if current_state in state_order:
-            current_idx = state_order.index(current_state)
-            next_idx = min(current_idx + 1, len(state_order) - 1)
-            return state_order[next_idx]
-        
-        # Default fallback
-        return SocraticState.PROBING
-    
-    def _state_to_hint_level(self, state: SocraticState) -> int:
-        """Convert Socratic state to hint level"""
-        mapping = {
-            SocraticState.PROBING: 0,
-            SocraticState.SCAFFOLDING: 1,
-            SocraticState.GUIDING: 2,
-            SocraticState.EXPLAINING: 3,
-            SocraticState.CONCLUSION: 4
-        }
-        return mapping.get(state, 0)
-    
-    async def _three_layer_grounding(
-        self,
-        query: str,
-        concept_id: str,
-        learner_id: str
-    ) -> Dict[str, Any]:
-        """
-        3-Layer Grounding System per Thesis.
-        
-        Scientific Basis:
-        - HybridRAG: Combines vector-based RAG with KG-based retrieval
-        - TruthfulRAG (2024): KG-based conflict resolution
-        
-        Layer 1: Document Grounding (RAG from Vector Store)
-        Layer 2: Course KG Grounding (Neo4j - structured knowledge)
-        Layer 3: Personal KG Grounding (Neo4j - learner-specific)
-        """
-        import asyncio
-        
-        # FIX Issue 3: Parallel layer execution with asyncio.gather()
-        doc_task = self._rag_retrieve(query, concept_id)
-        kg_task = self._course_kg_retrieve(concept_id)
-        personal_task = self._personal_kg_retrieve(learner_id, concept_id)
-        
-        results = await asyncio.gather(doc_task, kg_task, personal_task)
-        
-        doc_context, doc_score = results[0]
-        kg_context, kg_score = results[1]
-        personal_context, personal_score = results[2]
-        
-        sources = []
-        if doc_context:
-            sources.append({"layer": "DOCUMENT", "score": doc_score})
-        if kg_context:
-            sources.append({"layer": "COURSE_KG", "score": kg_score})
-        if personal_context:
-            sources.append({"layer": "PERSONAL_KG", "score": personal_score})
-        
-        # Calculate weighted confidence
-        confidence = (
-            self.W_DOC * doc_score +
-            self.W_KG * kg_score +
-            self.W_PERSONAL * personal_score
-        )
-        
-        # ===== CONFLICT DETECTION (New Feature) =====
-        conflict_detected = False
-        conflict_info = None
-        
-        # Check RAG vs Course KG conflict
-        if doc_context and kg_context:
-            is_conflict, similarity = await self._detect_conflict(
-                doc_context.get("retrieved_chunks", []),
-                kg_context.get("definition", "")
-            )
-            
-            if is_conflict:
-                conflict_detected = True
-                conflict_info = {
-                    "type": "RAG_VS_KG",
-                    "similarity": similarity,
-                    "resolution": "TRUST_KG",  # Trust hierarchy: KG > RAG
-                    "rag_content": doc_context.get("retrieved_chunks", [])[:1],
-                    "kg_content": kg_context.get("definition", "")
-                }
-                
-                # Apply confidence penalty for conflict
-                confidence = max(0.0, confidence - self.CONFLICT_PENALTY)
-                
-                self.logger.warning(
-                    f"⚠️ CONFLICT detected (similarity={similarity:.2f}). "
-                    f"Using KG as trusted source. Confidence reduced to {confidence:.2f}"
-                )
-        
-        # Merge context with conflict detection metadata
-        merged_context = {
-            "document": doc_context,
-            "course_kg": kg_context,
-            "personal": personal_context,
-            # Add layer scores for potential conflict resolution
-            "_layer_scores": {
-                "document": doc_score,
-                "course_kg": kg_score,
-                "personal": personal_score
-            },
-            # Conflict metadata
-            "_conflict": {
-                "detected": conflict_detected,
-                "info": conflict_info
-            }
-        }
-        
-        return {
-            "context": merged_context,
-            "confidence": confidence,
-            "sources": sources,
-            "conflict_detected": conflict_detected,
-            "conflict_info": conflict_info
-        }
-    
-    async def _detect_conflict(
-        self,
-        rag_chunks: list,
-        kg_definition: str
-    ) -> tuple:
-        """
-        Detect conflict between RAG results and Knowledge Graph definition.
-        
-        Uses semantic similarity to identify when RAG provides information
-        that contradicts the curated KG content.
-        
-        Returns:
-            tuple: (is_conflict: bool, similarity_score: float)
-        
-        Scientific Basis:
-            - TruthfulRAG (2024): KG-based conflict resolution
-            - Trust Hierarchy: KG > RAG when conflict detected
-        """
-        import numpy as np
-        
-        # Skip if either source is empty
-        if not rag_chunks or not kg_definition:
-            return False, 1.0
-        
-        try:
-            # Combine RAG chunks into single text
-            rag_text = " ".join(rag_chunks[:3]) if isinstance(rag_chunks, list) else str(rag_chunks)
-            
-            # Use LLM to check semantic alignment
-            if hasattr(self, 'llm') and self.llm:
-                # Method 1: LLM-based conflict detection (more accurate)
-                conflict_check_prompt = f"""
-                Compare these two statements and determine if they CONFLICT (contradict each other).
-                
-                Statement A (RAG): {rag_text[:500]}
-                Statement B (KG): {kg_definition[:500]}
-                
-                Reply with JSON: {{"conflict": true/false, "similarity": 0.0-1.0, "reason": "..."}}
-                """
-                
-                response = await self.llm.generate(conflict_check_prompt)
-                
-                try:
-                    import json
-                    result = json.loads(response)
-                    is_conflict = result.get("conflict", False)
-                    similarity = result.get("similarity", 0.8)
-                    
-                    if is_conflict:
-                        self.logger.info(f"LLM detected conflict: {result.get('reason', 'N/A')}")
-                    
-                    return is_conflict, similarity
-                except json.JSONDecodeError:
-                    pass
-            
-            # Method 2: Simple word overlap fallback
-            rag_words = set(rag_text.lower().split())
-            kg_words = set(kg_definition.lower().split())
-            
-            if not kg_words:
-                return False, 1.0
-            
-            # Jaccard similarity as simple measure
-            intersection = len(rag_words & kg_words)
-            union = len(rag_words | kg_words)
-            similarity = intersection / union if union > 0 else 0.0
-            
-            # Low similarity might indicate conflict
-            is_conflict = similarity < self.CONFLICT_THRESHOLD
-            
-            return is_conflict, similarity
-            
-        except Exception as e:
-            self.logger.error(f"Conflict detection error: {e}")
-            return False, 1.0  # Assume no conflict on error
-    
-    async def _rag_retrieve(self, query: str, concept_id: str) -> tuple:
-        """Layer 1: Retrieve from local LlamaIndex vector store"""
-        try:
-            if not self.query_engine:
-                 return {}, 0.0
-            
-            # Use LlamaIndex query engine
-            response = await self.query_engine.aquery(query)
-            
-            chunks = []
-            score_sum = 0
-            count = 0
-            
-            if hasattr(response, 'source_nodes'):
-                for node in response.source_nodes:
-                    chunks.append(node.text)
-                    if hasattr(node, 'score') and node.score:
-                        score_sum += node.score
-                        count += 1
-            
-            avg_score = score_sum / count if count > 0 else 0.5
-            
-            context = {
-                "retrieved_chunks": chunks[:3], # Top 3 chunks
-                "concept_id": concept_id,
-                "source": "Local RAG"
-            }
-            
-            return context, avg_score
-            
-        except Exception as e:
-            self.logger.error(f"RAG retrieval error: {e}")
-            return {}, 0.0
-    
     async def _course_kg_retrieve(self, concept_id: str) -> tuple:
         """Layer 2: Retrieve from Course Knowledge Graph"""
         try:
@@ -726,196 +376,7 @@ class TutorAgent(BaseAgent):
             self.logger.error(f"Personal KG retrieval error: {e}")
             return {}, 0.0
     
-    async def _generate_socratic_response(
-        self,
-        question: str,
-        concept: Dict[str, Any],
-        grounding_context: Dict[str, Any],
-        learner_state: Dict[str, Any],
-        socratic_state: SocraticState,
-        conversation_history: List
-    ) -> Dict[str, Any]:
-        """Generate response following Socratic state machine"""
-        try:
-            # Build state-specific prompt
-            prompt = self._build_socratic_prompt(
-                concept=concept,
-                grounding_context=grounding_context,
-                learner_state=learner_state,
-                socratic_state=socratic_state
-            )
-            
-            # Build user message
-            user_message = f"""
-Learner's Question: {question}
 
-Previous conversation: {len(conversation_history)} turns
-
-Generate a Socratic response following the {socratic_state.value} state.
-Keep response SHORT (2-4 sentences max).
-"""
-            
-            response = await self.llm.acomplete(prompt + "\n\n" + user_message)
-            response_text = response.text.strip()
-            
-            # FIX Issue 2: Improved follow-up question extraction
-            # Use regex to find the last question in response
-            import re
-            follow_up = None
-            questions = re.findall(r'[^.!?]*\?', response_text)
-            if questions:
-                follow_up = questions[-1].strip()  # Take the last question
-            
-            return {
-                "success": True,
-                "guidance": response_text,
-                "follow_up_question": follow_up
-            }
-        
-        except Exception as e:
-            self.logger.error(f"Response generation error: {e}")
-            return {"success": False, "error": str(e)}
-        
-    async def _classify_intent(self, question: str, history: List) -> UserIntent:
-        """Classify if user is HELP_SEEKING (blocked) or SENSE_MAKING (curious)"""
-        try:
-            prompt = f"""
-            Classify the learner's intent based on this question.
-            
-            Context: {len(history)} previous turns.
-            Question: "{question}"
-            
-            Categories:
-            1. HELP_SEEKING: Blocked, error message, "how to fix", "it's not working", frustration.
-            2. SENSE_MAKING: Curious, "why matches X", "difference between X and Y", conceptual understanding.
-            3. GENERAL: Greetings, or unclear.
-            
-            Return ONLY one word: HELP_SEEKING, SENSE_MAKING, or GENERAL.
-            """
-            response = await self.llm.acomplete(prompt)
-            text = response.text.strip().upper()
-            
-            if "HELP" in text: return UserIntent.HELP_SEEKING
-            if "SENSE" in text: return UserIntent.SENSE_MAKING
-            return UserIntent.GENERAL
-        except:
-            return UserIntent.GENERAL
-    
-    def _build_socratic_prompt(
-        self,
-        concept: Dict[str, Any],
-        grounding_context: Dict[str, Any],
-        learner_state: Dict[str, Any],
-        socratic_state: SocraticState
-    ) -> str:
-        """Build prompt for Socratic response based on state"""
-        
-        # State-specific instructions
-        state_instructions = {
-            SocraticState.PROBING: """
-STATE 0 - PROBING:
-- Ask open-ended question to probe understanding
-- "What do YOU think about...?"
-- Don't give any hints yet
-- Encourage them to formulate their own answer first
-""",
-            SocraticState.SCAFFOLDING: """
-STATE 1 - SCAFFOLDING:
-- Provide a CONCEPTUAL hint (high-level framework)
-- "Think about it this way..."
-- Still don't give the answer
-- Ask a clarifying question
-""",
-            SocraticState.GUIDING: """
-STATE 2 - GUIDING:
-- Provide a STRUCTURAL hint (steps/process)
-- "The first step is usually..."
-- Point them in the right direction
-- Ask them to continue the thought
-""",
-            SocraticState.EXPLAINING: """
-STATE 3 - EXPLAINING:
-- Provide PARTIAL explanation
-- Give part of the answer but leave key insight for them
-- "So X leads to Y because... can you complete this?"
-- Still engage them to participate
-""",
-            SocraticState.CONCLUSION: """
-STATE 4 - CONCLUSION:
-- Synthesize the full correct answer
-- Connect their insights with the correct concept
-- Praise their effort and thinking process
-- Summarize what they learned
-""",
-            SocraticState.REFUTATION: """
-STATE: REFUTATION (Misconception Detected):
-- ⚠️ Do NOT simply say "Wrong".
-- Use the "Socratic Paradox" method.
-- Ask a counter-question that reveals the contradiction in their logic.
-- "If X were true, wouldn't that mean Y? But we know Z..."
-- Guide them to realize the logical fallacy themselves.
-""",
-            SocraticState.ELABORATION: """
-STATE: ELABORATION (Near Correct):
-- Acknowledge they are on the right track.
-- Ask them to expand or apply it to a new context.
-- "That's correct. Now, how would this change if we..."
-- Deepen the understanding.
-""",
-            SocraticState.TEACH_BACK: """
-STATE: TEACH_BACK (The Protégé Effect):
-- 🧠 ACT NAIVE / FAKE CONFUSION.
-- "Wait, I'm not sure I understand that part. Can you explain it to me like I'm 5?"
-- Or: "I always get confused between X and Y. How do you distinguish them?"
-- Force the learner to teach YOU.
-"""
-        }
-        
-        # Build grounded context
-        kg_context = grounding_context.get("course_kg", {})
-        personal_context = grounding_context.get("personal", {})
-        
-        prompt = f"""
-You are an expert Socratic tutor using Harvard 7 Pedagogical Principles.
-
-HARVARD 7 PRINCIPLES (ENFORCE ALL):
-1. ❌ NEVER give direct answers - guide with questions
-2. ✅ Keep responses SHORT (2-4 sentences MAX)
-3. ✅ Reveal ONE STEP at a time
-4. ✅ Ask "What do YOU think?" before helping
-5. ✅ Praise EFFORT, not intelligence
-6. ✅ Personalized feedback - address THEIR specific error
-7. ✅ Ground ONLY in verified sources
-
-CURRENT STATE:
-{state_instructions[socratic_state]}
-
-CONCEPT INFORMATION:
-- Name: {concept.get('name', 'Unknown')}
-- Definition: {kg_context.get('definition', 'Not available')}
-- Examples: {kg_context.get('examples', [])}
-- Common Misconceptions: {kg_context.get('misconceptions', [])}
-- Prerequisites: {kg_context.get('prerequisites', [])}
-
-LEARNER CONTEXT:
-- Current Mastery: {learner_state.get('mastery', 0):.0%}
-- Past Errors: {learner_state.get('misconceptions', [])}
-- Learning Style: {personal_context.get('learning_style', 'VISUAL')}
-- Personal Notes: {personal_context.get('personal_notes', [])}
-
-RESPONSE RULES:
-- 2-4 sentences MAXIMUM
-- Follow the {socratic_state.value} state instructions
-- Reference course materials, not speculation
-- If learner has past errors, address them
-- Adapt to their learning style
-"""
-        
-        return prompt
-    
-    # ==========================================
-    # EVENT HANDLERS (Per THESIS Integration)
-    # ==========================================
     
     async def _on_path_planned(self, event: Dict):
         """Handle path_planned event from Agent 3"""

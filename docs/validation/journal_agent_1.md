@@ -1,37 +1,37 @@
 # Scientific Validation Journal: Agent 1 (Knowledge Extraction)
 
 ## 1. Audit Summary
-*   **Agent**: Knowledge Extraction
-*   **Source Code**: `backend/agents/knowledge_extraction_agent.py`
-*   **Scientific Basis**: `docs/SCIENTIFIC_BASIS.md`
-*   **Status**: 🟡 PARTIALLY VERIFIED
+*   **Agent**: Knowledge Extraction Agent
+*   **Target Research**: LightRAG (Guo et al., Oct 2024).
+*   **Status**: 🔵 **REFINEMENT (SOTA Alignment)**.
 
 ## 2. Claim Verification
 
-| Claim | Source Paper | Status | Evidence in Code |
+| Claim | Source Paper | Status | Evidence/Feedback |
 | :--- | :--- | :--- | :--- |
-| **Fuzzy Search** | Navarro (2001) | ✅ **VERIFIED** | `_get_candidate_concepts` uses `~0.8` Lucene operator (Line 765). Fallback to `CONTAINS` exists. |
-| **Ontology-Driven** | Gruber (1993) | ✅ **VERIFIED** | Prompt (Line 489) enforces strict JSON schema. `RelationshipType` Enum (Line 46) enforces edge types. |
-| **GraphRAG (Local)** | Edge et al. (2024) | ✅ **VERIFIED** | Extracts triples `(Subject, Predicate, Object)` and uses Entity Resolution to merge nodes. |
-| **GraphRAG (Global)** | Edge et al. (2024) | ❌ **MISSING** | The paper describes "Community Detection" (Leiden) and "Hierarchical Summarization". The current agent *extracts* the graph but does not *summarize* communities. |
+| **Dual-Graph Retrieval** | LightRAG (2024) | ⚠️ **MISCONCEPTION** | I initially thought "Keyword Graph" meant `Type=Keyword` nodes. Feedback clarifies it means **Edge Indexing**. High-level queries match *themes on edges*. |
+| **Pruning** | LightRAG (2024) | ⚠️ **CLARIFIED** | Not "removing nodes" but **Deduplication + LLM Profiling**. Summarize entities/edges into key-value pairs to reduce noise. |
+| **Incremental Update** | LightRAG (2024) | ⏳ **PENDING** | Need to implement $V \cup V'$ merge logic rather than full re-index. |
 
 ## 3. Analysis & Gaps
-### Gap 1: Missing "Global Search" Mechanism
-The Microsoft GraphRAG paper distinguishes between:
-1.  **Local Search**: Traversing neighbors (Current Implementation ✅).
-2.  **Global Search**: Aggregating community summaries to answer "What is the main theme?" (Missing ❌).
 
-**Impact**: Use cases requiring high-level course abstraction (e.g., "Generate a syllabus based on these 500 documents") will rely on simple LLM context window rather than GraphRAG's summarized hierarchy.
+### Gap 1: "Keyword Graph" Structure
+*   **Initial Thought**: Separate graph of Topic Nodes.
+*   **Correction**: **Edge-based Indexing**.
+    *   *Implementation*: Add `keywords: List[str]` and `summary: str` properties to every Neo4j RELATIONSHIP.
+    *   *Retrieval*: Vectorize usage query -> Match Edge Keywords -> Retrieve connected subgraph.
 
-## 5. NotebookLM Validation Feedback (2026-01-03)
-*   **Fuzzy Search vs. Community Detection**:
-    *   NotebookLM confirmed that Fuzzy Search is valid for *Entity Resolution* (cleaning data) but **does not replace Community Detection**.
-    *   To find "Topic Clusters" (e.g., "All SQL Optimization concepts"), we need structural clustering, not just name similarity.
-*   **Global Summarization Criticality**:
-    *   Confirmed as **CRITICAL** for high-level queries (e.g., "Summarize the course module").
-    *   Local RAG (current) is sufficient for prerequisite checking (A->B), but fails at "Sensemaking" (What is the big picture?).
-*   **Recommendation**:
-    *   Implement **Leiden Algorithm** recursively for Hierarchical Community Detection.
-    *   This is a "Future Refinement" (Phase 4), as the current TUTORING goal (Local Pathfinding) is functional without it.
+### Gap 2: LLM Profiling
+*   **Requirement**: Instead of raw text chunks, store "Profiled Summaries" on nodes/edges.
+*   **Action**: Update Extraction Prompt to output a *Summary* of the relationship, not just the predicate.
 
-**Final Status**: 🟡 **Gap Confirmed** (Missing Leiden/Global Layer). Codebase is valid for *Local* operations but incomplete for *Global* RAG claims.
+## 4. Refinement Log (2026-01-03)
+- [2026-01-03] **Implementation Implemented**:
+  - **Resolution**: Implemented "Edge-Attribute Thematic Indexing" (LightRAG, Guo et al. 2024).
+  - **Code**: `ConceptRelationship` now includes `keywords` and `summary`.
+  - **Logic**: Relationships carry thematic context, allowing "Edge Traversal" filtering instead of maintaining a complex separate Keyword Graph.
+  - **Validation Status**: Ready for experimental verification.
+*   **Action**: Updating `SCIENTIFIC_BASIS.md` to define LightRAG as "Edge-Attribute Thematic Indexing".
+*   **Action**: Modifying `knowledge_extraction_agent.py`:
+    *   Updated `KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT` to request `relationship_keywords`.
+    *   Updated Neo4j Schema to store `keywords` on edges.

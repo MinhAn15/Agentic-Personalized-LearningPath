@@ -1,129 +1,101 @@
-# Scientific Basis & Best Practices
+# Scientific Basis & Best Practices: SOTA Agentic AI (2024-2025)
 
-This document records the theoretical foundations, research papers, and industry best practices that drive the architecture of the Multi-Agent System.
+This document defines the **Target Architecture** based on the latest research in Large Language Models and Autonomous Agents.
+
+---
 
 ## Agent 1: Knowledge Extraction Agent
-**Role**: Automated Knowledge Graph Construction from unstructured text.
+**Role**: Automated Knowledge Graph Construction & Retrieval.
 
-### 1. GraphRAG (Local Search Only)
-*   **Source**: *Edge, D., et al. (2024). "From Local to Global: A Graph RAG Approach to Query-Focused Summarization." Microsoft Research.*
-*   **Application**: Agent 1 implements **Local Search Context** (Neighbors & Paths), enabling precise reasoning for specific concepts (e.g., "What are prerequisites for Join?").
-*   **Limitation**: Does NOT currently implement **Global Summarization** (Leiden Community Detection). High-level abstraction queries use standard RAG.
-*   **Mechanism**: `_extract_concepts_and_relations` parses text into structured triples `(Subject, Predicate, Object)`.
+### 1. LightRAG: Dual-Graph Retrieval
+*   **Source**: *Guo, Z., et al. (Oct 2024). "LightRAG: Simple and Fast Retrieval-Augmented Generation."*
+*   **Concept**: Combining **Graph-based Indexing** with **Vector Retrieval**.
+*   **Target Mechanism**:
+    *   **Entity Graph**: For precise structural queries (Command/Query Separation).
+    *   **Keyword Graph**: Implemented as **Edge-Attribute Thematic Indexing**. Relationships are tagged with keywords (e.g., "Impact", "Causality") to support high-level thematic traversal without creating a separate node graph.
+    *   *Upgrade from*: Standard GraphRAG (Edge 2024).
 
-### 2. Approximate String Matching (Fuzzy Search)
-*   **Source**: *Navarro, G. (2001). "A guided tour to approximate string matching." ACM Computing Surveys.*
-*   **Application**: To prevent duplication when handling noisy extracted concepts (e.g., "SQL Join" vs "SQL Joins"), Agent 1 uses **Lucene-based Fuzzy Search** (Levenshtein Edit Distance).
-*   **Implementation**: `db.index.fulltext.queryNodes` with `~` fuzziness operator.
+### 2. HippoRAG: Neurobiological Memory
+*   **Source**: *Gutiérrez, B., et al. (2024). "HippoRAG: Neurobiologically Inspired Long-Term Memory for LLMs."*
+*   **Concept**: Mimicking the Hippocampal indexing theory.
+*   **Target Mechanism**: Using a lightweight Knowledge Graph to "index" into heavier vector storage, enabling multi-hop reasoning without massive context windows.
 
-### 3. Ontology-Driven Extraction
-*   **Source**: *Gruber, T. R. (1993). "A translation approach to portable ontology specifications."*
-*   **Application**: Uses a strict Schema (`CourseConcept`, `REQUIRES`, `EXPLAINS`) rather than free-form tagging. This ensures the extracted knowledge is "computable" by the Path Planner.
-*   **Best Practice**: Hard-typed schema enforcement ensures consistency across different learning materials.
+---
 
 ## Agent 2: Learner Profiler
-**Role**: Managing Learner State, Preferences, and Long-Term History.
+**Role**: Tracking Knowledge State & Preferences.
 
-### 1. Hexagonal Architecture (Ports & Adapters)
-*   **Source**: *Cockburn, A. (2005). "Hexagonal Architecture."*
-*   **Application**: Separates the core *Learner Domain Logic* (Mastery updates, Style inference) from external adaptors (API, Database).
-*   **Mechanism**: The `LearnerProfile` is a pure entity isolated from the `Redis` persistence layer, allowing interchangeable storage backends.
+### 1. Deep Knowledge Tracing (DKT) & LLM Tracing
+*   **Source**: *Piech, C., et al. (2015). "Deep Knowledge Tracing"* & *Liu, et al. (2024) "Tracing Knowledge State with LLMs".*
+*   **Concept**: Knowledge is a latent state best estimated by combining Population Statistics (Prior) with Individual Semantic History (Likelihood), bridging DKT and LLM reasoning.
+*   **Target Mechanism**: **Hybrid DKT-LLM Anchoring**
+    *   **Prior (The Anchor)**: `CommunityAverage = 1.0 - (Difficulty * 0.15)`. This replaces the fixed bias parameter of DKT, providing a grounded starting point (dealing with Cold Start).
+    *   **Adjustment (The Intelligence)**: The LLM analyzes the student's *qualitative history* (errors, misconceptions) to adjust the Prior.
+    *   **Formula**: $P(Mastery) = LLM_{adjust}(Prior, History_{semantic})$. This avoids "Hallucinated Competence" by forcing the LLM to justify deviations from the norm.
 
-### 2. Bayesian Knowledge Tracing (BKT)
-
-*   **Source**: *Corbett, A. T., & Anderson, J. R. (1994). "Knowledge tracing: Modeling the acquisition of procedural knowledge."*
-*   **Application**: Models knowledge as a hidden state, updated via Bayesian inference with observations (correct/incorrect responses).
-*   **Mechanism**: Uses BKT parameters:
-    *   `P(Learn) = 0.1` (Probability of learning after one attempt)
-    *   `P(Guess) = 0.25` (Probability of correct answer without knowledge)
-    *   `P(Slip) = 0.10` (Probability of incorrect answer despite knowledge)
-*   **Formula**: `P(Know|Correct) = P(Correct|Know) * P(Know) / P(Correct)` (Bayes' theorem)
-
-### 3. Distributed Locking (Concurrency Control)
-*   **Source**: *Kleppmann, M. (2017). "Designing Data-Intensive Applications" (Redlock Algorithm).*
-*   **Application**: Prevents race conditions when multiple agents (e.g., Tutor and Evaluator) try to update the learner's state simultaneously.
-*   **Mechanism**: Uses `Redis.lock` with a TTL (Time-To-Live) to serialize write access to the `LearnerProfile`.
+---
 
 ## Agent 3: Path Planner
-**Role**: Dynamic Curriculum Sequencing and Adaptive Recommendation.
+**Role**: Dynamic Curriculum & Reasoning.
 
-### 1. Zone of Proximal Development (ZPD)
-*   **Source**: *Vygotsky, L. S. (1978). "Mind in society."*
-*   **Application**: The agent only recommends concepts where the learner has satisfied prerequisites (Grounding) but has not yet achieved mastery.
-*   **Mechanism**: `get_reachable_concepts()` filters the Knowledge Graph for nodes where `(Learner)-[:HAS_MASTERY]->(Prereq)` exists.
+### 1. Tree of Thoughts (ToT)
+*   **Source**: *Yao, S., et al. (2023). "Tree of Thoughts: Deliberate Problem Solving with Large Language Models."*
+*   **Concept**: Treating curriculum generation as a search problem over a tree of "Reasoning Steps" (Thoughts) rather than a greedy selection.
+*   **Mechanism (Implemented)**:
+    *   **Algorithm**: Beam Search ($b=3$, $d=3$).
+    *   **Thought Generator**: `_explore_learning_paths` generates top-3 candidate concepts.
+    *   **State Evaluator**: `_evaluate_path_viability` uses LLM to simulate future learner states (Projected Mastery) and scores paths from 0.0 to 1.0.
+    *   **Selection**: The system selects the path with the highest cumulative educational value, reducing "Myopia" (short-sighted teaching).
 
-### 2. Contextual Bandits (LinUCB)
-*   **Source**: *Li, L., et al. (2010). "A Contextual-Bandit Approach to Personalized News Article Recommendation."*
-*   **Application**: Balances **Exploration** (trying new content formats) vs **Exploitation** (using formats known to work for this learner).
-*   **Mechanism**:
-    *   **Context**: Learner embeddings (Knowledge State).
-    *   **Arm**: Activity Types (Video, Text, Quiz).
-    *   **Reward**: Evaluation Score + Time Efficiency.
-    *   **Update**: Woodbury Matrix Identity for efficient online updates.
-
-### 3. Spaced Repetition (Forgetting Curve)
+### 2. Spaced Repetition (Ebbinghaus)
 *   **Source**: *Ebbinghaus, H. (1885). "Memory: A Contribution to Experimental Psychology."*
-*   **Application**: Schedules reviews for previously mastered concepts to prevent decay.
-*   **Mechanism**: Before recommending new content, the agent checks `last_review_date` and inserts a "Review Node" if the decay threshold is met (Exponential Decay function).
+*   **Concept**: Forgetting Curve ($R = e^{-t/S}$).
+*   **Mechanism**:
+    *   Used in **Review Mode** to surface mastered concepts before they decay below threshold.
+
+---
 
 ## Agent 4: Tutor Agent
-**Role**: Interactive Instruction and Socratic Dialogue.
+**Role**: Interactive Pedagogy.
 
-### 1. Socratic Method
-*   **Source**: *Plato (approx 400 BC). "Meno" (Demonstration of questioning).*
-*   **Application**: Instead of lecturing, the agent asks guided questions to help the learner derive the answer.
-*   **Mechanism**: State machine transitions (`QUESTIONING` -> `HINTING` -> `EXPLAINING`) based on learner responses.
+### 1. Chain-of-Thought (CoT) & Self-Consistency
+*   **Source**: *Wei et al. (2022) "Chain-of-Thought Prompting"* & *Wang et al. (2022) "Self-Consistency Improves Chain of Thought Reasoning".*
+*   **Concept**: Making the model "think aloud" and validating logic via consensus.
+*   **Target Mechanism**:
+    *   **Hidden CoT**: Agent generates 3 internal reasoning traces.
+    *   **Self-Consistency**: It compares the traces. If they diverge, it falls back to Probing (low confidence). If they converge, it extracts the first missing step as a Scaffold.
+    *   **Leakage Guard**: Explicit filtering of "Final Answer" tokens to prevent premature revelation.
 
-### 2. Instructional Scaffolding
-*   **Source**: *Wood, D., Bruner, J. S., & Ross, G. (1976). "The role of tutoring in problem solving."*
-*   **Application**: Providing temporary support that remains until the learner can perform the task independently.
-*   **Mechanism**: Dynamic hint generation; hints become less explicit as the learner demonstrates competence.
-
-### 3. Three-Layer Knowledge Grounding
-*   **Source**: *Chandrasekaran, B., et al. (1999). "What are ontologies, and why do we need them?" (Knowledge Engineering).*
-*   **Application**: Minimizes hallucinations by grounding answers in specific contexts.
-*   **Mechanism**:
-    1.  **KG**: Structural Grounding (Concepts & Relations).
-    2.  **Vector DB**: Semantic Grounding (Text Chunks).
-    3.  **LLM**: Linguistic Grounding (Fluency & Syntax).
+---
 
 ## Agent 5: Evaluator Agent
-**Role**: Assessing Learner Mastery and Providing Feedback.
+**Role**: Assessment & Grading.
 
-### 1. Bloom's Taxonomy (Cognitive Domain)
-*   **Source**: *Bloom, B. S. (1956). "Taxonomy of educational objectives."*
-*   **Application**: Evaluating *Depth of Knowledge* rather than just keyword matching.
-*   **Mechanism**: The LLM Rubric explicitly asks: "Does the answer demonstrate Application/Analysis?" (Score 0.8+) vs "Just Recall?" (Score < 0.6).
+### 1. JudgeLM / LLM-as-a-Judge
+*   **Source**: *Zhu, L., et al. (2023). "JudgeLM: Fine-tuning Large Language Models as Scalable Judges."*
+*   **Concept**: Using a specialized (or prompted) LLM to grade open-ended responses with high correlation to human experts.
+*   **Target Mechanism**:
+    *   **G-Eval Steps**:
+        1.  Define Criteria (Reasoning, Accuracy, Clarity).
+        2.  Generate Scoring Trace.
+        3.  Output Weighted Score.
+    *   *Upgrade from*: Simple Rubric / IRT.
 
-### 2. Item Response Theory (IRT) - Concept Difficulty
-*   **Source**: *Lord, F. M. (1980). "Applications of item response theory to practical testing problems."*
-*   **Application**: Validating if a "difficult" question is actually hard or just poorly worded.
-*   **Mechanism**: Agent 6 (KAG) aggregates scores per concept; if high-proficiency learners fail a specific concept, its difficulty parameter is adjusted.
-
-### 3. F1 Score (Precision vs Recall in Grading)
-*   **Source**: *Van Rijsbergen, C. J. (1979). "Information Retrieval."*
-*   **Application**: Balancing "Key Concepts Mentioned" (Recall) vs "Correct Usage" (Precision).
-*   **Mechanism**: The scoring algorithm averages `key_concepts_hit` (Recall) and `lack_of_misconceptions` (Precision).
+---
 
 ## Agent 6: KAG Agent
-**Role**: Knowledge Aggregation and System Learning.
+**Role**: System Learning & Long-Term Memory.
 
-### 1. Zettelkasten Method (Smart Notes)
-*   **Source**: *Luhmann, N. (Social Systems Theory).*
-*   **Application**: Turning ephemeral quiz answers into permanent "Atomic Notes" for the learner.
-*   **Mechanism**: `AtomicNoteGenerator` extracts a strict structure: `Key Insight` + `Personal Example` + `Connection`.
+### 1. MemGPT: Tiered Memory Architecture
+*   **Source**: *Packer, C., et al. (2023). "MemGPT: Towards LLMs as Operating Systems."*
+*   **Concept**: Managing "Working Context" (Main/RAM) vs "Archival Storage" (Disk/VectorDB).
+*   **Target Mechanism**:
+    *   **Target Mechanism**:
+    *   **Working Memory (RAM)**: `WorkingMemory` class tracks active context.
+    *   **Memory Pressure Monitor**: Triggers `_auto_archive` (paging to disk) when > 70% capacity (OS Interrupt equivalent).
+    *   **Heartbeat Loop**: `execute` runs recursively if `request_heartbeat=True`, enabling multi-step autonomy (Search -> Read -> Refine).
 
-### 2. Dual-Loop Learning
-*   **Source**: *Argyris, C. (1976). "Single-loop and double-loop models in research on decision making."*
-*   **Application**: The system doesn't just teach (Single Loop); it analyzes *how well* it is teaching (Dual Loop).
-*   **Mechanism**: KAG aggregates "Struggle Rates" across learners to identify bad content (the system "learns to learn").
-
-### 3. Dual-Code Theory (Multimodal Learning)
-*   **Source**: *Paivio, A. (1971). "Imagery and verbal processes."*
-*   **Application**: Facilitates deep understanding by presenting information in two formats: Verbal (Text Notes) and Non-verbal (Visual Concept Maps).
-*   **Mechanism**: The agent generates `Mermaid.js` graphs alongside Zettelkasten notes to visualize relationships between concepts.
-
-### 4. Network Analysis (Graph Centrality)
-*   **Source**: *Page, L., et al. (1999). "The PageRank Citation Ranking: Bringing Order to the Web."*
-*   **Application**: Identifying "Keystone Concepts" that enable many other concepts.
-*   **Mechanism**: While currently simple, the architecture allows calculating `Degree Centrality` to recommend high-impact concepts first.
+### 2. Generative Agents
+*   **Source**: *Park, J., et al. (2023). "Generative Agents: Interactive Simulacra of Human Behavior."*
+*   **Concept**: Reflection trees where agents synthesis high-level insights from low-level events.
+*   **Target Mechanism**: Daily "Reflection" jobs where Agent 6 synthesizes global learning patterns from individual logs.

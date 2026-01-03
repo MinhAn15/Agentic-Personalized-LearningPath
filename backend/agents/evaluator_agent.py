@@ -78,11 +78,15 @@ class EvaluatorAgent(BaseAgent):
     # FIX Issue 5: Mastery update weight constant (Legacy, kept for compatibility)
     MASTERY_WEIGHT = EVAL_MASTERY_WEIGHT
     
-    # SCIENTIFIC FIX: Bayesian Knowledge Tracing (BKT) Parameters
-    # Source: Corbett & Anderson (1994)
-    P_LEARN = 0.1      # Probability of learning after one attempt
-    P_GUESS = 0.25     # Probability of guessing correctly without knowing
-    P_SLIP = 0.10      # Probability of making a mistake despite knowing
+    # SCIENTIFIC FIX: Hybrid DKT-LLM Parameters
+    # Source: Piech et al. (2015) & Liu et al. (2024)
+    P_LEARN = 0.1      # BKT: Probability of learning after one attempt
+    P_GUESS = 0.25     # BKT: Probability of guessing correctly without knowing
+    P_SLIP = 0.10      # BKT: Probability of making a mistake despite knowing
+    
+    # Hybrid Anchoring Constants
+    DKT_PRIOR_WEIGHT = 0.15   # Impact of concept difficulty on prior (Difficulty 1-5 * 0.15)
+    DKT_STEP_SIZE = 0.1       # Fallback step size if LLM formatting fails
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None, personal_kg=None):
@@ -295,12 +299,15 @@ class EvaluatorAgent(BaseAgent):
                 concept_difficulty=concept.get("difficulty", 2)
             )
             
-            # Step 7: Update learner progress
+            # Step 7: Update learner progress (Hybrid DKT-LLM)
             new_mastery = await self._update_learner_mastery(
                 learner_id=learner_id,
                 concept_id=concept_id,
                 score=score,
-                current_mastery=current_mastery
+                current_mastery=current_mastery,
+                concept_difficulty=concept.get("difficulty", 2),
+                error_type=error_type,
+                misconception=misconception
             )
             
             # Prepare result
@@ -384,100 +391,81 @@ class EvaluatorAgent(BaseAgent):
         learner_response: str,
         expected_answer: str,
         explanation: str,
-        target_bloom_level: int = 2  # Default: UNDERSTAND
+        target_bloom_level: int = 2
     ) -> Dict[str, Any]:
         """
-        Score learner response with Bloom's Taxonomy awareness.
+        Score learner response using JudgeLM / G-Eval Methodology (Zhu 2023).
         
-        Scientific Basis: Bloom (1956) - Taxonomy of Educational Objectives
-        
-        Bloom Levels:
-        1 = Remember (Recall facts)
-        2 = Understand (Explain concepts)
-        3 = Apply (Use in new situations)
-        4 = Analyze (Break down, compare)
-        5 = Evaluate (Justify, critique)
-        6 = Create (Design, construct)
-        
-        Scoring Rule: If target is "Apply" (3+), but answer is just "Recall", max score = 0.6.
+        Technique: Reference-as-Prior with CoT Grading.
+        - "Assistant 1" (Reference) is the anchor (Score 10/10).
+        - "Assistant 2" (Student) is compared against the Reference.
+        - CoT Trace: Forces analysis before scoring to reduce bias.
         """
         try:
-            bloom_level_names = {
-                1: "Remember (recall facts)",
-                2: "Understand (explain meaning)",
-                3: "Apply (use in new situations)",
-                4: "Analyze (compare, contrast, break down)",
-                5: "Evaluate (judge, justify)",
-                6: "Create (design, build)"
-            }
-            target_bloom_name = bloom_level_names.get(target_bloom_level, "Understand")
-            
             prompt = f"""
-            Score this learner response with BLOOM'S TAXONOMY awareness.
+            Task: Evaluate the Student's response against the Golden Reference.
             
-            TARGET COGNITIVE LEVEL: {target_bloom_level} - {target_bloom_name}
+            [Question Context]
+            Target Bloom Level: {target_bloom_level}
             
-            Learner response: {learner_response}
-            Expected answer: {expected_answer}
-            Correct explanation: {explanation}
+            [Assistant 1: GOLDEN REFERENCE]
+            Response: {expected_answer}
+            Reasoning: {explanation}
+            Score: 10.0 / 10.0 (Standard of Truth)
             
-            SCORING RULES:
-            - If Target Bloom = 1-2 (Remember/Understand): Score primarily on ACCURACY.
-            - If Target Bloom = 3+ (Apply/Analyze/Evaluate/Create): Score on REASONING quality.
-            - If learner provides CORRECT DEFINITION but fails to APPLY it: max score = 0.6.
-            - If learner demonstrates higher-level thinking: bonus up to 1.0.
+            [Assistant 2: STUDENT RESPONSE]
+            Response: {learner_response}
+            
+            [Evaluation Rubric]
+            1. Correctness (Weight 0.6): Factual alignment with Reference.
+            2. Completeness (Weight 0.2): Coverage of key points in Reference.
+            3. Clarity (Weight 0.2): Coherence and articulation.
+            
+            [Instruction]
+            Step 1: Compare Assistant 2 to Assistant 1. Identify gaps or misconceptions.
+            Step 2: Generate a "Justification Trace" explaining the quality.
+            Step 3: Assign a weighted score (0.0 to 10.0).
             
             Return ONLY valid JSON:
-            {{"score": 0.0-1.0, "bloom_achieved": 1-6, "reasoning": "..."}}
-            
-            Example: {{"score": 0.7, "bloom_achieved": 2, "reasoning": "Correct definition but no application shown"}}
+            {{
+                "justification_trace": "Analysis of gaps...",
+                "score": 0.0-10.0,
+                "dimensions": {{
+                    "correctness": 0-10,
+                    "completeness": 0-10,
+                    "clarity": 0-10
+                }}
+            }}
             """
             
             response = await self.llm.acomplete(prompt)
-            score_text = response.text
+            raw_text = response.text.strip()
             
-            # FIX Issue 6: Log if LLM response is empty
-            if not score_text or not score_text.strip():
-                self.logger.warning(f"Empty LLM response for Bloom scoring - using fallback")
+            # Log raw trace for debugging
+            self.logger.debug(f"JudgeLM Raw Trace: {raw_text[:100]}...")
             
-            # Parse JSON response
+            # Parse JSON
             try:
-                # Try to extract score from JSON
-                score_match = re.search(r'"score"\s*:\s*([\d.]+)', score_text or "")
-                bloom_match = re.search(r'"bloom_achieved"\s*:\s*(\d+)', score_text or "")
-                
-                if score_match:
-                    score = float(score_match.group(1))
-                    bloom_achieved = int(bloom_match.group(1)) if bloom_match else target_bloom_level
+                # Helper to find JSON block
+                json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group())
+                    raw_score = float(data.get("score", 0.0))
+                    normalized_score = min(1.0, max(0.0, raw_score / 10.0))
                     
-                    # Apply Bloom's penalty: If high target but low achievement, cap score
-                    if target_bloom_level >= 3 and bloom_achieved <= 2:
-                        original_score = score
-                        score = min(0.6, score)
-                        self.logger.debug(
-                            f"Bloom penalty applied: target={target_bloom_level}, achieved={bloom_achieved}, "
-                            f"score={original_score:.2f} -> {score:.2f}"
-                        )
+                    # Store trace for potential feedback augmentation
+                    # (Optional: return in result dict if needed)
+                    
+                    return {"success": True, "score": normalized_score}
                 else:
-                    # Fallback: word overlap
-                    learner_words = set(learner_response.lower().split())
-                    expected_words = set(expected_answer.lower().split())
-                    if expected_words:
-                        overlap = len(learner_words & expected_words) / len(expected_words)
-                        score = min(0.8, overlap)
-                    else:
-                        self.logger.warning(f"Cannot score - expected_answer is empty")
-                        score = 0.0
-                        
-                score = max(0.0, min(1.0, score))  # Clamp to 0-1
-            except Exception as parse_error:
-                self.logger.warning(f"Bloom score parsing error ({type(parse_error).__name__}): {parse_error}")
-                score = 0.0 if learner_response.lower() != expected_answer.lower() else 1.0
-            
-            return {"success": True, "score": score}
-        
+                    self.logger.warning("JudgeLM: No JSON found in response")
+                    return {"success": False, "score": 0.0}
+            except Exception as e:
+                self.logger.warning(f"JudgeLM Parse Error: {e} - Raw: {raw_text}")
+                return {"success": False, "score": 0.0}
+                
         except Exception as e:
-            self.logger.error(f"Bloom scoring error: {e}")
+            self.logger.error(f"JudgeLM Eval Error: {e}")
             return {"success": False, "score": 0.0}
     
     async def _classify_error(
@@ -689,46 +677,52 @@ class EvaluatorAgent(BaseAgent):
         learner_id: str,
         concept_id: str,
         score: float,
-        current_mastery: float
+        current_mastery: float,
+        concept_difficulty: int = 2,
+        error_type: Optional[ErrorType] = None,
+        misconception: Optional[str] = None
     ) -> float:
         """
-        Update learner's mastery level using Bayesian Knowledge Tracing (BKT).
+        Update learner's mastery level using Hybrid DKT-LLM Strategy.
         
-        Scientific Basis: Corbett & Anderson (1994)
-        
-        BKT models knowledge as a hidden state. The update uses:
-        - P(Know|Correct) = P(Correct|Know) * P(Know) / P(Correct)
-        - P(Know|Incorrect) = P(Incorrect|Know) * P(Know) / P(Incorrect)
-        - Then applies learning gain: P(Know) += (1 - P(Know)) * P_LEARN
+        Scientific Basis: Hybrid Anchoring (Piech 2015 + Liu 2024)
+        - Prior: Community Average derived from Difficulty (DKT Bias).
+        - Adjustment: LLM Qualitative analysis of history/misconceptions.
         """
         try:
-            prior_mastery = current_mastery
-            is_correct = score >= 0.8  # Threshold for "correct"
+            # 1. Calculate Community Prior (The Anchor)
+            # Difficulty 1 (Easy) -> Prior 0.85
+            # Difficulty 5 (Hard) -> Prior 0.25
+            community_prior = 1.0 - (concept_difficulty * self.DKT_PRIOR_WEIGHT)
+            community_prior = max(0.1, min(0.9, community_prior))
             
-            # Bayesian Update
-            if is_correct:
-                # P(Correct|Know) = 1 - P_SLIP; P(Correct|NotKnow) = P_GUESS
-                p_correct = (1 - self.P_SLIP) * prior_mastery + self.P_GUESS * (1 - prior_mastery)
-                if p_correct > 0:
-                    posterior = ((1 - self.P_SLIP) * prior_mastery) / p_correct
-                else:
-                    posterior = prior_mastery
-            else:
-                # P(Incorrect|Know) = P_SLIP; P(Incorrect|NotKnow) = 1 - P_GUESS
-                p_incorrect = self.P_SLIP * prior_mastery + (1 - self.P_GUESS) * (1 - prior_mastery)
-                if p_incorrect > 0:
-                    posterior = (self.P_SLIP * prior_mastery) / p_incorrect
-                else:
-                    posterior = prior_mastery
+            # 2. Determine "Student Context" for LLM
+            # (In a full DKT, this would be the LSTM hidden state. Here, it's the qualitative snapshot)
+            is_correct = score >= 0.8
+            outcome_str = "CORRECT" if is_correct else "INCORRECT"
+            error_val = error_type.value if error_type else "NONE"
             
-            # Apply learning gain (even after incorrect, some learning occurs)
-            new_mastery = posterior + (1 - posterior) * self.P_LEARN
-            new_mastery = max(0.0, min(1.0, new_mastery))  # Clamp to [0, 1]
+            context_summary = f"""
+            - Current Mastery: {current_mastery:.2f}
+            - Latest Attempt: {outcome_str} (Score: {score:.2f})
+            - Error Type: {error_val}
+            - Misconception Detected: {misconception if misconception else 'None'}
+            """
             
-            # Debug log for BKT update
+            # 3. Call LLM for Hybrid Adjustment
+            # The LLM decides how much to shift from the Prior/Current state
+            new_mastery = await self._calculate_hybrid_mastery(
+                community_prior, 
+                current_mastery, 
+                context_summary,
+                is_correct
+            )
+            
+            # Debug log for Hybrid update
             self.logger.debug(
-                f"BKT update: {learner_id}/{concept_id} | "
-                f"prior={prior_mastery:.2f}, correct={is_correct} -> posterior={new_mastery:.2f}"
+                f"Hybrid DKT update: {learner_id}/{concept_id} | "
+                f"Prior={community_prior:.2f}, Cur={current_mastery:.2f}, "
+                f"Outcome={outcome_str} -> New={new_mastery:.2f}"
             )
             
             # Save to database
@@ -740,8 +734,61 @@ class EvaluatorAgent(BaseAgent):
             return new_mastery
         
         except Exception as e:
-            self.logger.error(f"BKT mastery update error: {e}")
+            self.logger.error(f"Hybrid mastery update error: {e}")
             return current_mastery
+
+    async def _calculate_hybrid_mastery(
+        self, 
+        prior: float, 
+        current: float, 
+        context: str,
+        is_correct: bool
+    ) -> float:
+        """
+        Ask LLM to adjust mastery probability based on qualitative context.
+        """
+        try:
+            prompt = f"""
+            You are a Deep Knowledge Tracing Expert (DKT).
+            Task: Estimate the probability (0.0 to 1.0) that the student HAS MASTERED this concept.
+            
+            # Inputs
+            1. Community Expected Mastery (Prior): {prior:.2f} (Based on difficulty)
+            2. Student's Previous Mastery Belief: {current:.2f}
+            3. Latest Interaction Context:
+            {context}
+            
+            # Logic (Hybrid Anchoring)
+            - Start with the 'Previous Mastery' (if > 0) or 'Community Prior' (if Cold Start).
+            - ADJUST based on the Interaction:
+              - Correct + No Misconception: Increase significantly.
+              - Correct + Creating Misconception (Lucky Guess?): Increase slightly or Maintain.
+              - Incorrect + Conceptual Error: Decrease significantly (reveal gap).
+              - Incorrect + Slip (Typo): Decrease slightly.
+            
+            Return ONLY the new probability as a float (e.g., 0.75).
+            """
+            
+            response = await self.llm.acomplete(prompt)
+            raw_text = response.text.strip()
+            
+            # Extract float
+            import re
+            match = re.search(r"0\.\d+|1\.0|0|1", raw_text)
+            if match:
+                val = float(match.group())
+                return max(0.0, min(1.0, val))
+            else:
+                self.logger.warning(f"LLM did not return float for mastery: {raw_text}")
+                # Fallback: Simple update
+                if is_correct:
+                    return min(1.0, current + self.DKT_STEP_SIZE)
+                else:
+                    return max(0.0, current - self.DKT_STEP_SIZE)
+                    
+        except Exception as e:
+            self.logger.error(f"LLM calculation error: {e}")
+            return current
     
     # ==========================================
     # EVENT HANDLERS (Per THESIS Integration)

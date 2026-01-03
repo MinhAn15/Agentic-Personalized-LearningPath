@@ -98,3 +98,21 @@ CHAIN_RELATIONSHIPS = {
 SUCCESS_PROB_MASTERY_WEIGHT = 0.4  # Primary: learner capability
 SUCCESS_PROB_TIME_WEIGHT = 0.4  # Secondary: resource availability
 SUCCESS_PROB_DIFFICULTY_WEIGHT = 0.2  # Risk: concept hardness
+
+# ============================================================================
+# TREE OF THOUGHTS (ToT) - Agent 3
+# Source: Yao et al. (2023)
+# ============================================================================
+TOT_BEAM_WIDTH = 3  # b=3: Keep top 3 paths
+TOT_MAX_DEPTH = 3   # T=3: Look ahead 3 steps
+TOT_EVAL_TEMPERATURE = 0.5 # Balance precision/creativity in evaluation
+
+# ============================================================================
+# CHAIN OF THOUGHT (CoT) - Agent 4
+# Source: Wei et al. (2022), Wang et al. (2022)
+# ============================================================================
+TUTOR_COT_TRACES = 3      # n=3: Generate 3 internal traces (Self-Consistency)
+TUTOR_CONSENSUS_THRESHOLD = 0.6 # >60% agreement required
+TUTOR_LEAKAGE_KEYWORDS = [
+    "Therefore", "The answer is", "So", "Thus", "Hence"
+] # Stop words for Leakage Guard

@@ -203,7 +203,7 @@ class Neo4jBatchUpserter:
             for i in range(0, len(rels), self.batch_size):
                 batch = rels[i:i + self.batch_size]
                 
-                # Include weight and dependency (SPR spec)
+                # Include weight, dependency, keywords, summary (LightRAG)
                 batch_data = []
                 for rel in batch:
                     batch_data.append({
@@ -212,10 +212,12 @@ class Neo4jBatchUpserter:
                         "confidence": rel.get("confidence", self.DEFAULT_CONFIDENCE),
                         "weight": rel.get("weight", self.DEFAULT_WEIGHT),
                         "dependency": rel.get("dependency", self.DEFAULT_DEPENDENCY),
+                        "keywords": rel.get("keywords", []),
+                        "summary": rel.get("summary", ""),
                         "source_document_id": source_document_id
                     })
                 
-                # Dynamic relationship type in query with full SPR fields
+                # Dynamic relationship type in query with full SPR fields + LightRAG fields
                 query = f"""
                 UNWIND $batch AS row
                 MATCH (s:CourseConcept {{concept_id: row.source}})
@@ -225,12 +227,16 @@ class Neo4jBatchUpserter:
                     r.confidence = row.confidence,
                     r.weight = row.weight,
                     r.dependency = row.dependency,
+                    r.keywords = row.keywords,
+                    r.summary = row.summary,
                     r.source_document_ids = [row.source_document_id],
                     r.created_at = datetime()
                 ON MATCH SET
                     r.confidence = COALESCE(row.confidence, r.confidence),
                     r.weight = COALESCE(row.weight, r.weight),
                     r.dependency = COALESCE(row.dependency, r.dependency),
+                    r.keywords = CASE WHEN size(row.keywords) > 0 THEN row.keywords ELSE r.keywords END,
+                    r.summary = COALESCE(row.summary, r.summary),
                     r.source_document_ids = CASE 
                         WHEN row.source_document_id IN r.source_document_ids 
                         THEN r.source_document_ids 

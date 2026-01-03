@@ -83,6 +83,26 @@ class KAGAgent(BaseAgent):
     # FIX Issue 7 (Phase 4): Struggle mastery threshold for statistics
     STRUGGLE_MASTERY_THRESHOLD = KAG_STRUGGLE_MASTERY_THRESHOLD
     
+    # ==========================================
+    # MemGPT Architecture (Packer 2023)
+    # ==========================================
+    
+    class WorkingMemory:
+        """Simulates RAM for the Agent."""
+        def __init__(self, max_tokens=2048):
+            self.max_tokens = max_tokens
+            self.current_context = [] # List of messages/facts
+            
+        def add(self, content: str):
+            self.current_context.append({"content": content, "timestamp": datetime.now()})
+            
+        def get_context_size(self):
+            # Rough estimation (4 chars ~= 1 token)
+            return sum(len(c["content"]) for c in self.current_context) // 4
+            
+        def is_pressure_high(self):
+            return self.get_context_size() > (self.max_tokens * 0.7)
+
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None):
         super().__init__(agent_id, AgentType.KAG, state_manager, event_bus)
@@ -107,6 +127,10 @@ class KAGAgent(BaseAgent):
             neo4j_driver=state_manager.neo4j if state_manager else None
         )
         
+        # MemGPT Components
+        self.working_memory = self.WorkingMemory()
+        self.max_steps = 5  # Max heartbeat recursion
+        
         # FIX Issue 12: Warn if neo4j driver is missing
         if not state_manager or not hasattr(state_manager, 'neo4j') or not state_manager.neo4j:
             self.logger.warning("KGSynchronizer initialized without neo4j driver - KG operations may fail")
@@ -117,49 +141,71 @@ class KAGAgent(BaseAgent):
             self.logger.info("Subscribed to EVALUATION_COMPLETED")
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
-        """Main execution method."""
+        """
+        Main execution method with MemGPT Heartbeat Loop.
+        
+        Scientific Basis: "Interrupts" and "Function Chaining" (MemGPT).
+        """
         try:
             action = kwargs.get("action", "analyze")
-            
-            # FIX Issue 7: Log action for debugging
             self.logger.debug(f"Executing action: {action}")
             
-            if action == "generate_artifact":
-                return await self._generate_artifact(**kwargs)
-            elif action == "analyze":
-                return await self._analyze_system(**kwargs)
-            elif action == "sync_kg":
-                return await self._sync_dual_kg(**kwargs)
-            else:
-                return {
-                    "success": False,
-                    "error": f"Unknown action: {action}",
-                    "agent_id": self.agent_id
-                }
+            steps = 0
+            request_heartbeat = True
+            final_result = {}
+            
+            while request_heartbeat and steps < self.max_steps:
+                steps += 1
+                
+                # Monitor Memory Pressure (OS Interrupt)
+                if self.working_memory.is_pressure_high():
+                    self.logger.warning("⚠️ SYSTEM ALERT: MEMORY PRESSURE (>70%)")
+                    # In a full system, this would inject a system message prompt.
+                    # For now, we trigger an auto-save routine.
+                    await self._auto_archive()
+                
+                # Execute Logic
+                if action == "generate_artifact":
+                    result = await self._generate_artifact(**kwargs)
+                elif action == "analyze":
+                    result = await self._analyze_system(**kwargs)
+                elif action == "sync_kg":
+                    result = await self._sync_dual_kg(**kwargs)
+                else:
+                    return {"success": False, "error": f"Unknown action: {action}"}
+                
+                # Check for Heartbeat request (Simulated for specific actions)
+                # In real MemGPT, the LLM response contains function_call + request_heartbeat flag.
+                # Here, we simulate it for complex "analyze" tasks that might need multi-step.
+                # For now, generic tasks return heartbeat=False.
+                request_heartbeat = result.get("request_heartbeat", False)
+                final_result = result
+                
+                if request_heartbeat:
+                    self.logger.info(f"💓 Heartbeat triggered (Step {steps})")
+            
+            return final_result
         
         except Exception as e:
             self.logger.error(f"❌ KAG execution failed: {e}")
-            
-            # FIX Issue 5: Emit error event so other agents know execution failed
             try:
-                # FIX Issue 11: Use uppercase event name convention
                 await self.send_message(
                     receiver="all",
                     message_type="KAG_EXECUTION_FAILED",
                     payload={
                         "action": kwargs.get("action", "analyze"),
-                        "learner_id": kwargs.get("learner_id"),
                         "error": str(e)
                     }
                 )
             except Exception:
-                pass  # Best effort
+                pass
+            return {"success": False, "error": str(e)}
             
-            return {
-                "success": False,
-                "error": str(e),
-                "agent_id": self.agent_id
-            }
+    async def _auto_archive(self):
+        """Simulate paging out to disk."""
+        self.logger.info("💾 Auto-Archiving Working Memory to Archival Storage...")
+        self.working_memory.current_context = [] # Flush
+
     
     # ==========================================
     # 1. ZETTELKASTEN ARTIFACT GENERATION

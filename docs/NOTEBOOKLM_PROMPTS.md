@@ -1,103 +1,126 @@
-# NotebookLM Prompts: Scientific Validation
+# NotebookLM Prompts: SOTA Validation (2024-2025)
 
-Use these prompts in **Google NotebookLM** (or similar tools) after uploading the relevant Research Paper (PDF). These prompts are designed to bridge the gap between "Theoretical Theory" and "Actual Implementation".
+Use these prompts to validte the transition from Classical Algorithms to **SOTA Agentic AI**.
 
----
-
-## 🔍 How to Use
-1.  **Upload the Paper**: Get the PDF linked in `docs/SCIENTIFIC_BASIS.md`.
-2.  **Paste the Context**: Copy the "Context" block below (which summarizes our code implementation).
-3.  **Run the Prompt**: Ask NotebookLM to critique and validate the alignment.
+> [!TIP]
+> Upload the target SOTA paper (e.g., Tree of Thoughts PDF) to NotebookLM before running these prompts.
 
 ---
 
-## Agent 1: Knowledge Extraction vs GraphRAG
-**Target Paper**: *Edge, D., et al. (2024). "From Local to Global: A Graph RAG Approach..."*
+## Agent 1: LightRAG / HippoRAG
+**Target Paper**: *Guo et al. (2024) "LightRAG" OR Gutiérrez et al. (2024) "HippoRAG"*
 
-**Context (Paste this into Chat)**:
-> "I am building a Knowledge Extraction Agent. Instead of simple chunking, I implemented 'Ontology-Driven extraction'.
-> 1. I use a fixed schema (Concepts, Prerequisites) extracted via LLM.
-> 2. I identify entities using Fuzzy Search (Levenshtein distance ~0.8).
-> 3. I map relationships directionally (e.g., 'Concept A requires Concept B').
-> 4. **Limitation**: This is a 'Local RAG' implementation (finding path A->B). It explicitly LACKS the 'Global Summarization' (Leiden Community Detection) layer described in the GraphRAG paper."
+**Context**:
+> "I am upgrading my Knowledge Extraction Agent.
+> - **Current**: Simple GraphRAG (Triples + Fuzzy Search).
+> - **Goal**: Implement 'LightRAG' Thematic Indexing.
+> - **Architecture Decision**: Instead of maintaining a separate 'Keyword Graph' (which doubles schema complexity), I am implementing **'Edge-Attribute Thematic Indexing'**. 
+> - **Mechanism**: Every relationship edge (e.g., A -> B) now carries `keywords` and a `summary` property, allowing the LLM to filter paths by theme (e.g., 'Traverse only edges related to *database optimization*')."
 
 **Prompt**:
-> "Based on the GraphRAG paper, critique my implementation.
-> 1. Does my use of 'Fuzzy Search' for entity resolution align with the paper's approach to community detection?
-> 2. The paper discusses 'Hierarchical Summarization'. My current approach only extracting atomic triples. What specific mechanism from the paper should I add to support 'Global Queries' better?
-> 3. Is my strict Schema (Ontology) a constraint or an advantage compared to the paper's unstructured graph generation?"
+> "Evaluate this 'Edge-Attribute' implementation of LightRAG against the original paper.
+> 1. Does storing keywords/summaries on *relationships* (edges) achieve the same 'global retrieval' capability as the paper's separate 'Keyword Nodes', or does it limit discovery?
+> 2. The paper discusses 'Graph Pruning' to reduce noise. Will filtering edges by their new `keywords` property be an effective pruning strategy for retrieval?
+> 3. Are there risks of 'Edge Explosion' (too much text on edges) impacting graph traversal performance?"
 
 ---
 
-## Agent 2: Profiler vs Bayesian Knowledge Tracing
-**Target Paper**: *Corbett & Anderson (1994). "Knowledge Tracing..."*
+## Agent 2: Deep Knowledge Tracing (DKT)
+**Target Paper**: *Piech et al. (2015) "Deep Knowledge Tracing" or Liu et al. (2024) "LLM Tracing"*
 
-**Context (Paste this into Chat)**:
-> "I implemented Bayesian Knowledge Tracing (BKT) for my Learner Profiler.
-> - **BKT Parameters** (class-level constants):
->   - `P_LEARN = 0.1` (Probability of learning after one attempt)
->   - `P_GUESS = 0.25` (Probability of guessing correctly without knowledge)
->   - `P_SLIP = 0.10` (Probability of making a mistake despite knowing)
-> - **Update Rule** (Bayes' theorem):
->   - If Correct: `P(Know|Correct) = ((1 - P_SLIP) * P(Know)) / P(Correct)`
->   - If Incorrect: `P(Know|Incorrect) = (P_SLIP * P(Know)) / P(Incorrect)`
->   - Then: `P(Know) += (1 - P(Know)) * P_LEARN`"
+**Context**:
+> "I am upgrading my Learner Profiler.
+> - **Current**: Hybrid DKT-LLM Anchoring.
+> - **Mechanism**:
+>     1. **Community Prior**: I calculate a baseline pass rate based on difficulty (e.g., Hard=25%).
+>     2. **LLM Adjustment**: I provide the LLM with this Prior AND the student's recent semantic history (errors, misconceptions).
+>     3. **Prompt**: 'The baseline is [Prior]. Given the student's history [X], adjust this probability up or down.'"
 
 **Prompt**:
-> "Analyze this BKT implementation against the formal Hidden Markov Model.
-> 1. Are my parameter values (`P_LEARN=0.1`, `P_GUESS=0.25`, `P_SLIP=0.10`) reasonable defaults based on the research literature?
-> 2. I apply learning gain AFTER the Bayesian update. The paper shows `P(L_n) = P(L_{n-1}) + (1 - P(L_{n-1})) * P(T)`. Is my formula mathematically equivalent?
-> 3. What experiments or calibration methods from the paper would help me tune these parameters for different subject domains (e.g., math vs programming)?"
+> "Evaluate this 'Hybrid Anchoring' approach against the principles of Deep Knowledge Tracing.
+> 1. Does providing a 'Community Prior' effectively solve the 'Cold Start' problem mentioned in the DKT paper (where LSTM hidden states are initialized)?
+> 2. By asking the LLM to 'adjust' a baseline rather than predict from scratch, do I sufficiently mitigate the 'Calibration Error' (Hallucination) risk?
+> 3. DKT assumes 'slip' and 'guess' are latent. How does my system account for 'Lucky Guesses' if the LLM sees a correct answer?"
 
 ---
 
-## Agent 3: Path Planner vs Contextual Bandits (LinUCB)
-**Target Paper**: *Li, L., et al. (2010). "A Contextual-Bandit Approach..."*
+## Agent 3: Path Planner (Tree of Thoughts)
+**Target Paper**: *Yao et al. (2023) "Tree of Thoughts: Deliberate Problem Solving with Large Language Models"*
 
-**Context (Paste this into Chat)**:
-> "I implemented the LinUCB Disjoint algorithm for recommending learning materials.
-> - Context ($x_{t,a}$): Learner Embedding Vector + Graph Embeddings.
-> - Update: I use the Woodbury Matrix Identity to update the Inverse Covariance Matrix ($A^{-1}$) incrementally ($O(d^2)$) instead of re-inverting ($O(d^3)$).
-> - Selection: I chose the arm with the highest Upper Confidence Bound."
+**Context**:
+> "I have upgraded my Path Planner to use **Tree of Thoughts (ToT)**.
+> - **Algorithm**: Beam Search (Width $b=3$, Depth $d=3$).
+> - **Search Space**: The Curriculum Knowledge Graph.
+> - **State Evaluator**: 
+>     1. **Input**: A candidate path (e.g., A -> B -> C).
+>     2. **Prompt**: 'Evaluate feasibility on 0.0-1.0 scale. Consider Prerequisite Logic and Cognitive Load.'
+>     3. **Output**: Float score used for pruning."
 
-**Prompt**:
-> "Review my LinUCB implementation details.
-> 1. Does my use of Woodbury Matrix Identity preserve the mathematical exactness required by the paper's 'Ridge Regression' core?
-> 2. The paper warns about 'non-stationary' environments (user preferences change). My implementation currently assumes static feature dimensions. Based on the experiments in the paper, how significant is the 'Cold Start' problem if I don't use hybrid features?
-> 3. Evaluate the theoretical justification for using 'Graph Embeddings' as the context vector. Does the paper support using high-dimensional dense vectors?"
-
----
-
-## Agent 5: Evaluator vs Item Response Theory (IRT)
-**Target Paper**: *Lord, F. M. (1980). "Applications of Item Response Theory..."*
-
-**Context (Paste this into Chat)**:
-> "I am using a simplified IRT model to grade learners.
-> - I calculate 'Concept Difficulty' dynamically.
-> - If high-mastery learners (Top 20%) consistently fail a question, I flag the *Question* as 'High Difficulty' or 'Ambiguous'.
-> - I weight the final score based on this difficulty: `Score = RawScore * (1 + DifficultyBonus)`."
-
-**Prompt**:
-> "Critique this 'Dynamic Difficulty' approach against standard IRT 2-Parameter Logistic (2PL) models.
-> 1. IRT uses a Logit function $P(\theta) = \frac{1}{1 + e^{-a(\theta - b)}}$. My linear multiplier is much simpler. What specific 'Item Characteristic Curve' property am I losing?
-> 2. Is determining difficulty solely based on 'High-Mastery Failure' a recognized heuristic in the literature, or is it prone to bias?
-> 3. How would you map my 'DifficultyBonus' to the paper's 'Discrimination Parameter' ($a$)?"
+**Validation Prompt**:
+> "Evaluate this specific ToT implementation:
+> 1. **Beam Width**: Is $b=3$ sufficient for a curriculum graph, or is the risk of missing a global optimum high?
+> 2. **Evaluation Prompt**: How can I ensure the LLM's '0.8' core is consistent across different paths? Should I provide 'Few-Shot' examples of good vs bad paths?
+> 3. **Pruning**: Should I add a 'Diversity' metric to ensure the 3 beams aren't just minor variations of the same path?"
 
 ---
 
-## Agent 6: KAG vs Zettelkasten & Dual-Loop
-**Target Paper**: *Argyris (1976) "Double-Loop Learning" + Luhmann's Zettelkasten*
+## Agent 4: Chain-of-Thought (CoT)
+**Target Paper**: *Wei et al. (2022) "Chain-of-Thought Prompting"*
 
-**Context (Paste this into Chat)**:
-> "My Agent 6 performs 'System Learning' (Dual-Loop) and implements 'Dual-Code Theory' (Paivio).
-> 1. Single Loop: Tutor corrects the student.
-> 2. Dual Loop: Agent 6 aggregates failure rates across ALL students to identify system bottlenecks.
-> 3. Artifacts: It generates 'Atomic Notes' (Zettelkasten) that contain BOTH:
->    - **Verbal**: Textual insights and personal examples.
->    - **Visual**: A `Mermaid.js` Concept Map (`graph TD`) visualizing relationships between the new concept and prior knowledge."
+**Context**:
+> "I am upgrading my Tutor Agent.
+> - **Current**: Socratic State Machine (Fixed transitions).
+> - **Goal**: 'Dynamic Chain-of-Thought'.
+> - **Mechanism**:
+>     1. When a student errs, the Agent generates a hidden Connect-the-Dots trace (CoT).
+>     2. It reveals this trace one step at a time as 'Scaffolding'."
 
 **Prompt**:
-> "Analyze this Dual-Loop architecture.
-> 1. Does aggregating 'Struggle Rate' constitute a valid 'Governing Variable' modification as defined by Argyris? Or is it just 'Single Loop' at a larger scale?
-> 2. Luhmann's Zettelkasten emphasizes 'serendipitous connection'. My agent uses strict semantic similarity (Vector Search) to link notes. Does the literature suggest this effectively mimics human 'associative thought', or is it too deterministic?
-> 3. Suggest a 'Double-Loop' feedback mechanism from the findings of the paper that I am missing."
+> "Review this CoT Scaffolding strategy.
+> 1. Does the paper suggest that 'Hidden CoT' improves the alignment of the final output compared to standard prompting?
+> 2. How can I ensure the CoT doesn't 'leak' the answer too early?
+> 3. Suggest a 'Metacognitive' check I can add to the generation step."
+
+---
+
+## Agent 5: JudgeLM / G-Eval
+**Target Paper**: *Zhu et al. (2023) "JudgeLM"*
+
+**Context**:
+> "I have upgraded my Evaluator Agent to **JudgeLM (Reference-Based)**.
+> - **Technique**: 'Reference-as-Prior' (Zhu 2023).
+> - **Mechanism**:
+>     1. **Prompt Structure**: Pairwise Comparison.
+>        - 'Assistant 1': Golden Answer (Score 10/10).
+>        - 'Assistant 2': Learner Response.
+>     2. **CoT Requirement**: The LLM must output a `justification_trace` JSON field analyzing gaps *before* outputting the `score`.
+>     3. **Scoring**: Weighted average of Correctness (0.6), Completeness (0.2), and Clarity (0.2)."
+
+**Prompt**:
+> "Critique this G-Eval implementation.
+> 1. The paper discusses 'Position Bias' (LLM preferring the first option). How should I structure the prompt to mitigate this when grading single answers?
+> 2. Is generating the 'Justification Trace' essential for score reliability, or just for transparency?
+> 3. Does JudgeLM perform better with 'Reference-Based' (Golden Answer provided) or 'Reference-Free' evaluation?"
+
+---
+
+## Agent 6: MemGPT
+**Target Paper**: *Packer et al. (2023) "MemGPT"*
+
+**Context**:
+> "I am upgrading my KAG Agent (System Memory).
+> - **Current**: Zettelkasten Notes in VectorDB.
+> - **Goal**: 'Tiered Memory System' (OS-style).
+> - **Architecture**:
+>     1. **Main Context (RAM)**: Current Active Goal + Immediate Errors.
+>     2. **External Context (Disk)**: Knowledge Graph + Vector Archive.
+> - **Mechanism (Implemented)**:
+>     1. **WorkingMemory**: Class tracking current token usage vs max context.
+>     2. **Interrupt**: `is_pressure_high()` checks if context > 70%. If true, injects "SYSTEM ALERT" and triggers `_auto_archive`.
+>     3. **Heartbeat**: The `execute` method runs a `while` loop, allowing the agent to chain multiple actions (Search -> Read) before yielding to user."
+
+**Prompt**:
+> "Analyze this MemGPT-inspired architecture.
+> 1. The paper defines 'Virtual Context Management'. Is my 'Paging via Function Calling' equivalent to their OS-level interrupt mechanism?
+> 2. How does MemGPT decide *when* to yield context (write to disk) to prevent context overflow? I need a correct heuristic.
+> 3. What is the role of 'System Events' (Heartbeats) in maintaining agent persistence?"
