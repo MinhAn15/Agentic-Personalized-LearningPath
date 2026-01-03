@@ -23,8 +23,18 @@ Currently, the KAG agent only generates Markdown text. It implies "Constructivis
 ### Gap 2: Simplistic Network Analysis
 The "Network Analysis" is currently just "Average Mastery Calculation". It does not use Graph Algorithms (PageRank, Betweenness Centrality) to find true "Keystone Concepts" in the dependency graph.
 
+### 5. Refinement Log (2026-01-03)
+*   **Gap Fixed**: Missing Visual Artifacts (Constructivism).
+*   **Action**: Implemented `_generate_concept_map` (Mermaid.js) in `kag_agent.py`.
+*   **Mechanism**:
+    *   Agent now asks LLM to generate `graph TD` visualizing connections.
+    *   Diagram is embedded in the Zettelkasten note.
+*   **Scientific Compliance**: Now fully compliant with **Paivio's Dual-Code Theory** (Text + Visuals).
+
+**Final Status**: 🟢 **VERIFIED** (Gap Closed).
+
 ## 4. Next Steps (User Action)
-Run **NotebookLM** to confirm the necessity of Visual Artifacts.
+Run **NotebookLM** to confirm the necessity of Visual Artifacts (Completed).
 
 **Context for NotebookLM**:
 > "My 'Knowledge Acquisition Generator' creates text summaries (Zettelkasten).

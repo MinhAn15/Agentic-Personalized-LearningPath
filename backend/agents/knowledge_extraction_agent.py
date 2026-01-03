@@ -768,6 +768,9 @@ Return JSON object mapping concept_id to metadata:
             # Try Fulltext Search
             result = await neo4j.run_query(
                 """
+                // Scientific Basis: Approximate String Matching
+                // Source: Navarro, G. (2001). "A guided tour to approximate string matching."
+                // Application: Handling phonetic/typo variations in concept names.
                 CALL db.index.fulltext.queryNodes("conceptNameIndex", $query) 
                 YIELD node, score
                 RETURN DISTINCT node.concept_id as concept_id,
@@ -788,6 +791,8 @@ Return JSON object mapping concept_id to metadata:
         # Fallback to exact/contains match if Index missing or query fails
         result = await neo4j.run_query(
             """
+            // NOTE: Global Summarization (Leiden Algorithm) is NOT implemented (Local Search Only)
+            // See: Edge, D., et al. (2024) - GraphRAG
             UNWIND $names AS lookup_name
             MATCH (c:CourseConcept)
             WHERE toLower(c.name) = toLower(lookup_name) 

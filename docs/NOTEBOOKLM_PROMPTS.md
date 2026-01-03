@@ -15,10 +15,11 @@ Use these prompts in **Google NotebookLM** (or similar tools) after uploading th
 **Target Paper**: *Edge, D., et al. (2024). "From Local to Global: A Graph RAG Approach..."*
 
 **Context (Paste this into Chat)**:
-> "I am building a Knowledge Extraction Agent. Instead of simple chunking, I implemented an 'Ontology-Driven extraction'.
+> "I am building a Knowledge Extraction Agent. Instead of simple chunking, I implemented 'Ontology-Driven extraction'.
 > 1. I use a fixed schema (Concepts, Prerequisites) extracted via LLM.
-> 2. I identify entities using Fuzzy Search (Levenshtein distance ~0.8) to merge 'SQL Join' and 'SQL Joins' into one node.
-> 3. I map relationships directionally (e.g., 'Concept A requires Concept B')."
+> 2. I identify entities using Fuzzy Search (Levenshtein distance ~0.8).
+> 3. I map relationships directionally (e.g., 'Concept A requires Concept B').
+> 4. **Limitation**: This is a 'Local RAG' implementation (finding path A->B). It explicitly LACKS the 'Global Summarization' (Leiden Community Detection) layer described in the GraphRAG paper."
 
 **Prompt**:
 > "Based on the GraphRAG paper, critique my implementation.
@@ -88,10 +89,12 @@ Use these prompts in **Google NotebookLM** (or similar tools) after uploading th
 **Target Paper**: *Argyris (1976) "Double-Loop Learning" + Luhmann's Zettelkasten*
 
 **Context (Paste this into Chat)**:
-> "My Agent 6 performs 'System Learning' (Dual-Loop).
+> "My Agent 6 performs 'System Learning' (Dual-Loop) and implements 'Dual-Code Theory' (Paivio).
 > 1. Single Loop: Tutor corrects the student.
-> 2. Dual Loop: Agent 6 aggregates failure rates across ALL students. If a concept has >60% struggle rate, it recommends changing the COURSE (ontology) itself.
-> 3. It generates 'Atomic Notes' (Zettelkasten) that link `Personal Experience` to `Theory`."
+> 2. Dual Loop: Agent 6 aggregates failure rates across ALL students to identify system bottlenecks.
+> 3. Artifacts: It generates 'Atomic Notes' (Zettelkasten) that contain BOTH:
+>    - **Verbal**: Textual insights and personal examples.
+>    - **Visual**: A `Mermaid.js` Concept Map (`graph TD`) visualizing relationships between the new concept and prior knowledge."
 
 **Prompt**:
 > "Analyze this Dual-Loop architecture.

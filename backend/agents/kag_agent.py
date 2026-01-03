@@ -324,7 +324,14 @@ Return ONLY valid JSON:
                 "connections": []
             }
         
-        # Build atomic note
+        # SCIENTIFIC FIX: Dual-Code Theory (Paivio, 1971) requires Visuals + Maps
+        try:
+            concept_map = await self._generate_concept_map(concept_id, note_data)
+        except Exception as e:
+            self.logger.warning(f"Failed to generate concept map: {e}")
+            concept_map = ""
+
+        # Build atomic note with Concept Map
         content = f"""
 # {concept_id}
 
@@ -336,6 +343,11 @@ Return ONLY valid JSON:
 
 ## Common Mistake
 {note_data.get('common_mistake', '')}
+
+## Concept Map (Mermaid)
+```mermaid
+{concept_map}
+```
 """.strip()
         
         return {
@@ -345,6 +357,7 @@ Return ONLY valid JSON:
             "personal_example": note_data.get("personal_example", ""),
             "common_mistake": note_data.get("common_mistake", ""),
             "connections": note_data.get("connections", []),
+            "concept_map": concept_map,
             "concept_id": concept_id,
             "source_context": source_context
         }
@@ -381,6 +394,43 @@ Return ONLY valid JSON:
         )
         
         return result if result else []
+    
+    async def _generate_concept_map(self, concept_id: str, note_data: Dict) -> str:
+        """
+        Generate a strictly valid Mermaid.js diagram for Constructivist Learning.
+        Scientific Basis: Dual-Code Theory (Paivio) & Concept Mapping (Novak).
+        """
+        prompt = f"""
+        Create a simple Mermaid.js diagram (graph TD) for the concept "{concept_id}".
+        
+        Key Insight to visualize: "{note_data.get('key_insight', '')}"
+        Connections: {', '.join(note_data.get('connections', []))}
+        
+        RULES:
+        1. Return ONLY the mermaid code inside a ```mermaid block.
+        2. Use `graph TD`.
+        3. Max 5 nodes.
+        4. Node names must be short (max 3 words).
+        5. No subgraphs or complex styling.
+        
+        Example:
+        graph TD
+          A[Concept] --> B[Sub-concept]
+          A --> C[Related Idea]
+        """
+        
+        response = await self.llm.acomplete(prompt)
+        text = response.text
+        
+        # Extract content inside ```mermaid ... ``` or just return text if raw
+        import re
+        match = re.search(r"```mermaid\n(.*?)\n```", text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        elif "graph TD" in text:
+            return text.strip()
+        else:
+            return f"graph TD\n  A[{concept_id}] --> B[Insight]"
     
     async def _generate_tags(self, atomic_note: Dict) -> List[str]:
         """Generate semantic tags for the note"""

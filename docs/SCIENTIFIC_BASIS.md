@@ -5,9 +5,10 @@ This document records the theoretical foundations, research papers, and industry
 ## Agent 1: Knowledge Extraction Agent
 **Role**: Automated Knowledge Graph Construction from unstructured text.
 
-### 1. GraphRAG (Structure-Aware Retrieval)
+### 1. GraphRAG (Local Search Only)
 *   **Source**: *Edge, D., et al. (2024). "From Local to Global: A Graph RAG Approach to Query-Focused Summarization." Microsoft Research.*
-*   **Application**: Agent 1 doesn't just chunk text; it extracts **Concepts** (Nodes) and **Relationships** (Edges). This allows downstream agents (Tutor) to traverse reasoning paths rather than just retrieving keyword matches.
+*   **Application**: Agent 1 implements **Local Search Context** (Neighbors & Paths), enabling precise reasoning for specific concepts (e.g., "What are prerequisites for Join?").
+*   **Limitation**: Does NOT currently implement **Global Summarization** (Leiden Community Detection). High-level abstraction queries use standard RAG.
 *   **Mechanism**: `_extract_concepts_and_relations` parses text into structured triples `(Subject, Predicate, Object)`.
 
 ### 2. Approximate String Matching (Fuzzy Search)
@@ -117,7 +118,12 @@ This document records the theoretical foundations, research papers, and industry
 *   **Application**: The system doesn't just teach (Single Loop); it analyzes *how well* it is teaching (Dual Loop).
 *   **Mechanism**: KAG aggregates "Struggle Rates" across learners to identify bad content (the system "learns to learn").
 
-### 3. Network Analysis (Graph Centrality)
+### 3. Dual-Code Theory (Multimodal Learning)
+*   **Source**: *Paivio, A. (1971). "Imagery and verbal processes."*
+*   **Application**: Facilitates deep understanding by presenting information in two formats: Verbal (Text Notes) and Non-verbal (Visual Concept Maps).
+*   **Mechanism**: The agent generates `Mermaid.js` graphs alongside Zettelkasten notes to visualize relationships between concepts.
+
+### 4. Network Analysis (Graph Centrality)
 *   **Source**: *Page, L., et al. (1999). "The PageRank Citation Ranking: Bringing Order to the Web."*
 *   **Application**: Identifying "Keystone Concepts" that enable many other concepts.
 *   **Mechanism**: While currently simple, the architecture allows calculating `Degree Centrality` to recommend high-impact concepts first.

@@ -23,12 +23,15 @@ The Microsoft GraphRAG paper distinguishes between:
 
 **Impact**: Use cases requiring high-level course abstraction (e.g., "Generate a syllabus based on these 500 documents") will rely on simple LLM context window rather than GraphRAG's summarized hierarchy.
 
-## 4. Next Steps (User Action)
-Run **NotebookLM** with the following prompt to determine if we *need* to implement Leiden Community Detection now or if our "Concept-Centric" approach is sufficient for a Tutoring System (vs a Summarization System).
+## 5. NotebookLM Validation Feedback (2026-01-03)
+*   **Fuzzy Search vs. Community Detection**:
+    *   NotebookLM confirmed that Fuzzy Search is valid for *Entity Resolution* (cleaning data) but **does not replace Community Detection**.
+    *   To find "Topic Clusters" (e.g., "All SQL Optimization concepts"), we need structural clustering, not just name similarity.
+*   **Global Summarization Criticality**:
+    *   Confirmed as **CRITICAL** for high-level queries (e.g., "Summarize the course module").
+    *   Local RAG (current) is sufficient for prerequisite checking (A->B), but fails at "Sensemaking" (What is the big picture?).
+*   **Recommendation**:
+    *   Implement **Leiden Algorithm** recursively for Hierarchical Community Detection.
+    *   This is a "Future Refinement" (Phase 4), as the current TUTORING goal (Local Pathfinding) is functional without it.
 
-**Context for NotebookLM**:
-> "My Knowledge Extraction Agent successfully builds a graph with Entity Resolution (Fuzzy Search ~0.8). However, I have not implemented the 'Hierarchical Community Summarization' (Leiden algorithm) described in the GraphRAG paper. 
-> My system's goal is personalized *Tutoring* (finding a specific path for a student), not general *Summarization* of the dataset."
-
-**Question for NotebookLM**:
-> "Given my goal of 'Personalized Pathfinding' (finding A->B->C), is the missing 'Global Summarization' layer critical? Or is a standard Local Graph Traversal sufficient for checking prerequisites (Grounding)?"
+**Final Status**: 🟡 **Gap Confirmed** (Missing Leiden/Global Layer). Codebase is valid for *Local* operations but incomplete for *Global* RAG claims.
