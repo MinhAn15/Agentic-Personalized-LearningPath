@@ -307,7 +307,10 @@ class EvaluatorAgent(BaseAgent):
                 current_mastery=current_mastery,
                 concept_difficulty=concept.get("difficulty", 2),
                 error_type=error_type,
-                misconception=misconception
+                misconception=misconception,
+                learner_response=learner_response,
+                expected_answer=expected_answer,
+                concept_name=concept.get("name", concept_id)
             )
             
             # Prepare result
@@ -680,52 +683,62 @@ class EvaluatorAgent(BaseAgent):
         current_mastery: float,
         concept_difficulty: int = 2,
         error_type: Optional[ErrorType] = None,
-        misconception: Optional[str] = None
+        misconception: Optional[str] = None,
+        learner_response: str = "",
+        expected_answer: str = "",
+        concept_name: str = ""
     ) -> float:
         """
-        Update learner's mastery level using Hybrid DKT-LLM Strategy.
+        Update learner's mastery using Semantic Knowledge Tracing (LKT).
         
-        Scientific Basis: Hybrid Anchoring (Piech 2015 + Liu 2024)
-        - Prior: Community Average derived from Difficulty (DKT Bias).
-        - Adjustment: LLM Qualitative analysis of history/misconceptions.
+        Scientific Basis: Lee et al. (2024) - Language Model Knowledge Tracing
+        - Input: Textual history of interactions.
+        - Mechanism: LLM predicts correctness probability for the next step.
         """
         try:
-            # 1. Calculate Community Prior (The Anchor)
-            # Difficulty 1 (Easy) -> Prior 0.85
-            # Difficulty 5 (Hard) -> Prior 0.25
-            community_prior = 1.0 - (concept_difficulty * self.DKT_PRIOR_WEIGHT)
-            community_prior = max(0.1, min(0.9, community_prior))
+            # 1. Update Interaction History (Append latest)
+            # Fetch profile (assuming it contains a 'history' list, if not create one)
+            profile = await self.state_manager.get_learner_profile(learner_id) or {}
+            history = profile.get("interaction_history", [])
             
-            # 2. Determine "Student Context" for LLM
-            # (In a full DKT, this would be the LSTM hidden state. Here, it's the qualitative snapshot)
-            is_correct = score >= 0.8
-            outcome_str = "CORRECT" if is_correct else "INCORRECT"
-            error_val = error_type.value if error_type else "NONE"
+            # Create interaction record
+            interaction = {
+                "concept_name": concept_name or concept_id,
+                "question": expected_answer, # Using expected answer as proxy for question text if not provided
+                "result": "CORRECT" if score >= 0.8 else "INCORRECT",
+                "response": learner_response,
+                "timestamp": datetime.now().isoformat()
+            }
+            history.append(interaction)
             
-            context_summary = f"""
-            - Current Mastery: {current_mastery:.2f}
-            - Latest Attempt: {outcome_str} (Score: {score:.2f})
-            - Error Type: {error_val}
-            - Misconception Detected: {misconception if misconception else 'None'}
-            """
+            # Keep last 10 interactions to fit context window
+            if len(history) > 10:
+                history = history[-10:]
             
-            # 3. Call LLM for Hybrid Adjustment
-            # The LLM decides how much to shift from the Prior/Current state
-            new_mastery = await self._calculate_hybrid_mastery(
-                community_prior, 
-                current_mastery, 
-                context_summary,
-                is_correct
+            # Save updated history
+            profile["interaction_history"] = history
+            # Note: Ideally we'd have a specific method to save the full profile, 
+            # but for now we rely on the implementation specific to state_manager.
+            # Assuming state_manager has a way to persist this or we save it separately.
+            await self.save_state(f"learner_profile:{learner_id}", profile)
+
+            # 2. Format History for LKT
+            lkt_history_str = self._format_interaction_history(history)
+            
+            # 3. Predict Mastery using LKT
+            new_mastery = await self._predict_mastery_lkt(
+                lkt_history_str,
+                target_concept=concept_name or concept_id,
+                target_question=expected_answer
             )
             
-            # Debug log for Hybrid update
+            # Debug log
             self.logger.debug(
-                f"Hybrid DKT update: {learner_id}/{concept_id} | "
-                f"Prior={community_prior:.2f}, Cur={current_mastery:.2f}, "
-                f"Outcome={outcome_str} -> New={new_mastery:.2f}"
+                f"LKT Update: {learner_id}/{concept_id} | "
+                f"History Len={len(history)} -> New Mastery={new_mastery:.2f}"
             )
             
-            # Save to database
+            # Save mastery state
             await self.save_state(
                 f"learner_mastery:{learner_id}:{concept_id}",
                 {"mastery": new_mastery, "updated": datetime.now().isoformat()}
@@ -734,39 +747,50 @@ class EvaluatorAgent(BaseAgent):
             return new_mastery
         
         except Exception as e:
-            self.logger.error(f"Hybrid mastery update error: {e}")
+            self.logger.error(f"LKT mastery update error: {e}")
             return current_mastery
 
-    async def _calculate_hybrid_mastery(
+    def _format_interaction_history(self, history: List[Dict]) -> str:
+        """
+        Format history into LKT string:
+        [CLS] Concept1 \n Question1 [CORRECT] ... ConceptN \n QuestionN [INCORRECT]
+        """
+        formatted_segments = ["[CLS]"]
+        for entry in history:
+            concept = entry.get("concept_name", "Unknown Concept")
+            question = entry.get("question", "Unknown Question")
+            result = entry.get("result", "INCORRECT") # [CORRECT] or [INCORRECT]
+            
+            segment = f"{concept} \n {question} [{result}]"
+            formatted_segments.append(segment)
+            
+        return " ".join(formatted_segments)
+
+    async def _predict_mastery_lkt(
         self, 
-        prior: float, 
-        current: float, 
-        context: str,
-        is_correct: bool
+        history_str: str, 
+        target_concept: str,
+        target_question: str
     ) -> float:
         """
-        Ask LLM to adjust mastery probability based on qualitative context.
+        Predict mastery probability using LKT Prompting.
         """
         try:
+            # Construct the LKT Masked Prompt
             prompt = f"""
-            You are a Deep Knowledge Tracing Expert (DKT).
-            Task: Estimate the probability (0.0 to 1.0) that the student HAS MASTERED this concept.
+            You are a Semantic Knowledge Tracing model (LKT).
+            Task: Predict the probability that the student will answer the NEXT question CORRECTLY.
             
-            # Inputs
-            1. Community Expected Mastery (Prior): {prior:.2f} (Based on difficulty)
-            2. Student's Previous Mastery Belief: {current:.2f}
-            3. Latest Interaction Context:
-            {context}
+            Input Sequence (History):
+            {history_str}
             
-            # Logic (Hybrid Anchoring)
-            - Start with the 'Previous Mastery' (if > 0) or 'Community Prior' (if Cold Start).
-            - ADJUST based on the Interaction:
-              - Correct + No Misconception: Increase significantly.
-              - Correct + Creating Misconception (Lucky Guess?): Increase slightly or Maintain.
-              - Incorrect + Conceptual Error: Decrease significantly (reveal gap).
-              - Incorrect + Slip (Typo): Decrease slightly.
+            Target:
+            {target_concept} \n {target_question} [MASK]
             
-            Return ONLY the new probability as a float (e.g., 0.75).
+            Instruction:
+            Based on the student's history of correct/incorrect responses and the SEMANTIC RELATIONSHIP between the concepts, estimate the probability (0.00 to 1.00) of the token [CORRECT] filling the [MASK].
+            
+            Return ONLY the probability float.
             """
             
             response = await self.llm.acomplete(prompt)
@@ -779,16 +803,12 @@ class EvaluatorAgent(BaseAgent):
                 val = float(match.group())
                 return max(0.0, min(1.0, val))
             else:
-                self.logger.warning(f"LLM did not return float for mastery: {raw_text}")
-                # Fallback: Simple update
-                if is_correct:
-                    return min(1.0, current + self.DKT_STEP_SIZE)
-                else:
-                    return max(0.0, current - self.DKT_STEP_SIZE)
+                self.logger.warning(f"LKT did not return float: {raw_text}")
+                return 0.5 # Uncertainty fallback
                     
         except Exception as e:
-            self.logger.error(f"LLM calculation error: {e}")
-            return current
+            self.logger.error(f"LKT prediction error: {e}")
+            return 0.0
     
     # ==========================================
     # EVENT HANDLERS (Per THESIS Integration)

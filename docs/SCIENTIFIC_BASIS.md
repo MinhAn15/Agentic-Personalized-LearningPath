@@ -7,32 +7,27 @@ This document defines the **Target Architecture** based on the latest research i
 ## Agent 1: Knowledge Extraction Agent
 **Role**: Automated Knowledge Graph Construction & Retrieval.
 
-### 1. LightRAG: Dual-Graph Retrieval
-*   **Source**: *Guo, Z., et al. (Oct 2024). "LightRAG: Simple and Fast Retrieval-Augmented Generation."*
-*   **Concept**: Combining **Graph-based Indexing** with **Vector Retrieval**.
+### 1. LightRAG: Dual-Graph Retrieval (Integrated Architecture)
+*   **Source**: *Guo, Z., et al. (Oct 2024). "LightRAG"* & *Gutiérrez, B., et al. (2024). "HippoRAG".*
+*   **Concept**: Combining **Graph-based Indexing** with **Vector Retrieval** to mimic Neurobiological Memory (Hippocampal Indexing).
 *   **Target Mechanism**:
     *   **Entity Graph**: For precise structural queries (Command/Query Separation).
     *   **Edge-Attribute Keywords**: Relationships are tagged with *thematic keywords* (e.g., "Impact", "Causality") to support high-level traversal.
-    *   **Content Keywords**: High-level topics extracted at the chunk level, indexed in the `DocumentRegistry` for broad semantic search (LightRAG "High-Level" retrieval).
-    *   *Upgrade from*: Standard GraphRAG (Edge 2024).
-
-### 2. HippoRAG: Neurobiological Memory
-*   **Source**: *Gutiérrez, B., et al. (2024). "HippoRAG: Neurobiologically Inspired Long-Term Memory for LLMs."*
-*   **Concept**: Mimicking the Hippocampal indexing theory.
-*   **Target Mechanism**: Using a lightweight Knowledge Graph to "index" into heavier vector storage, enabling multi-hop reasoning without massive context windows.
+    *   **Content Keywords**: High-level topics extracted at the chunk level, indexed in the `DocumentRegistry` to serve as the "Hippocampal Index" into the heavier Vector Storage.
+    *   *Note*: This implementation unifies LightRAG's dual-graph approach with HippoRAG's associative indexing theory.
 
 ---
 
 ## Agent 2: Learner Profiler
 **Role**: Tracking Knowledge State & Preferences.
 
-### 1. Deep Knowledge Tracing (DKT) & LLM Tracing
-*   **Source**: *Piech, C., et al. (2015). "Deep Knowledge Tracing"* & *Liu, et al. (2024) "Tracing Knowledge State with LLMs".*
-*   **Concept**: Knowledge is a latent state best estimated by combining Population Statistics (Prior) with Individual Semantic History (Likelihood), bridging DKT and LLM reasoning.
-*   **Target Mechanism**: **Hybrid DKT-LLM Anchoring**
-    *   **Prior (The Anchor)**: `CommunityAverage = 1.0 - (Difficulty * 0.15)`. This replaces the fixed bias parameter of DKT, providing a grounded starting point (dealing with Cold Start).
-    *   **Adjustment (The Intelligence)**: The LLM analyzes the student's *qualitative history* (errors, misconceptions) to adjust the Prior.
-    *   **Formula**: $P(Mastery) = LLM_{adjust}(Prior, History_{semantic})$. This avoids "Hallucinated Competence" by forcing the LLM to justify deviations from the norm.
+### 1. Semantic Knowledge Tracing (LKT/DKT Hybrid)
+*   **Source**: *Lee, et al. (2024). "Language Model Can Do Knowledge Tracing"* & *Piech, C., et al. (2015). "Deep Knowledge Tracing".*
+*   **Concept**: Deep Knowledge Tracing (DKT) uses LSTM to capture long-term dependencies. LKT replaces the LSTM with a Pre-trained Language Model (PLM) to solve "Cold Start" via semantic understanding.
+*   **Target Mechanism**:
+    *   **Input**: Concatenated textual history (`[CLS] Concept1 \n Question1 [CORRECT] ...`).
+    *   **Logic**: Using the LLM to predict the probability of correctness for the next step based on the full semantic context, not just ID sequences.
+    *   **Cold Start**: Leveraging the LLM's pre-trained knowledge to predict mastery even with zero history, purely from the semantic difficulty of the question.
 
 ---
 

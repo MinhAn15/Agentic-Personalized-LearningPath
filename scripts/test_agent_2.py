@@ -1,176 +1,111 @@
+
+import unittest
 import asyncio
-import os
 import sys
-import logging
-import argparse
-from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger("Agent2_TestRunner")
+from backend.agents.evaluator_agent import EvaluatorAgent
+from backend.models.evaluation import ErrorType
 
-# ==========================================
-# HOTFIX: MOCK SIBLING AGENTS
-# ==========================================
-sys.modules["backend.agents.knowledge_extraction_agent"] = MagicMock()
-sys.modules["backend.agents.path_planner_agent"] = MagicMock()
-sys.modules["backend.agents.tutor_agent"] = MagicMock()
-sys.modules["backend.agents.evaluator_agent"] = MagicMock()
-sys.modules["backend.agents.kag_agent"] = MagicMock()
-
-# Mock LlamaIndex for standalone testing
-sys.modules["llama_index"] = MagicMock()
-sys.modules["llama_index.llms"] = MagicMock()
-sys.modules["llama_index.llms.gemini"] = MagicMock()
-sys.modules["llama_index.core"] = MagicMock()
-sys.modules["llama_index.graph_stores"] = MagicMock()
-sys.modules["llama_index.graph_stores.neo4j"] = MagicMock()
-sys.modules["llama_index.embeddings"] = MagicMock()
-sys.modules["llama_index.embeddings.gemini"] = MagicMock()
-
-class MockStateManager:
-    def __init__(self):
-        self.neo4j = AsyncMock()
-        self.redis = AsyncMock()
-        self.postgres = AsyncMock()
+class TestAgent2_HybridDKT(unittest.TestCase):
+    """
+    Verification for Agent 2 (Evaluator) - Hybrid DKT-LLM Logic.
+    """
+    
+    def setUp(self):
+        # Mock dependencies
+        self.mock_llm = AsyncMock()
+        self.mock_state_manager = MagicMock()
+        self.mock_event_bus = MagicMock()
         
-        # Setup mock returns
-        self.neo4j.run_query.return_value = []
-        
-        # Mock Redis Lock
-        lock_mock = MagicMock()
-        
-        async def async_acquire():
-            return True
-            
-        async def async_release():
-            pass
-            
-        lock_mock.acquire = async_acquire
-        lock_mock.release = async_release
-        self.redis.lock.return_value = lock_mock
-        
-    async def get(self, key):
-        if "profile:" in key:
-            return {
-                "learner_id": "test_learner",
-                "name": "Test User",
-                "concept_mastery_map": {},
-                "avg_mastery_level": 0.5
-            }
-        return None
-        
-    async def set(self, key, value, ttl=None):
-        return True
-
-class MockEventBus:
-    async def publish(self, *args, **kwargs):
-        logger.info(f"event_bus.publish called with: {kwargs}")
-
-    def subscribe(self, message_type, handler):
-        logger.info(f"event_bus.subscribe called for: {message_type}")
-
-async def run_mock_mode():
-    """Test Logic in Isolation"""
-    from backend.agents.profiler_agent import ProfilerAgent
-    
-    logger.info("🎭 Initializing MOCK environment...")
-    state_manager = MockStateManager()
-    event_bus = MockEventBus()
-    
-    agent = ProfilerAgent(
-        agent_id="mock_profiler_1",
-        state_manager=state_manager,
-        event_bus=event_bus
-    )
-    
-    # 1. Mock LLM for Intent Extraction
-    agent.llm.acomplete = AsyncMock(return_value=MagicMock(text='''
-    {
-      "topic": "Python",
-      "purpose": "Data Science",
-      "goal": "Learn Python for Data Science",
-      "time_available": 30,
-      "current_skill_level": "BEGINNER",
-      "preferred_learning_style": "VISUAL"
-    }
-    '''))
-    
-    # 2. Mock Diagnostic Assessment (Skip for speed or mock return)
-    # We will just verify the profile creation flow
-    
-    payload = {
-        "learner_message": "I want to learn Python for Data Science",
-        "learner_name": "Test User",
-        "skip_diagnostic": True # Skip complex graph RAG
-    }
-    
-    logger.info("🚀 Executing Agent 2 (Mock Mode)...")
-    result = await agent.execute(**payload)
-    
-    print("\n" + "="*50)
-    print("[SUCCESS] PROFILING RESULT")
-    print("="*50)
-    import json
-    print(json.dumps(result, indent=2, default=str))
-    
-    # 3. Test Event Handling (EVALUATION_COMPLETED)
-    logger.info("\n🧪 Testing Event: EVALUATION_COMPLETED...")
-    event_payload = {
-        "learner_id": result.get("learner_id", "test_learner"),
-        "concept_id": "python_basics",
-        "score": 0.9,
-        "question_difficulty": 1,
-        "question_type": "factual"
-    }
-    
-    await agent._on_evaluation_completed(event_payload)
-    logger.info("Event handler executed successfully (Check logs for lock acquisition).")
-
-async def run_real_mode():
-    """Run with Real DBs"""
-    try:
-        from backend.database.database_factory import initialize_databases, get_factory
-        from backend.core.state_manager import CentralStateManager
-        from backend.core.event_bus import EventBus
-        from backend.agents.profiler_agent import ProfilerAgent
-        
-        await initialize_databases()
-        factory = get_factory()
-        state_manager = CentralStateManager(factory.redis, factory.postgres)
-        state_manager.neo4j = factory.neo4j
-        
-        agent = ProfilerAgent(
-            agent_id="real_profiler",
-            state_manager=state_manager,
-            event_bus=EventBus()
+        # Initialize Agent
+        self.agent = EvaluatorAgent(
+            agent_id="test_opt_2", 
+            state_manager=self.mock_state_manager, 
+            event_bus=self.mock_event_bus,
+            llm=self.mock_llm
         )
         
-        payload = {
-            "learner_message": "I want to master Advance SQL in 1 week",
-            "learner_name": "Real User",
-            "skip_diagnostic": False 
-        }
+        # Suppress logging during tests
+        self.agent.logger = MagicMock()
+
+    def test_community_prior_calculation(self):
+        """Test that cold start prior is derived from difficulty"""
+        # Difficulty 1 (Easy) -> Expect High Prior (e.g., 0.85)
+        # Logic: 1.0 - (1 * 0.15) = 0.85
+        prior_easy = 1.0 - (1 * self.agent.DKT_PRIOR_WEIGHT)
+        self.assertEqual(prior_easy, 0.85)
         
-        result = await agent.execute(**payload)
-        print(result)
+        # Difficulty 5 (Hard) -> Expect Low Prior (e.g., 0.25)
+        # Logic: 1.0 - (5 * 0.15) = 0.25
+        prior_hard = 1.0 - (5 * self.agent.DKT_PRIOR_WEIGHT)
+        self.assertEqual(prior_hard, 0.25)
+
+    def test_hybrid_llm_update_success(self):
+        """Test that LLM output is correctly parsed into mastery"""
+        # Mock LLM to return a mastery float
+        self.mock_llm.acomplete.return_value = MagicMock(text="0.75")
         
-    except Exception as e:
-        logger.error(f"Real mode failed: {e}")
+        prior = 0.5
+        current = 0.4
+        context = "Test Context"
+        
+        # Run async test
+        new_mastery = asyncio.run(self.agent._calculate_hybrid_mastery(
+            prior, current, context, is_correct=True
+        ))
+        
+        self.assertEqual(new_mastery, 0.75, "Should parse float from LLM response")
+        
+        # Verify prompt contained inputs
+        call_args = self.mock_llm.acomplete.call_args[0][0]
+        self.assertIn(f"{prior:.2f}", call_args)
+        self.assertIn(f"{current:.2f}", call_args)
+
+    def test_hybrid_llm_fallback(self):
+        """Test fallback when LLM output is invalid"""
+        # Mock LLM to return garbage
+        self.mock_llm.acomplete.return_value = MagicMock(text="I am not sure")
+        
+        current = 0.5
+        # Correct answer fallback: current + step_size (0.1)
+        expected = min(1.0, current + self.agent.DKT_STEP_SIZE)
+        
+        new_mastery = asyncio.run(self.agent._calculate_hybrid_mastery(
+            prior=0.5, current=current, context="ctx", is_correct=True
+        ))
+        
+        self.assertEqual(new_mastery, expected, "Should use fallback step size on LLM failure")
+
+    def test_full_update_flow(self):
+        """Verify integration from _update_learner_mastery to _calculate_hybrid_mastery"""
+        # Mock internal calculation to isolate flow
+        self.agent._calculate_hybrid_mastery = AsyncMock(return_value=0.88)
+        self.agent.save_state = AsyncMock()
+        
+        asyncio.run(self.agent._update_learner_mastery(
+            learner_id="student_1",
+            concept_id="concept_A",
+            score=0.9,
+            current_mastery=0.4,
+            concept_difficulty=2, # imply Prior = 1.0 - 0.3 = 0.7
+            error_type=None
+        ))
+        
+        # Verify inputs passed to calculation
+        self.agent._calculate_hybrid_mastery.assert_called_once()
+        args = self.agent._calculate_hybrid_mastery.call_args
+        prior_arg = args[0][0]
+        
+        # Check Prior Calculation
+        self.assertAlmostEqual(prior_arg, 0.7, places=2)
+        
+        # Check Save State
+        self.agent.save_state.assert_called_once()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["real", "mock"], default="mock")
-    args = parser.parse_args()
-    
-    if args.mode == "real":
-        asyncio.run(run_real_mode())
-    else:
-        asyncio.run(run_mock_mode())
+    unittest.main()
