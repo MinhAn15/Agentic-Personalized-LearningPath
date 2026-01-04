@@ -14,8 +14,10 @@ Use these prompts to validte the transition from Classical Algorithms to **SOTA 
 > "I am upgrading my Knowledge Extraction Agent.
 > - **Current**: Simple GraphRAG (Triples + Fuzzy Search).
 > - **Goal**: Implement 'LightRAG' Thematic Indexing.
-> - **Architecture Decision**: Instead of maintaining a separate 'Keyword Graph' (which doubles schema complexity), I am implementing **'Edge-Attribute Thematic Indexing'**. 
-> - **Mechanism**: Every relationship edge (e.g., A -> B) now carries `keywords` and a `summary` property, allowing the LLM to filter paths by theme (e.g., 'Traverse only edges related to *database optimization*')."
+> - **Architecture Decision**: Instead of maintaining a separate 'Keyword Graph' (which doubles schema complexity), I am implementing **'Edge-Attribute Thematic Indexing'** combined with **'Chunk-Level Content Keywords'**. 
+> - **Mechanism**: 
+>     1. **Low-Level**: Every relationship edge (e.g., A -> B) carries `keywords` and a `summary` property.
+>     2. **High-Level**: Global "Content Keywords" are extracted per document chunk and indexed in `DocumentRegistry` for broad thematic search."
 
 **Prompt**:
 > "Evaluate this 'Edge-Attribute' implementation of LightRAG against the original paper.

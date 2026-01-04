@@ -12,7 +12,8 @@ This document defines the **Target Architecture** based on the latest research i
 *   **Concept**: Combining **Graph-based Indexing** with **Vector Retrieval**.
 *   **Target Mechanism**:
     *   **Entity Graph**: For precise structural queries (Command/Query Separation).
-    *   **Keyword Graph**: Implemented as **Edge-Attribute Thematic Indexing**. Relationships are tagged with keywords (e.g., "Impact", "Causality") to support high-level thematic traversal without creating a separate node graph.
+    *   **Edge-Attribute Keywords**: Relationships are tagged with *thematic keywords* (e.g., "Impact", "Causality") to support high-level traversal.
+    *   **Content Keywords**: High-level topics extracted at the chunk level, indexed in the `DocumentRegistry` for broad semantic search (LightRAG "High-Level" retrieval).
     *   *Upgrade from*: Standard GraphRAG (Edge 2024).
 
 ### 2. HippoRAG: Neurobiological Memory

@@ -64,6 +64,7 @@ class DocumentRecord:
     
     # Provenance
     extracted_concept_ids: list = field(default_factory=list)
+    content_keywords: list = field(default_factory=list) # LightRAG High-level keywords
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage"""
@@ -82,7 +83,8 @@ class DocumentRecord:
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "error_message": self.error_message,
             "retry_count": self.retry_count,
-            "extracted_concept_ids": self.extracted_concept_ids
+            "extracted_concept_ids": self.extracted_concept_ids,
+            "content_keywords": self.content_keywords
         }
     
     @classmethod
@@ -103,7 +105,8 @@ class DocumentRecord:
             completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
             error_message=data.get("error_message"),
             retry_count=data.get("retry_count", 0),
-            extracted_concept_ids=data.get("extracted_concept_ids", [])
+            extracted_concept_ids=data.get("extracted_concept_ids", []),
+            content_keywords=data.get("content_keywords", [])
         )
 
 

@@ -48,6 +48,64 @@ IMPORTANT:
 - confidence is how sure you are about the relationship (0.8+ is good)
 """
 
+# LightRAG Prompts (Guo et al. 2024)
+LIGHTRAG_RELATIONSHIP_EXTRACTION_PROMPT = """
+# Source: LightRAG (Guo et al., 2024)
+# Goal: Extract relationships with "Global Thematic Keywords" for edge-attribute indexing.
+
+Identify relationships between these concepts:
+
+{concept_list}
+
+For each relationship, specify:
+1. source: Source concept_id (UPPERCASE_WITH_UNDERSCORES)
+2. target: Target concept_id
+3. relationship_type: One of [REQUIRES, IS_PREREQUISITE_OF, NEXT, REMEDIATES, HAS_ALTERNATIVE_PATH, SIMILAR_TO, IS_SUB_CONCEPT_OF]
+4. weight: 0.0-1.0 (Strength of connection)
+5. dependency: STRONG, MODERATE, or WEAK
+6. confidence: 0.0-1.0
+7. reasoning: Brief explanation
+8. keywords: **CRITICAL** - High-level themes summarizing the nature of the relationship (e.g., "Data Integrity", "Performance Optimization").
+9. summary: A concise sentence explaining *why* they are related.
+
+Return ONLY valid JSON array:
+[
+  {{
+    "source": "CONCEPT_A",
+    "target": "CONCEPT_B",
+    "relationship_type": "REQUIRES",
+    "weight": 0.9,
+    "dependency": "STRONG",
+    "confidence": 0.95,
+    "keywords": ["database_normalization", "data_integrity"],
+    "summary": "Concept A is the foundational theory required to implement B.",
+    "reasoning": "Standard database curriculum dependency."
+  }}
+]
+
+Return empty array [] if no relationships found.
+"""
+
+LIGHTRAG_CONTENT_KEYWORDS_PROMPT = """
+# Source: LightRAG (Guo et al., 2024)
+# Goal: Extract "High-Level Keywords" that summarize the main concepts, themes, or topics of the text chunk.
+
+Determine the 'content_keywords' for this text section:
+
+Content:
+{content}
+
+Instructions:
+1. Identify high-level key words/phrases that summarize the overarching ideas (e.g., "Object-Oriented Programming", "Memory Management").
+2. Focus on broad themes suitable for "Global Retrieval".
+3. Avoid overly specific entity names unless they are central to the theme.
+
+Return ONLY valid JSON object:
+{{
+  "content_keywords": ["Theme 1", "Theme 2", "Theme 3"]
+}}
+"""
+
 # Learner Profiler Agent System Prompt
 LEARNER_PROFILER_SYSTEM_PROMPT = """
 You are an expert learning coach that creates personalized learner profiles.

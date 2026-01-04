@@ -37,6 +37,7 @@ Agent 1 is the "Librarian". It takes raw files (PDFs, Videos, Text) and converts
     *   **Layer 1 (Concepts)**: Key Concept Extraction + Stable ID generation (`{domain}.{name}`).
     *   **Layer 2 (Relationships)**: Prerequisite/Similarity detection.
     *   **Layer 3 (Metadata)**: Bloom's Level, Tags.
+    *   **Layer 4 (Content Keywords)**: High-level thematic keywords for the chunk (LightRAG).
 *   **Performance**: Parallel processing with `asyncio.gather` (Limit 5).
 
 ### Step 4: Component Validation
@@ -79,7 +80,10 @@ Agent 1 is the "Librarian". It takes raw files (PDFs, Videos, Text) and converts
 
 ### Relationship: `IS_PREREQUISITE_OF`
 ```cypher
-(sql.basics.select)-[:IS_PREREQUISITE_OF]->(sql.joins.inner)
+(sql.basics.select)-[:IS_PREREQUISITE_OF {
+    keywords: ["query structure", "data retrieval"],
+    summary: "SELECT is fundamental for retrieving data before joining."
+}]->(sql.joins.inner)
 ```
 
 ## 5. Potential Issues / To-Do

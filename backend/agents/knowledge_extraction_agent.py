@@ -21,7 +21,11 @@ from enum import Enum
 
 from backend.core.base_agent import BaseAgent, AgentType
 from backend.models import DocumentInput, KnowledgeExtractionOutput
-from backend.prompts import KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT
+from backend.prompts import (
+    KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
+    LIGHTRAG_RELATIONSHIP_EXTRACTION_PROMPT,
+    LIGHTRAG_CONTENT_KEYWORDS_PROMPT
+)
 from backend.config import get_settings
 
 # New production modules
@@ -255,6 +259,7 @@ class KnowledgeExtractionAgent(BaseAgent):
             failed_chunks = []
             all_concepts = []
             all_relationships = []
+            all_content_keywords = set()
             
             for idx, result in enumerate(processing_results):
                 if isinstance(result, Exception):
@@ -266,9 +271,11 @@ class KnowledgeExtractionAgent(BaseAgent):
                     self.logger.error(f"❌ Chunk {idx+1} failed: {result}")
                     continue
                     
-                chunk_concepts, chunk_relationships = result
+                chunk_concepts, chunk_relationships, chunk_keywords = result
                 all_concepts.extend(chunk_concepts)
                 all_relationships.extend(chunk_relationships)
+                if chunk_keywords:
+                    all_content_keywords.update(chunk_keywords)
             
             if len(failed_chunks) == len(chunks) and len(chunks) > 0:
                 raise Exception(f"All {len(chunks)} chunks failed processing")
@@ -393,10 +400,13 @@ class KnowledgeExtractionAgent(BaseAgent):
                     "document_id": document_id,
                     "document_title": document_title,
                     "concepts_added": resolution_result.stats["truly_new_concepts"],
-                    "concepts_merged": resolution_result.stats["merged_concepts"],
+                    "concepts_merged": resolution_result.stats["merged_to_existing"],
                     "total_concepts": commit_result["concepts_created"],
                     "total_relationships": commit_result["relationships_created"],
-                    "extraction_version": self.extraction_version.value
+                    "total_concepts": commit_result["concepts_created"],
+                    "total_relationships": commit_result["relationships_created"],
+                    "extraction_version": self.extraction_version.value,
+                    "content_keywords": list(all_content_keywords)
                 }
             )
             
@@ -411,7 +421,9 @@ class KnowledgeExtractionAgent(BaseAgent):
                 "chunking": chunk_stats,
                 "validation": validation_result.to_dict(),
                 "resolution": resolution_result.to_dict(),
-                "commit": commit_result
+                "resolution": resolution_result.to_dict(),
+                "commit": commit_result,
+                "content_keywords": list(all_content_keywords)
             }
         
         except Exception as e:
@@ -432,13 +444,16 @@ class KnowledgeExtractionAgent(BaseAgent):
             # Layer 1: Concept extraction
             chunk_concepts = await self._extract_concepts_from_chunk(chunk, document_title)
             
-            # Layer 2: Relationship extraction
+            # Layer 2: Relationship extraction (LightRAG)
             chunk_relationships = await self._extract_relationships_from_chunk(
                 chunk, chunk_concepts
             )
             
             # Layer 3: Metadata enrichment
             enriched_concepts = await self._enrich_metadata(chunk_concepts)
+            
+            # Layer 4: Content Keywords (LightRAG)
+            content_keywords = await self._extract_content_keywords(chunk)
             
             # Add provenance to each concept
             for concept in enriched_concepts:
@@ -447,7 +462,7 @@ class KnowledgeExtractionAgent(BaseAgent):
                 concept["extraction_version"] = self.extraction_version.value
                 concept["extracted_at"] = datetime.now().isoformat()
                 
-            return enriched_concepts, chunk_relationships
+            return enriched_concepts, chunk_relationships, content_keywords
             
         except Exception as e:
             self.logger.error(f"Error processing chunk {chunk.chunk_id}: {e}")
@@ -597,48 +612,9 @@ Return ONLY the domain name, nothing else. Example: sql
             for c in concepts
         ])
         
-        prompt = f"""
-# Source: Guo et al. (2024) - LightRAG: "Simple, Fast, Effective Retrieval-Augmented Generation"
-# Implements "Edge-Attribute Thematic Indexing" by extracting keywords/summary on relationships.
-Identify relationships between these concepts:
-
-{concept_list}
-
-For each relationship, specify:
-1. source: Source concept_id (UPPERCASE_WITH_UNDERSCORES)
-2. target: Target concept_id
-3. relationship_type: One of [REQUIRES, IS_PREREQUISITE_OF, NEXT, REMEDIATES, HAS_ALTERNATIVE_PATH, SIMILAR_TO, IS_SUB_CONCEPT_OF]
-4. weight: 0.0-1.0 (how important is this link for learning?)
-5. dependency: STRONG (must learn first), MODERATE (recommended), or WEAK (optional)
-6. confidence: 0.0-1.0 (your confidence in this relationship)
-7. reasoning: Brief explanation why this relationship exists
-
-Relationship Type Meanings:
-- REQUIRES: A requires knowledge of B first
-- IS_PREREQUISITE_OF: A is prerequisite for B
-- NEXT: A should be learned before B (sequencing)
-- REMEDIATES: A helps fix misunderstanding of B
-- HAS_ALTERNATIVE_PATH: A and B are alternative ways to learn same concept
-- SIMILAR_TO: A and B are semantically similar
-- IS_SUB_CONCEPT_OF: A is a sub-concept/part of B
-
-Return ONLY valid JSON array:
-[
-  {{
-    "source": "CONCEPT_A_ID",
-    "target": "CONCEPT_B_ID",
-    "relationship_type": "REQUIRES",
-    "weight": 0.8,
-    "dependency": "STRONG",
-    "confidence": 0.9,
-    "keywords": ["database", "prerequisite"],
-    "summary": "To understand B, you must first master A",
-    "reasoning": "Brief explanation..."
-  }}
-]
-
-Return empty array [] if no relationships found.
-"""
+        prompt = LIGHTRAG_RELATIONSHIP_EXTRACTION_PROMPT.format(
+            concept_list=concept_list
+        )
         try:
             response = await self.llm.acomplete(prompt)
             return self._parse_json_array(response.text)
@@ -695,6 +671,19 @@ Return JSON object mapping concept_id to metadata:
         except Exception as e:
             self.logger.error(f"Metadata enrichment error: {e}")
             return concepts
+    
+    async def _extract_content_keywords(self, chunk: SemanticChunk) -> List[str]:
+        """Layer 4: Extract LightRAG Content Keywords"""
+        prompt = LIGHTRAG_CONTENT_KEYWORDS_PROMPT.format(
+            content=chunk.content[:2000]  # Limit context window if needed
+        )
+        try:
+            response = await self.llm.acomplete(prompt)
+            result = self._parse_json_object(response.text)
+            return result.get("content_keywords", [])
+        except Exception as e:
+            self.logger.warning(f"Content keyword extraction failed for chunk {chunk.chunk_id}: {e}")
+            return []
     
     # ===========================================
     # STAGING METHODS

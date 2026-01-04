@@ -3,7 +3,7 @@ import os
 import sys
 import logging
 import argparse
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,7 +34,9 @@ class MockStateManager:
         
         # Setup mock returns
         self.neo4j.run_query.return_value = []
-        
+        self.redis.get = AsyncMock(return_value=None)
+        self.redis.set = AsyncMock(return_value=True)
+
     async def get(self, key):
         return None
         
@@ -109,11 +111,26 @@ async def run_mock_mode(document_content, document_title):
     # Mock specific Neo4j calls if needed
     state_manager.neo4j.run_query.return_value = [] # Return empty for concept lookups
     
-    agent = KnowledgeExtractionAgent(
-        agent_id="mock_runner_1",
-        state_manager=state_manager,
-        event_bus=event_bus
-    )
+    # PATCH SemanticChunker to avoid LLM requirement during Init
+    with patch("backend.agents.knowledge_extraction_agent.SemanticChunker") as MockChunkerClass:
+        # Configure the mock instance returned by the class
+        mock_chunker_instance = MagicMock()
+        MockChunkerClass.return_value = mock_chunker_instance
+        
+        agent = KnowledgeExtractionAgent(
+            agent_id="mock_runner_1",
+            state_manager=state_manager,
+            event_bus=event_bus
+        )
+        
+        # We also need to mock the llm_service if it's used elsewhere
+        agent.llm = AsyncMock()
+        agent.llm.acomplete = AsyncMock(return_value=MagicMock(text="{}"))
+        
+        # Re-assign chunker (though patch should have verified it)
+        agent.chunker = mock_chunker_instance
+    
+    # Mock internal methods to avoid needing real LLM if we want pure logic test
     
     # Mock internal methods to avoid needing real LLM if we want pure logic test
     # But usually we want to test the flow, so we might let LLM calls fail or mock them too.
@@ -122,13 +139,46 @@ async def run_mock_mode(document_content, document_title):
     
     # Setting up a mock LLM response for _extract_concepts_from_chunk
     agent._extract_concepts_from_chunk = AsyncMock(return_value=[
-        {"name": "Test Concept", "description": "A concept for testing", "type": "concept"}
+        {
+            "concept_id": "TestConcept", 
+            "name": "Test Concept", 
+            "description": "A concept for testing", 
+            "type": "concept"
+        }
     ])
     agent._extract_relationships_from_chunk = AsyncMock(return_value=[
-        {"source": "Test Concept", "target": "Other Concept", "type": "RELATED_TO"}
+        {
+            "source": "Test Concept", 
+            "target": "Other Concept", 
+            "relationship_type": "RELATED_TO",
+            "keywords": ["mock_theme", "testing"],
+            "summary": "Mock summary of relationship"
+        }
     ])
+    agent._extract_content_keywords = AsyncMock(return_value=["Mock Theme A", "Mock Theme B"])
     agent._enrich_metadata = AsyncMock(side_effect=lambda x: x)
     agent._extract_domain = AsyncMock(return_value="mock_domain")
+
+    # Mock RAG Vector Persistence to avoid real Embedding API calls
+    agent._persist_vector_index = AsyncMock()
+    
+    # Mock Chunker to avoid real Chunking/LLM
+    from backend.utils.semantic_chunker import SemanticChunk
+    mock_chunk = MagicMock(spec=SemanticChunk)
+    mock_chunk.chunk_id = "test_chunk_1"
+    mock_chunk.content = "Test content"
+    mock_chunk.source_heading = "Test Heading"
+    
+    # Mock Chunker to avoid real Chunking/LLM
+    from backend.utils.semantic_chunker import SemanticChunk
+    mock_chunk = MagicMock(spec=SemanticChunk)
+    mock_chunk.chunk_id = "test_chunk_1"
+    mock_chunk.content = "Test content"
+    mock_chunk.source_heading = "Test Heading"
+    
+    # Configure the mocked chunker (which is agent.chunker)
+    agent.chunker.chunk_with_ai = AsyncMock(return_value=[mock_chunk])
+    agent.chunker.get_stats.return_value = {"count": 1}
     
     payload = {
         "document_content": document_content,

@@ -31,6 +31,10 @@
   - **Code**: `ConceptRelationship` now includes `keywords` and `summary`.
   - **Logic**: Relationships carry thematic context, allowing "Edge Traversal" filtering instead of maintaining a complex separate Keyword Graph.
   - **Validation Status**: Ready for experimental verification.
+- [2026-01-04] **Verification Completed**:
+  - **Script**: `scripts/test_agent_1.py` passed in mock mode.
+  - **Result**: Confirmed `content_keywords` are extracted at chunk level and `keywords` are attached to relationships.
+  - **Resolution**: **Gap 1 (Keyword Graph)** is officially closed via LightRAG implementation.
 *   **Action**: Updating `SCIENTIFIC_BASIS.md` to define LightRAG as "Edge-Attribute Thematic Indexing".
 *   **Action**: Modifying `knowledge_extraction_agent.py`:
     *   Updated `KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT` to request `relationship_keywords`.
