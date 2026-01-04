@@ -68,27 +68,31 @@ graph TD
 
 ---
 
-## 🧠 Reverse Socratic State Machine (8 States)
+## 🧠 Hybrid CoT & Method Ontology
 
-| State | Trigger | Purpose |
+The Agent uses a high-level **Method Ontology** (Chandrasekaran 1999) to manage the pedagogical goal, and **Chain-of-Thought** (Wei 2022) to generate the content.
+
+### 1. The Method Ontology (State Machine)
+We retain a lightweight State Machine to track the *Phase* of instruction, ensuring we don't start scaffolding before we know the intent.
+
+| Phase | Trigger | Purpose |
 | ----- | ------- | ------- |
-| **PROBING** | Default / Sense-Making intent | Ask open-ended questions |
-| **SCAFFOLDING** | Help-Seeking intent | Provide conceptual hints |
-| **GUIDING** | hint_level ≥ 2 | Structural hints / analogies |
-| **EXPLAINING** | hint_level ≥ 3 | Direct instruction |
-| **CONCLUSION** | hint_level ≥ 4 or 5+ turns | Synthesize answer |
-| **REFUTATION** | Misconception detected | Challenge incorrect beliefs |
-| **ELABORATION** | Near-correct answer | Expand on partial understanding |
-| **TEACH_BACK** | High mastery (>0.7) + 40% random | Learner explains back (Protégé Effect) |
+| **INTRO** | New Session | Establish context & Probe understanding |
+| **PROBING** | Ambiguous Input | Ask diagnostic questions |
+| **SCAFFOLDING** | Concept Identified | **Hidden CoT Loop** (Generate -> Slice -> Serve) |
+| **ASSESSMENT** | Mastery Check | Handoff to Evaluator |
 
-### State Progression Flow
+### 2. Dynamic Chain-of-Thought (The Brain)
+During the `SCAFFOLDING` phase, the agent triggers:
+1.  **Generation**: `_generate_cot_traces(n=3)` produces 3 internal reasoning paths.
+2.  **Consensus**: `_check_consensus` validates the optimal path.
+3.  **Slicing**: The "Trace" is sliced into individual hints served one per turn.
+4.  **Leakage Guard**: Strict regex filtering prevents the "Final Answer" from being revealed early.
 
-```text
-Standard: PROBING → SCAFFOLDING → GUIDING → EXPLAINING → CONCLUSION
-Special:  REFUTATION → PROBING (verify correction)
-          ELABORATION → CONCLUSION (wrap up)
-          TEACH_BACK → CONCLUSION (end cycle)
-```
+### Scientific Basis
+- **Chain-of-Thought**: Wei et al., 2022
+- **Self-Consistency**: Wang et al., 2022
+- **Method Ontology**: Chandrasekaran et al., 1999
 
 ### Scientific Basis
 - **Socratic Dialogue Framework**: Collins & Stevens, 1982

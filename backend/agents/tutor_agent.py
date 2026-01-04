@@ -137,26 +137,72 @@ class TutorAgent(BaseAgent):
             if not isinstance(conversation_history, list):
                  conversation_history = []
 
-            # UPGRADE: Dynamic Chain-of-Thought (CoT)
-            # Source: Wei et al. (2022) & Wang et al. (2022)
+            # ---------------------------------------------------------------
+            # HYBRID ARCHITECTURE: State Machine + CoT
+            # ---------------------------------------------------------------
             
-            # 1. Generate Hidden CoT Traces (Self-Consistency)
-            traces = await self._generate_cot_traces(question, conversation_history, concept_id)
+            # 1. Get or Create Dialogue State
+            state = self._get_or_create_dialogue_state(learner_id, concept_id)
+            state.turn_count += 1
             
-            # 2. Check Consensus
-            best_trace = self._check_consensus(traces)
-            
+            # 2. Check for Handoff (Assessment Phase)
+            if state.current_phase == DialoguePhase.ASSESSMENT:
+                await self._handoff_to_evaluator(learner_id, concept_id, state)
+                return {
+                    "response": "I've noticed you're doing great! Let's verify your mastery with a quick quiz.",
+                    "action": "HANDOFF_TO_EVALUATOR"
+                }
+
+            # 3. Determine Response Strategy based on Phase
             response_text = ""
-            if best_trace:
-                # 3. Apply Leakage Guard (Scaffolding)
-                response_text = self._extract_scaffold(best_trace)
-            else:
-                # Fallback: Safe Probing (No consensus)
-                response_text = "I notice you might be stuck. Can you explain your current thinking step-by-step?"
+            
+            if state.current_phase in [DialoguePhase.INTRO, DialoguePhase.PROBING]:
+                # Use Standard Prompting for lightweight phases
+                response_text = await self._generate_probing_question(question, state)
+                # Heuristic transition: If student answers probe, move to Scaffolding
+                if state.turn_count > 2:
+                    state.current_phase = DialoguePhase.SCAFFOLDING
+                    
+            elif state.current_phase == DialoguePhase.SCAFFOLDING:
+                # -------------------------------------------------------------
+                # DYNAMIC CoT SCAFFOLDING (Wei 2022) with Slicing Logic
+                # -------------------------------------------------------------
+                
+                # Check if we already have an active trace for this concept/misconception
+                if not state.current_cot_trace:
+                     # Generate NEW Hidden CoT Traces
+                     traces = await self._generate_cot_traces(question, conversation_history, concept_id)
+                     best_trace = self._check_consensus(traces)
+                     
+                     if best_trace:
+                         # SLICING LOGIC: Split trace into scaffolding steps
+                         # We expect the trace to be formatted as "1. ... 2. ... 3. ..." or similar.
+                         # We'll split by newlines or numbered lists.
+                         steps = self._slice_cot_trace(best_trace)
+                         state.current_cot_trace = steps
+                         state.cot_step_index = 0
+                     else:
+                         # Fallback if CoT fails
+                         response_text = "Could you break that down into smaller steps?"
+                
+                # Serve the next step in the trace
+                if state.current_cot_trace and state.cot_step_index < len(state.current_cot_trace):
+                    raw_step = state.current_cot_trace[state.cot_step_index]
+                    response_text = self._format_scaffold_step(raw_step, state.cot_step_index)
+                    state.cot_step_index += 1
+                else:
+                    # Trace finished, check if understanding is clear? 
+                    # For now, generic prompt.
+                    response_text = "How does that explanation feel? Do you see how the pieces fit?"
+
+
+            # 4. Update Interaction Log
+            state.interaction_log.append({"role": "user", "content": question})
+            state.interaction_log.append({"role": "assistant", "content": response_text})
 
             return {
                 "response": response_text,
-                "needs_human_review": not bool(best_trace)
+                "current_phase": state.current_phase.value
             }
         except Exception as e:
             self.logger.error(f"Tutor execution failed: {e}")
@@ -166,28 +212,56 @@ class TutorAgent(BaseAgent):
                 "agent_id": self.agent_id
             }
 
+    async def _generate_probing_question(self, question: str, state: DialogueState) -> str:
+        """Lightweight prompt for Intro/Probing phases"""
+        prompt = f"""
+        Act as a Socratic Tutor.
+        Context: Learner {state.learner_id} is asking about {state.concept_id}.
+        Phase: {state.current_phase.value}
+        Student Question: {question}
+        
+        Goal: Ask a guiding question to check understanding without giving the answer.
+        Keep it short (1-2 sentences).
+        """
+        response = await self.llm.acomplete(prompt)
+        return response.text
+
     async def _generate_cot_traces(self, question: str, history: List[Dict], concept_id: str, n: int = TUTOR_COT_TRACES) -> List[str]:
         """
         Generate n internal reasoning traces (Internal Monologue).
+        Uses Exemplars from Wei et al. (2022) to elicit reasoning.
         """
         if not self.llm:
             return []
             
+        # SOTA PROMPTING STRATEGY via NotebookLM Audit
         prompt = f"""
-        Act as a Master Tutor.
-        Student Question: {question}
+        Instruction: You are a Tutor. Solve the problem step-by-step to identify the logic, but DO NOT reveal the answer to the student yet.
+
+        [Exemplar 1: Math/Logic]
+        Q: Roger has 5 tennis balls. He buys 2 more cans of tennis balls. Each can has 3 tennis balls. How many tennis balls does he have now?
+        CoT: Roger started with 5 balls. 2 cans of 3 tennis balls each is 6 tennis balls. 5 + 6 = 11.
+        Student Hint: First, calculate how many balls are in the new cans.
+
+        [Exemplar 2: Commonsense]
+        Q: Would a pear sink in water?
+        CoT: The density of a pear is about 0.6 g/cm^3, which is less than water. Objects less dense than water float. Thus, a pear would float.
+        Student Hint: Think about the density of the pear compared to water.
+
+        [Exemplar 3: Coding]
+        Q: My recursion function errors with 'maximum depth exceeded'.
+        CoT: Recursion requires a base case to stop. Infinite recursion happens if the base case is missing or unreachable. The student likely forgot the base case.
+        Student Hint: Check your function for a stop condition. Does it handle the simplest case?
+
+        [Current Interaction]
+        Q: {question}
         Concept Context: {concept_id}
+        Conversation History: {str(history[-3:] if history else [])}
         
         Task: Diagnose the student's misunderstanding.
-        Method: Chain-of-Thought (think step-by-step).
-        
-        Output format:
-        1. Identify the core concept.
-        2. Analyze the student's error.
-        3. Formulate the correct logic.
-        4. Determine the next best hint (Scaffold).
-        
-        DO NOT OUTPUT THE FINAL ANSWER YET.
+        Output Format:
+        CoT: [Internal reasoning trace about the error]
+        Student Hint: [The first scaffolding step]
         """
         try:
              # Simulation of multiple calls (in production, run in parallel)
@@ -200,22 +274,60 @@ class TutorAgent(BaseAgent):
             self.logger.error(f"CoT generation failed: {e}")
             return []
 
+    def _slice_cot_trace(self, trace: str) -> List[str]:
+        """
+        Slice the CoT trace into steps. 
+        Note: The Exemplar prompts usually produce a single 'Student Hint'.
+        However, if the CoT is complex, we might want to break it down.
+        For V1 (Exemplar based), we mostly map 'Student Hint' as step 1.
+        If we want multi-step, we'd need the prompt to output Step 1, Step 2.
+        
+        Let's try to extract 'Student Hint' and any logic from 'CoT' that is safe.
+        """
+        steps = []
+        
+        # 1. Extract the explicit "Student Hint"
+        if "Student Hint:" in trace:
+            hint = trace.split("Student Hint:")[1].strip()
+            steps.append(hint)
+        
+        # 2. (Optional) If we want more steps, we could process the CoT part 
+        # but the prompt structure currently focuses on ONE main hint.
+        # Future refinement: Chain hints.
+        
+        if not steps:
+            # Fallback cleanup
+            steps.append(self._extract_scaffold(trace))
+            
+        return steps
+
+    def _format_scaffold_step(self, step_content: str, index: int) -> str:
+        """Format the step for the user"""
+        return f"Hint: {step_content}"
+
     def _check_consensus(self, traces: List[str]) -> Optional[str]:
         """
         Metacognitive Check: Self-Consistency (Wang 2022).
-        Simple heuristic: Check if majority of traces point to similar scaffold direction.
-        For V1, we just pick the longest/most detailed trace if n > 0.
-        Real implementation would use embedding similarity.
+        For V1, pick the trace that follows the format 'CoT:... Student Hint:...'
         """
         if not traces:
             return None
-        # Placeholder: Return the longest trace as 'best'
-        return max(traces, key=len)
+        
+        valid_traces = [t for t in traces if "Student Hint:" in t]
+        if not valid_traces:
+            return max(traces, key=len) # Fallback to longest
+            
+        # Placeholder: Return the first valid one as 'best'
+        return valid_traces[0]
 
     def _extract_scaffold(self, trace: str) -> str:
         """
         Leakage Guard: Remove 'final answer' markers.
         """
+        if "Student Hint:" in trace:
+            return trace.split("Student Hint:")[1].strip()
+            
+        # Fallback: Heuristic cleaning
         lines = trace.split('\n')
         safe_lines = []
         for line in lines:
@@ -227,9 +339,8 @@ class TutorAgent(BaseAgent):
             if not is_leak:
                 safe_lines.append(line)
         
-        # Post-process: Ensure it sounds like a hint, not a monologue
         scaffold = "\n".join(safe_lines).strip()
-        return f"Let's breakdown your logic:\n{scaffold}\n\nWhat do you think is the next step?"
+        return f"Let's think about this:\n{scaffold}\n\nWhat are your thoughts?"
             
 
     

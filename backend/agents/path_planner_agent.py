@@ -75,10 +75,18 @@ class PathPlannerAgent(BaseAgent):
         super().__init__(agent_id, AgentType.PATH_PLANNER, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.settings = get_settings()
+
+        # UPGRADE: Tree of Thoughts (Beam Search) instead of LinUCB
+        # Source: Yao et al. (2023)
         # UPGRADE: Tree of Thoughts (Beam Search) instead of LinUCB
         # Source: Yao et al. (2023)
         self.logger = logging.getLogger(f"PathPlannerAgent.{agent_id}")
+        
+        # System 1: RL Engine (Contextual Bandit) for Fallback
+        self.rl_engine = RLEngine(
+            feature_dim=10,
+            alpha=self.settings.LINUCB_ALPHA
+        )
         
         # Relationship type priorities for each chaining mode
         self.CHAIN_RELATIONSHIPS = {
@@ -139,23 +147,25 @@ class PathPlannerAgent(BaseAgent):
         """
         Explore learning paths using Tree of Thoughts (Beam Search).
         Source: Yao et al. (2023)
-        
-        Args:
-            learner_id: Learner ID
-            concept_ids: List of candidate concept IDs (from 'Thought Generator')
-            
-        Returns:
-            List[str]: Best path found (sequence of concept_ids)
         """
         if not current_concept:
-            # Cold start: Return top single step based on basic heuristic
-            return concept_ids[:1]
+             # Cold start: Use internal graph or fallback logic
+             return concept_ids[:1]
 
-        # 1. Thought Generator: Generate initial candidates (Beam Width b=3)
-        initial_thoughts = concept_ids[:self.settings.TOT_BEAM_WIDTH] if hasattr(self.settings, 'TOT_BEAM_WIDTH') else concept_ids[:3]
+        # 1. Thought Generator: Generate initial candidates (k=3)
+        # Using the LLM to propose "Thoughts" (Review, Scaffold, Challenge)
+        initial_thoughts = await self._thought_generator(
+            learner_id, 
+            current_concept, 
+            target_concept=None # Could be passed from execute
+        )
         
         # 2. Beam Search
-        return await self._beam_search(learner_id, initial_thoughts)
+        # Flatten thoughts to just concept_ids for the beam search, 
+        # but we might want to keep metadata. For now, we stick to the signature.
+        candidate_ids = [t['concept'] for t in initial_thoughts if t.get('concept')]
+        
+        return await self._beam_search(learner_id, candidate_ids)
 
     async def _beam_search(self, learner_id: str, initial_candidates: List[str]) -> List[str]:
         """
@@ -171,8 +181,16 @@ class PathPlannerAgent(BaseAgent):
             
             for path in beam:
                 last_node = path[-1]
-                # Generate next thoughts (neighbors)
-                neighbors = await self._get_reachable_concepts(learner_id, last_node, limit=3) # Limit branching
+                # Generate next thoughts (neighbors) via LLM Generator
+                # We need to know the 'current_concept' context. 
+                # Ideally, we pass the profile or graph. 
+                # For now, we call the generator based on the last node.
+                thoughts = await self._thought_generator(learner_id, last_node)
+                neighbors = [t['concept'] for t in thoughts if t.get('concept')]
+                
+                if not neighbors:
+                    # Fallback to Graph Neighbors if LLM fails or returns nothing
+                    neighbors = await self._get_reachable_concepts(learner_id, last_node, limit=3)
                 
                 if not neighbors:
                     candidates.append((path, 0.0)) # Dead end
@@ -206,44 +224,102 @@ class PathPlannerAgent(BaseAgent):
 
     async def _evaluate_path_viability(self, learner_id: str, path: List[str]) -> float:
         """
-        Value Prompt: Evaluate state feasibility (0.0 - 1.0).
-        Actually uses LLM to simulate "Projected Mastery".
+        State Evaluator: Evaluate path feasibility (0.0 - 1.0).
+        Uses "Mental Simulation" to predict learner's future state.
         """
         if not self.llm:
-            return 0.5 # Fallback if no LLM
+            return 0.5 
 
         path_str = " -> ".join(path)
-        prompt = f"""
-        Act as a Curriculum Architect.
-        Evaluate the educational viability of this learning path: {path_str}.
-        Consider:
-        1. Prerequisite logic (Are hard concepts taught after easy ones?)
-        2. Cognitive Load (Is the jump too high?)
         
-        Return ONLY a float score between 0.0 (Impossible) and 1.0 (Perfect).
+        # Get Learner Profile for context (Assuming it's cached or we fetch it)
+        # For efficiency, we might pass it down, but here we'll fetch just strictly necessary info
+        # or rely on the agent's state manager if needed. 
+        # For now, we'll keep the prompt focused on the path logic itself to save tokens,
+        # unless we want to inject the mastery vector.
+        
+        prompt = f"""
+        Input:
+        Proposed Path: {path_str}
+        
+        Instruction:
+        Evaluate this teaching step. Perform a mental simulation of the student learning this concept.
+        Consider:
+        1. Prerequisites: Does the student have the required background?
+        2. Scaffolding Value: Will learning this make future concepts easier?
+        3. Frustration Risk: Is the gap too wide?
+
+        Assign a "Strategic Value" score (1-10) considering LONG-TERM benefit.
+        - 1: Impossible/Harmful.
+        - 5: Neutral/Safe.
+        - 10: High Leverage.
+
+        Output format JSON:
+        {{"simulation_reasoning": "...", "value_score": 8}}
         """
         try:
             response = await self.llm.acomplete(prompt)
-            # Parse float
-            import re
-            match = re.search(r"0\.\d+|1\.0", response.text)
-            return float(match.group(0)) if match else 0.5
+            data = json.loads(response.text.strip())
+            score = data.get("value_score", 5)
+            # Normalize 1-10 to 0.0-1.0
+            return max(0.0, min(1.0, score / 10.0))
         except Exception as e:
             self.logger.warning(f"ToT Evaluation failed: {e}")
-            return 0.5 # Fallback
+            return 0.5
+
+    async def _thought_generator(self, learner_id: str, current_concept: str, target_concept: str = None) -> List[Dict[str, Any]]:
+        """
+        Thought Generator: Propose 3 distinct next concepts (Thoughts).
+        """
+        if not self.llm:
+            return []
+
+        prompt = f"""
+        Act as a Curriculum Architect.
+        Input:
+        Current Concept: {current_concept}
+        Target Goal: {target_concept or "Next Logical Step"}
+        
+        Instruction:
+        Propose 3 distinct next concepts to teach.
+        - Option 1: "Review" step (consolidate foundation).
+        - Option 2: "Scaffold" step (intermediate difficulty).
+        - Option 3: "Challenge" step (direct approach).
+        
+        Output format (JSON):
+        [
+          {{"concept": "Concept_A", "strategy": "review", "reason": "..."}},
+          {{"concept": "Concept_B", "strategy": "scaffold", "reason": "..."}},
+          {{"concept": "Concept_C", "strategy": "challenge", "reason": "..."}}
+        ]
+        """
+        try:
+            response = await self.llm.acomplete(prompt)
+            text = response.text.strip()
+            # Clean generic markdown if present
+            if text.startswith("```json"):
+                text = text[7:-3]
+            thoughts = json.loads(text)
+            return thoughts if isinstance(thoughts, list) else []
+        except Exception as e:
+            self.logger.error(f"ToT Thought Generation failed: {e}")
+            return []
 
     async def _get_reachable_concepts(self, learner_id: str, current_concept_id: str, limit: int = 5) -> List[str]:
         """
-        Helper: Get next reachable concepts for thought generation.
+        Helper: Get next reachable concepts from Neo4j (Fallback for Generator).
         """
-        # This implementation should use the Graph to find 'NEXT' or 'IS_PREREQUISITE_OF'
-        # For now, we assume this method exists or we implement a stub that uses self.event_bus?
-        # Since this is "PathPlannerAgent", it usually calculates this. 
-        # Checking existing code... it seems we need to implement or reuse existing logic.
-        # Based on existing code structure, we rely on Graph Service or internal Graph map.
-        # Assuming we have access to self.graph_service or similar. 
-        # If not, we return empty list to be safe, but this needs to be properly connected.
-        return [] # Placeholder - will be filled by actual graph logic in execute or similar
+        try:
+            query = """
+            MATCH (c:CourseConcept {concept_id: $cid})-[:NEXT|IS_PREREQUISITE_OF]->(next:CourseConcept)
+            RETURN next.concept_id as id
+            LIMIT $limit
+            """
+            results = await self.state_manager.neo4j.run_query(query, cid=current_concept_id, limit=limit)
+            return [r['id'] for r in results]
+        except Exception as e:
+            self.logger.error(f"Graph fallback failed: {e}")
+            return []
 
     async def _on_evaluation_feedback(self, event: Dict[str, Any]):
         """
@@ -465,13 +541,34 @@ class PathPlannerAgent(BaseAgent):
             # Step 5: Determine chaining mode
             chain_mode = self._select_chain_mode(last_result)
             
-            # Step 6: Generate learning path with adaptive chaining
-            learning_path = await self._generate_adaptive_path(
-                learner_profile=learner_profile,
-                course_concepts=course_concepts,
-                relationship_map=relationship_map,
-                chain_mode=chain_mode
+            # --- UPGRADE: Tree of Thoughts (System 2) ---
+            # Try to find a path using Beam Search approach first
+            tot_path_ids = await self._explore_learning_paths(
+                learner_id=learner_id,
+                concept_ids=concept_ids,
+                current_concept=learner_profile.get("current_concept") # Need to ensure we have this or infer from history
             )
+            
+            learning_path = {"success": False}
+            
+            # If ToT found a valid sequence (min length 2 to be worth it?)
+            if tot_path_ids and len(tot_path_ids) >= 1:
+                self.logger.info(f"🧠 ToT Planner found path: {tot_path_ids}")
+                # Convert IDs to detailed path
+                learning_path = await self._construct_detailed_path(
+                   learner_profile, tot_path_ids, course_concepts, chain_mode
+                )
+            
+            # Fallback to LinUCB (System 1) if ToT failed or returned empty
+            if not learning_path.get("success"):
+                self.logger.info("⚠️ ToT Planner fallback -> Switching to LinUCB (System 1)")
+                learning_path = await self._generate_adaptive_path(
+                    learner_profile=learner_profile,
+                    course_concepts=course_concepts,
+                    relationship_map=relationship_map,
+                    chain_mode=chain_mode
+                )
+            # --------------------------------------------
             
             if not learning_path["success"]:
                 return learning_path
@@ -546,6 +643,58 @@ class PathPlannerAgent(BaseAgent):
             rel_map[rel_type][source].append(target)
         
         return rel_map
+
+    async def _construct_detailed_path(
+        self,
+        learner_profile: Dict[str, Any],
+        path_ids: List[str],
+        course_concepts: List[Dict],
+        chain_mode: ChainingMode
+    ) -> Dict[str, Any]:
+        """Convert ToT ID sequence into full learning path object"""
+        path = []
+        hours_used = 0
+        current_mastery = {
+            m["concept_id"]: m["mastery_level"]
+            for m in learner_profile.get("current_mastery", [])
+        }
+        hours_per_day = learner_profile.get("hours_per_day", 2)
+        total_available = learner_profile.get("time_available", 30) * hours_per_day
+        
+        for cid in path_ids:
+            # Find concept data
+            concept = next((c for c in course_concepts if c["concept_id"] == cid), None)
+            if not concept:
+                continue
+            
+            difficulty = concept.get('difficulty', 2)
+            time_est = concept.get('time_estimate', 60) / 60
+            
+            path.append({
+                "day": int(hours_used / hours_per_day) + 1,
+                "concept": cid,
+                "concept_name": concept.get('name', cid),
+                "difficulty": difficulty,
+                "estimated_hours": round(time_est, 1),
+                "chain_mode": "TOT_GENERATED", # Mark as AI generated
+                "recommended_type": self._recommend_content_type(
+                    difficulty,
+                    learner_profile.get("preferred_learning_style", "VISUAL")
+                )
+            })
+            
+            hours_used += time_est
+            current_mastery[cid] = max(0.1, 0.5 - (difficulty * 0.08))
+
+        pacing = self._determine_pacing(hours_used, total_available, len(path))
+        
+        return {
+            "success": True,
+            "path": path,
+            "pacing": pacing,
+            "total_hours": round(hours_used, 1),
+            "current_mastery": current_mastery
+        }
     
     def _select_chain_mode(self, last_result: Optional[str]) -> ChainingMode:
         """

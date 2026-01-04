@@ -18,18 +18,26 @@ graph TD
         PKG --> STATE
     end
 
-    subgraph Phase2_Intent[Phase 2: Intent & State]
+    subgraph Phase2_Intent[Phase 2: Intent & Method Ontology]
         Q --> CLASSIFY[Classify Intent]
-        STATE --> NEXT_STATE{Determine Socratic State}
-        CLASSIFY --> NEXT_STATE
-        NEXT_STATE -->|Misconception| REFUTE[REFUTATION]
-        NEXT_STATE -->|Help| SCAFFOLD[SCAFFOLDING]
-        NEXT_STATE -->|Curious| PROBE[PROBING]
-        NEXT_STATE -->|Mastery| TEACH[TEACH_BACK]
+        STATE --> NEXT_PHASE{Determine Phase}
+        CLASSIFY --> NEXT_PHASE
+        NEXT_PHASE -->|Intro| PROBE[Lightweight Probing]
+        NEXT_PHASE -->|Scaffolding| COT_LOOP[Hidden CoT Loop]
+        NEXT_PHASE -->|Assessment| HANDOFF[Handoff to Evaluator]
+    end
+
+    subgraph Phase2a_CoT[Dynamic CoT Loop]
+        COT_LOOP --> GEN[Generate 3 Traces]
+        GEN --> CONSENSUS{Consensus?}
+        CONSENSUS -->|Yes| SLICE[Slice Steps]
+        CONSENSUS -->|No| FALLBACK[Ask Clarification]
+        SLICE --> SERVE[Serve Next Hint]
     end
 
     subgraph Phase3_Grounding[Phase 3: 3-Layer Grounding]
         PROBE --> G_START[Start Grounding]
+        COT_LOOP --> G_START
         G_START -->|Async| RAG[Layer 1: RAG]
         G_START -->|Async| C_KG[Layer 2: Course KG]
         G_START -->|Async| P_KG[Layer 3: Personal KG]
@@ -45,9 +53,10 @@ graph TD
 
     subgraph Phase4_Response[Phase 4: ResponseGen]
         CALC --> CHECK{Confidence > 0.5?}
-        CHECK -->|No| FALLBACK[Ask Clarification]
-        CHECK -->|Yes| LLM[Generate Socratic Response]
-        LLM --> HARVARD[Enforce Harvard 7 Principles]
+        CHECK -->|No| FALLBACK_GEN[Ask Clarification]
+        CHECK -->|Yes| LLM[Generate Response]
+        LLM --> GUARD[Leakage Guard]
+        GUARD --> HARVARD[Enforce Harvard 7 Principles]
     end
 
     subgraph Phase5_Output[Phase 5: Output]
@@ -59,18 +68,14 @@ graph TD
 
 ## 2. Key Components
 
-### 2.1 Reverse Socratic State Machine
-Logic determines the next pedagogical step based on `hint_level`, `conversation_turns`, and `mastery`.
+### 2.1 Hybrid Architecture: Method Ontology + CoT
+The Agent uses a high-level **Method Ontology** (Chandrasekaran 1999) to manage the pedagogical goal, and **Chain-of-Thought** (Wei 2022) to generate the content.
 
-| State | Condition | Goal |
+| Phase | Condition | Mechanism |
 | :--- | :--- | :--- |
-| **PROBING** | Default or SENSE_MAKING intent | Deepen understanding via questions. |
-| **SCAFFOLDING** | HELP_SEEKING or `hint_level=1` | Provide conceptual support. |
-| **GUIDING** | `hint_level=2` | Give structural hints (analogies). |
-| **EXPLAINING** | `hint_level=3` | Direct explanation. |
-| **CONCLUSION** | `hint_level=4` or >5 turns | Synthesize and close. |
-| **REFUTATION** | Misconception detected | Correct factual errors. |
-| **TEACH_BACK** | Mastery > 0.7 (40% chance) | Ask learner to explain. |
+| **INTRO** | New Concept | Lightweight Probing (Socratic Question). |
+| **SCAFFOLDING** | Concept identified | **Hidden CoT**: Generates internal traces, slices them, and serves step-by-step hints. |
+| **ASSESSMENT** | Mastery check needed | **Handoff**: Transfers control to Agent 5 (Evaluator) for grading. |
 
 ### 2.2 3-Layer Grounding (Async)
 Parallel retrieval from three sources to ensure hallucination-free responses.

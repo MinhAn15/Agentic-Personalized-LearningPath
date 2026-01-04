@@ -61,11 +61,14 @@ class DialogueState:
         self.correct_answers = 0
         
         # Content tracking
-        self.last_user_response = ""
         self.last_intent = UserIntent.GENERAL
         self.interaction_log: List[Dict] = []
         self.suspected_misconceptions: List[Dict] = []
         self.hints_given: List[str] = []
+        
+        # CoT Slicing State
+        self.current_cot_trace: List[str] = [] # Stores sliced steps
+        self.cot_step_index: int = 0           # Current step to serve
         
         # Timestamps
         self.created_at = datetime.now()
@@ -155,6 +158,8 @@ class DialogueState:
             'interaction_log': self.interaction_log,
             'suspected_misconceptions': self.suspected_misconceptions,
             'hints_given': self.hints_given,
+            'current_cot_trace': self.current_cot_trace,
+            'cot_step_index': self.cot_step_index,
             'last_intent': self.last_intent.value,
             'created_at': self.created_at.isoformat(),
             'last_updated': self.last_updated.isoformat()
@@ -176,5 +181,7 @@ class DialogueState:
         state.interaction_log = data.get('interaction_log', [])
         state.suspected_misconceptions = data.get('suspected_misconceptions', [])
         state.hints_given = data.get('hints_given', [])
+        state.current_cot_trace = data.get('current_cot_trace', [])
+        state.cot_step_index = data.get('cot_step_index', 0)
         state.last_intent = UserIntent(data.get('last_intent', 'GENERAL'))
         return state

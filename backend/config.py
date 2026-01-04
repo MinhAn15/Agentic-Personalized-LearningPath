@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
     CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
+
+    # ============================================
+    # Agent 3: Path Planner
+    # ============================================
+    LINUCB_ALPHA: float = 0.1  # Exploration parameter
+    TOT_BEAM_WIDTH: int = 3
+    TOT_LOOKAHEAD_DEPTH: int = 3
     
     class Config:
         env_file = ".env"

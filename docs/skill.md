@@ -1,98 +1,109 @@
-# Skill: Semantic Knowledge Tracing Upgrade (LKT/DKT Hybrid)
+# Skill: Tree of Thoughts (ToT) Path Planner Strategy
 
 ## 1. Context & Objective
-Upgrade the Learner Profiler from **Bayesian Knowledge Tracing (BKT)** (scalar, discrete) to a **LLM-based Semantic Tracing** architecture.
-*   **Primary Source:** *Language Model Can Do Knowledge Tracing (LKT)* [Lee et al.].
-*   **Foundational Logic:** *Deep Knowledge Tracing (DKT)* [Piech et al.].
-*   **Goal:** Leverage pre-trained semantic understanding to solve the "Cold Start" problem and capture latent dependencies between concepts that BKT misses.
+Upgrade the current **LinUCB Path Planner** (Greedy/Myopic) to a **Tree of Thoughts (ToT)** architecture to enable strategic lookahead.
+*   **Current Limit:** LinUCB optimizes for *immediate* mastery, failing to identify "scaffolding" paths (teaching a hard concept now to unlock easier concepts later).
+*   **Target:** Implement "System 2" reasoning (slow, deliberate search) to plan curriculum paths by simulating future learner states.
+*   **Source Authority:** *Tree of Thoughts: Deliberate Problem Solving with LLM* [Yao et al., NeurIPS 2023].
 
-## 2. Data Engineering: The LKT Input Format
+## 2. Architecture Specification
 
-Unlike DKT which uses numerical IDs ($q_t, a_t$), the system must transform interactions into a **textual sequence** to utilize the PLM's semantic power.
+The system must implement the four pillars of ToT defined in the paper: **Decomposition, Generator, Evaluator, and Search Algorithm**.
 
-### 2.1. Tokenization Strategy
-*   **Input Sequence Construction:** Concatenate Knowledge Concepts (KCs), Question Texts, and Responses into a single stream.
-*   **Special Tokens:** Use `[CLS]` for start, `[EOS]` for end. Use specific tokens `[CORRECT]` and `[INCORRECT]` for outcomes.
-*   **Masking Logic:** To train the model to predict mastery, replace 15% of the response tokens with `[MASK]`.
+### 2.1. Thought Decomposition
+*   **Definition:** Instead of generating token-by-token, the atomic unit of reasoning is a **"Curriculum Step"** (Thought).
+*   **Structure:** A "Thought" $z$ is defined as `{Next_Concept_ID, Pedagogical_Strategy, Expected_Difficulty}`.
 
-### 2.2. Prompt Template (Strict Construction)
-*Reference: LKT Paper, Section 3.2 & Figure 1,*
-
-The AI must format the history buffer ($H_t$) into the following string structure before tokenization:
-
-```text
-[CLS] KC_Content_1 \n Question_Text_1 [Response_Token_1] KC_Content_2 \n Question_Text_2 [Response_Token_2] ... KC_Target \n Question_Target [MASK] [EOS]
-```
-
-**Variables:**
-*   `KC_Content`: Text description of the concept (e.g., "Calculating area").
-*   `Question_Text`: The actual problem text (e.g., "A rectangular room measures 12 by 15...").
-*   `Response_Token`: Either `[CORRECT]` or `[INCORRECT]`.
-*   `Target`: The next step we want to predict probability for.
-
-**Example Data Block:**
-```text
-KCs : Calculating area Questions : A rectangular room measures 12 feet by 15 feet. What is the area? Responses : [CORRECT]
-KCs : Finding perimeter Questions : What is the perimeter... Responses : [MASK]
-```
-
-## 3. Model Architecture & Training
-
-### 3.1. Backbone Selection
-*   **Model:** Use **DeBERTa-v3** or **RoBERTa** (proven to outperform standard BERT in LKT benchmarks).
-*   **Mechanism:** Encoder-based PLM. The model does *not* generate text; it classifies the token at the `[MASK]` position.
-
-### 3.2. Prediction Head (Mathematical Logic)
-Instead of a simple classification, we extract the logit for the `[MASK]` token at position $m$.
-
-*   **Equation:** $\hat{y}_{m} = \sigma(h_m)$.
-    *   $h_m$: Hidden state vector at mask position.
-    *   $\sigma$: Sigmoid function mapping to probability $(0, 1)$.
-    *   **Output:** The probability that the student will answer `[CORRECT]`.
-
-### 3.3. Loss Function
-Use **Binary Cross-Entropy (BCE)** loss between predicted probability $\hat{y}$ and actual correctness $y$ (0 or 1).
-*   **Formula:** $L = - \sum [y \log(\hat{y}) + (1-y) \log(1-\hat{y})]$.
-
-## 4. Solving Specific Problems
-
-### 4.1. The "Cold Start" Problem
-*   **Challenge:** New students or new questions have no history $H_t$. BKT fails here.
-*   **LKT Solution:** Do *not* initialize with random weights. Rely on the **Pre-trained Knowledge** of the LLM. The model understands from the text "Calculating area" that it is related to "Multiplication", even with zero interaction history.
-*   **Heuristic:** For a cold-start student, feed the `Question_Text` with an empty history. The model will output a probability based purely on the semantic difficulty of the text.
-
-### 4.2. Curriculum Optimization (Next Step Recommendation)
-*   **DKT Logic:** Use the trained model to simulate future states.
-*   **Algorithm:** **Expectimax / Greedy Lookahead**,.
-    1.  Candidate Generation: Select $k$ potential next questions ($q_{next}$).
-    2.  Simulation: Append each $q_{next}$ to the student's current history string with a `[MASK]` token.
-    3.  Evaluation: Query the LKT model to get $P(Correct | History, q_{next})$.
-    4.  Selection: Choose the question that yields the optimal probability (e.g., closest to 0.5 for ZPD or highest for mastery confirmation).
-
-## 5. Interpretability & "Whitebox" Analysis
-
-To prevent "Hallucinated Competence" and ensure the model isn't guessing, implement **Attention Analysis**.
-
-### 5.1. Attention Map Extraction
-*   **Action:** Extract attention weights from the last layer for the `[MASK]` token.
-*   **Verification:** Check which tokens have the highest weights.
-    *   *Good Signal:* High attention on domain-specific terms (e.g., "integers", "odd positive").
-    *   *Bad Signal:* High attention on stop words ("the", "is") or irrelevant context.
-
-### 5.2. LIME Integration (Optional)
-If computational resources allow, run LIME (Local Interpretable Model-agnostic Explanations) to identify which words contributed most to a "Pass" prediction.
-
-## 6. Implementation Checklist for AI Agent
-
-1.  [ ] **Tokenizer Update:** Add special tokens `[CORRECT]`, `[INCORRECT]` to the PLM tokenizer.
-2.  [ ] **Data Pipeline:** Create a function `format_interaction_history(user_log) -> string` following the LKT template.
-3.  [ ] **Model Registry:** Load `deberta-v3-base`. Replace the head with a binary classification layer on top of the hidden state.
-4.  [ ] **Inference Function:**
+### 2.2. Search Algorithm: Breadth-First Search (BFS)
+*Rationale:* BFS (Algorithm 1 in Source) allows us to explore the top $b$ most promising curriculum paths in parallel.
+*   **Parameters:**
+    *   $b$ (Beam Width): **3** (Keep top 3 most promising paths).
+    *   $T$ (Depth): **3** (Look ahead 3 teaching steps).
+*   **Logic Flow:**
     ```python
-    def predict_mastery(history_str):
-        tokenized = tokenizer(history_str + " [MASK]", return_tensors='pt')
-        logits = model(**tokenized).last_hidden_state
-        mask_idx = (tokenized.input_ids == tokenizer.mask_token_id).nonzero()
-        return sigmoid(linear_layer(logits[mask_idx]))
+    # Pseudo-code based on ToT Algorithm 1
+    current_frontier = [initial_student_state]
+    for step in range(lookahead_depth):
+        candidates = []
+        for state in current_frontier:
+            # 1. Generator: Propose next concepts
+            next_thoughts = generate_thoughts(state, k=3)
+            for thought in next_thoughts:
+                # 2. Evaluator: Simulate future outcome
+                value = evaluate_state(state + thought)
+                candidates.append((state + thought, value))
+        
+        # 3. Selection: Beam Search (Keep top b)
+        current_frontier = select_top_b(candidates, b=3)
+    
+    return best_path_in_frontier
     ```
-5.  [ ] **Safety Check:** If history is empty, ensure the prompt includes the full text of the incoming question to leverage Zero-shot capabilities.
+
+## 3. Prompt Engineering (Strictly Adapted from Source)
+
+The implementation requires two distinct LLM calls per step: **Generation** and **Valuation**.
+
+### 3.1. Thought Generator (Propose Prompt)
+*Reference: Game of 24 "Propose Prompt" (Source)*
+*   **Role:** Generate potential next steps without judging them yet.
+*   **Adaptation:** Unlike standard CoT which outputs one path, this must output $k$ distinct options.
+
+```text
+Input:
+Student Profile: {History, Current_Mastery_Vector}
+Current Goal: {Target_Concept}
+
+Instruction:
+Propose 3 distinct next concepts to teach that could serve as valid next steps.
+- Option 1 should be a "Review" step (consolidate foundation).
+- Option 2 should be a "Scaffolding" step (intermediate difficulty).
+- Option 3 should be a "Challenge" step (direct approach to target).
+
+Output format (JSON):
+[
+  {"concept": "Concept_A", "strategy": "review", "reason": "..."},
+  {"concept": "Concept_B", "strategy": "scaffold", "reason": "..."},
+  {"concept": "Concept_C", "strategy": "challenge", "reason": "..."}
+]
+```
+
+### 3.2. State Evaluator (Value Prompt)
+*Reference: Game of 24 "Value Prompt" (Source)*
+*   **Role:** Perform "Lookahead Simulation". Predict the learner's future state if this path is chosen.
+*   **Strategy:** **(a) Value each state independently** (Source). The LLM acts as a heuristic function $V(s)$.
+
+```text
+Input:
+Proposed Path: {Current_State} -> {Next_Concept}
+Student Profile: {Mastery_Vector}
+
+Instruction:
+Evaluate this teaching step. Perform a mental simulation of the student learning this concept.
+Consider:
+1. Prerequisites: Does the student have the required background?
+2. Scaffolding Value: Will learning this make future concepts easier?
+3. Frustration Risk: Is the gap too wide?
+
+Assign a "Strategic Value" score (1-10) considering LONG-TERM benefit, not just immediate success.
+- 1: Impossible/Harmful (Student will quit).
+- 5: Neutral/Safe (Standard progression).
+- 10: High Leverage (Unlocks multiple future nodes).
+
+Output format:
+{"simulation_reasoning": "If we teach X, the student might struggle initially but will master Y 2x faster...", "value_score": 8}
+```
+
+## 4. Implementation Checklist for AI Agent
+
+1.  [ ] **State Manager:** Define a class `ToTNode` that stores the chain of thoughts (path history) and the cumulative value score.
+2.  [ ] **Switch Mechanism:**
+    *   If `User_Query` implies simple retrieval $\rightarrow$ Use Standard RAG (System 1).
+    *   If `User_Query` is "Create a Study Plan" or "I'm stuck, guide me" $\rightarrow$ Trigger **ToT Pipeline** (System 2).
+3.  [ ] **Parallel Execution:** Since ToT requires $b \times k$ calls per step, implement `async/await` for the Generation and Evaluation steps to reduce latency (Source notes cost/latency is higher, so optimization is key).
+4.  [ ] **Safety Pruning:** Implement a hard rule: If `value_score < 3` (Source), prune the branch immediately (DFS/Pruning logic) to save tokens.
+
+## 5. Whitebox Analysis & Constraints
+
+*   **Why BFS?** The paper demonstrates that for tasks with a clear "depth limit" (like `Game of 24` or a 3-step curriculum), BFS performs better than DFS because it retains diversity at each step (Source).
+*   **Myopia vs. Lookahead:** The standard Bandit (LinUCB) only sees the reward at $t+1$. This ToT implementation explicitly prompts the LLM to verify "possibility of reaching 24" (analogous to "reaching Mastery") in the future steps (Source), effectively solving the myopia problem.
+*   **Cost Warning:** ToT uses approx 5-10x more tokens than standard CoT (Source). Ensure this is only triggered for high-stakes planning decisions.

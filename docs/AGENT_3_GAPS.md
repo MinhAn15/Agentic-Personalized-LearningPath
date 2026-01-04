@@ -1,27 +1,29 @@
-# Agent 3 Gaps: Path Planner
+# Agent 3: Identified Gaps & Technical Debt
 
-> **Priority**: Medium-High
+> **Status**: Open
+> **Date**: 2026-01-04
+> **Priority**: High
 
-## 1. Concurrency: Feedback Race Condition
-- **Status**: 🔴 **OPEN**
-- **Description**: `_on_evaluation_feedback` performs "Read-Modify-Write" on Redis data (`mab_stats` and `linucb_arm`) without locking.
-- **Impact**: If multiple learners complete evaluations simultaneously (or same learner rapid-fires), updates to the LinUCB model (Matrix A) could be overwritten (Lost Update), corrupting the learning model.
-- **Proposed Fix**: Implement **Redis Distributed Lock**, similar to Agent 2.
+## 1. ToT Implementation is Disconnected
+- **Status**: 🔴 **CRITICAL**
+- **Description**: The method `_get_reachable_concepts` returns `[]`.
+- **Impact**: The Beam Search (`_beam_search`) immediately terminates, effectively disabling the ToT Planner.
+- **Required Fix**: Implement Graph traversal in `_get_reachable_concepts` OR implement the "Thought Generator" LLM prompt to propose steps.
 
-## 2. Config: Hardcoded Thresholds
-- **Status**: 🟡 **OPEN**
-- **Description**: Constants like `0.8` (Gate), `0.7` (Prereq), `0.1` (Review Chance) are hardcoded in the logic.
-- **Impact**: Difficult to tune or experiment with different pedagogical strategies without code changes.
-- **Proposed Fix**: Extract to `backend.core.constants` or `backend.config.Settings`.
+## 2. Weak Evaluator Prompt
+- **Status**: 🔴 **CRITICAL**
+- **Description**: `_evaluate_path_viability` uses a generic "Act as a Curriculum Architect" prompt.
+- **Impact**: It lacks the "Mental Simulation" required by ToT (predicting future mastery state).
+- **Required Fix**: alignment with `skill.md` "State Evaluator" specification (Simulation Reasoning + Value Score).
 
-## 3. Testability: Non-Deterministic Logic
-- **Status**: 🟡 **OPEN**
-- **Description**: The Probabilistic Gate uses `random.random()` directly.
-- **Impact**: Tests are flaky or require complex mocking of the random module.
-- **Proposed Fix**: Inject a `seed` or wrap random logic in a helper that can be mocked/controlled.
+## 3. Missing Thought Generator
+- **Status**: 🟡 **MAJOR**
+- **Description**: Current logic selects concepts via Graph Neighbors.
+- **Impact**: It misses "Strategic" steps (Review vs Scaffold vs Challenge) which are the core "Thoughts" in the ToT paper.
+- **Required Fix**: Implement the "Propose Prompt" (Review/Scaffold/Challenge) in `_explore_learning_paths`.
 
-## 4. Performance: Synchronous Loops
-- **Status**: 🟢 **LOW**
-- **Description**: `_get_chain_candidates` iterates and checks prereqs in Python loops.
-- **Impact**: Likely negligible for now (Limit 100 concepts), but could scale poorly if graph grows.
-- **Proposed Fix**: Keep as is for now, monitor.
+## 4. Hybrid Conflicting Logic
+- **Status**: 🟡 **MAJOR**
+- **Description**: The class has both `_generate_adaptive_path` (LinUCB) and `_explore_learning_paths` (ToT).
+- **Impact**: It is unclear which valid logic is prioritized. `execute` currently calls `_generate_adaptive_path` (LinUCB).
+- **Required Fix**: Refactor `execute` to use ToT (`_explore_learning_paths`) as the primary "System 2" planner, potentially keeping LinUCB as a "System 1" heuristic.

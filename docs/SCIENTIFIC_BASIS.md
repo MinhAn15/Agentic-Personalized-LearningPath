@@ -36,12 +36,12 @@ This document defines the **Target Architecture** based on the latest research i
 
 ### 1. Tree of Thoughts (ToT)
 *   **Source**: *Yao, S., et al. (2023). "Tree of Thoughts: Deliberate Problem Solving with Large Language Models."*
-*   **Concept**: Treating curriculum generation as a search problem over a tree of "Reasoning Steps" (Thoughts) rather than a greedy selection.
-*   **Mechanism (Implemented)**:
-    *   **Algorithm**: Beam Search ($b=3$, $d=3$).
-    *   **Thought Generator**: `_explore_learning_paths` generates top-3 candidate concepts.
-    *   **State Evaluator**: `_evaluate_path_viability` uses LLM to simulate future learner states (Projected Mastery) and scores paths from 0.0 to 1.0.
-    *   **Selection**: The system selects the path with the highest cumulative educational value, reducing "Myopia" (short-sighted teaching).
+*   **Concept**: Curriculum generation as a **Search Problem** over a tree of reasoning steps ($z$: "Curriculum Step"), enabling strategic lookahead (System 2) vs greedy selection (System 1).
+*   **Target Mechanism**:
+    *   **Thought Decomposition**: A thought is `{Next_Concept_ID, Strategy, Difficulty}`.
+    *   **Search**: BFS with Beam Width $b=3$ and Lookahead $T=3$.
+    *   **Thought Generator**: Proposes $k=3$ distinct next steps (Review, Scaffolding, Challenge).
+    *   **State Evaluator**: LLM simulates future mastery states and assigns a "Strategic Value" (1-10) for pruning.
 
 ### 2. Spaced Repetition (Ebbinghaus)
 *   **Source**: *Ebbinghaus, H. (1885). "Memory: A Contribution to Experimental Psychology."*
@@ -54,13 +54,14 @@ This document defines the **Target Architecture** based on the latest research i
 ## Agent 4: Tutor Agent
 **Role**: Interactive Pedagogy.
 
-### 1. Chain-of-Thought (CoT) & Self-Consistency
-*   **Source**: *Wei et al. (2022) "Chain-of-Thought Prompting"* & *Wang et al. (2022) "Self-Consistency Improves Chain of Thought Reasoning".*
-*   **Concept**: Making the model "think aloud" and validating logic via consensus.
+### 1. Dynamic Chain-of-Thought (CoT) & Method Ontology
+*   **Source**: *Wei et al. (2022) "Chain-of-Thought Prompting"* & *Chandrasekaran et al. (1999) "Ontologies for Task Method Structures".*
+*   **Concept**: Combining **Reasoning Traces** (CoT) with a structured **Task Methodology** (Ontology) to guide the scaffolding process.
 *   **Target Mechanism**:
-    *   **Hidden CoT**: Agent generates 3 internal reasoning traces.
-    *   **Self-Consistency**: It compares the traces. If they diverge, it falls back to Probing (low confidence). If they converge, it extracts the first missing step as a Scaffold.
-    *   **Leakage Guard**: Explicit filtering of "Final Answer" tokens to prevent premature revelation.
+    *   **Hybrid Architecture**: Retains a high-level `DialogueState` (Method Ontology: Intro -> Scaffolding -> Handoff) for flow control.
+    *   **Hidden CoT**: Agent generates 3 internal reasoning traces during the `SCAFFOLDING` phase.
+    *   **Self-Consistency**: Verifies majority consensus before serving a hint.
+    *   **Leakage Guard**: Explicit filtering of "Final Answer" and Slicing Logic to reveal one step at a time.
 
 ---
 

@@ -72,12 +72,13 @@ Use these prompts to validte the transition from Classical Algorithms to **SOTA 
 **Target Paper**: *Wei et al. (2022) "Chain-of-Thought Prompting"*
 
 **Context**:
-> "I am upgrading my Tutor Agent.
-> - **Current**: Socratic State Machine (Fixed transitions).
-> - **Goal**: 'Dynamic Chain-of-Thought'.
+> "I have upgraded my Tutor Agent to **Hybrid CoT + Method Ontology**.
+> - **Architecture**: Hybrid State Machine (Intro -> Scaffolding -> Handoff).
+> - **Innovation**: 'Method Ontology' (Chandrasekaran 1999) guides the phase, while 'Chain-of-Thought' (Wei 2022) generates the content.
 > - **Mechanism**:
->     1. When a student errs, the Agent generates a hidden Connect-the-Dots trace (CoT).
->     2. It reveals this trace one step at a time as 'Scaffolding'."
+>     1. **Hidden CoT**: Generates 3 internal reasoning traces during the `SCAFFOLDING` phase.
+>     2. **Slicing**: The logic is sliced into a sequence of hints (Method Steps) served one per turn.
+>     3. **Leakage Guard**: Strict regex filtering prevents the 'Final Answer' from leaking."
 
 **Prompt**:
 > "Review this CoT Scaffolding strategy.

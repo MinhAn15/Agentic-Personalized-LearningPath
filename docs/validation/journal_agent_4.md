@@ -36,3 +36,12 @@ We replaced the `SocraticState` Enum and strict FSM with a Dynamic CoT loop:
     *   ✅ Leakage Guard active (Answer Hidden).
     *   ✅ Scaffolding format verified.
     *   ✅ Legacy Socratic methods removed (No NameError).
+
+## 5. Refinement (2026-01-04): Hybrid CoT + Method Ontology
+**Trigger**: Scientific Audit revealed "Method Ontology" (Chandrasekaran 1999) is needed for structured scaffolding.
+**Action**:
+1.  **Restored `DialogueState`**: Re-integrated the State Machine to track phases (Intro -> Scaffolding -> Handoff).
+2.  **Slicing Logic**: Implemented `_slice_cot_trace` to serve the CoT plan one step at a time.
+3.  **SOTA Prompts**: Injected GSM8K/CSQA Exemplars into `_generate_cot_traces`.
+**Verification**:
+*   `test_agent_4_cot.py`: Confirmed phase transitions and sequential hint serving.
