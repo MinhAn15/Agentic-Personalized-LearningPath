@@ -58,7 +58,15 @@ Agent 2 subscribes to events to update the profile dynamically:
 | `EVALUATION_COMPLETED` | `_on_evaluation_completed` | Updates Mastery & Bloom Level. Applies Interest Decay. |
 | `PACE_CHECK_TRIGGERED` | `_on_pace_check` | Adjusts Learning Velocity. |
 
-## 5. Potential Issues
+## 5. Semantic Knowledge Tracing (LKT) [Upgrade 2026]
+*   **Method**: `_predict_mastery_lkt`
+*   **Trigger**: Called during `_update_learner_mastery`.
+*   **Logic**:
+    1.  **Format**: Flattens history to `[CLS] Concept \n Question [RESULT]`.
+    2.  **Inference**: Uses DeBERTa/LLM to predict correctness probability for the next concept.
+    3.  **Cold Start**: Uses semantic similarity of Question Text to estimate difficulty-based probability.
+
+## 6. Potential Issues
 *   **Concurrency**: Uses `asyncio.Lock` which is not distributed-safe.
 *   **Config**: Hardcoded paths for Vector Index.
 *   **Dependency**: Strict dependency on `llama-index-graph-stores-neo4j`.

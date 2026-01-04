@@ -144,7 +144,7 @@ ON MATCH SET l.goal = $goal, l.last_updated = datetime()
 - **Source:** Agent 5 (Evaluator)
 - **Process:**
   1. Acquire **Async Lock** (`learner_id`)
-  2. Update `concept_mastery_map`
+  2. **LKT Update**: Predict new mastery using Semantic History (`_predict_mastery_lkt`)
   3. **Bloom Logic:** $Bloom = 0.6 \times Score + 0.25 \times Difficulty + 0.15 \times QuestionType$
   4. **Interest Decay:** $\lambda = 0.95$
 

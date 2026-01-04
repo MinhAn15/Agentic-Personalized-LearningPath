@@ -27,22 +27,24 @@ Use these prompts to validte the transition from Classical Algorithms to **SOTA 
 
 ---
 
-## Agent 2: Deep Knowledge Tracing (DKT)
-**Target Paper**: *Piech et al. (2015) "Deep Knowledge Tracing" or Liu et al. (2024) "LLM Tracing"*
+## Agent 2: semantic Knowledge Tracing (LKT)
+**Target Paper**: *Lee et al. (2024) "Language Model Can Do Knowledge Tracing"*
 
 **Context**:
-> "I am upgrading my Learner Profiler.
-> - **Current**: Hybrid DKT-LLM Anchoring.
+> "I have upgraded my Learner Profiler to **Semantic Knowledge Tracing (LKT)**.
+> - **Previous**: Hybrid DKT (Prior + Adjustment).
+> - **Current**: **Pure Semantic LKT**.
 > - **Mechanism**:
->     1. **Community Prior**: I calculate a baseline pass rate based on difficulty (e.g., Hard=25%).
->     2. **LLM Adjustment**: I provide the LLM with this Prior AND the student's recent semantic history (errors, misconceptions).
->     3. **Prompt**: 'The baseline is [Prior]. Given the student's history [X], adjust this probability up or down.'"
+>     1. **Input Format**: I flatten the student's history into a semantic string: `[CLS] ConceptA \n QuestionA [CORRECT] ConceptB...`
+>     2. **Prediction**: I append the target concept/question and a `[MASK]` token.
+>     3. **Inference**: The LLM predicts the probability of `[CORRECT]` filling the mask based on the full semantic context (not just IDs).
+>     4. **Cold Start**: For new students, the model relies purely on the semantic difficulty of the `Question` text."
 
 **Prompt**:
-> "Evaluate this 'Hybrid Anchoring' approach against the principles of Deep Knowledge Tracing.
-> 1. Does providing a 'Community Prior' effectively solve the 'Cold Start' problem mentioned in the DKT paper (where LSTM hidden states are initialized)?
-> 2. By asking the LLM to 'adjust' a baseline rather than predict from scratch, do I sufficiently mitigate the 'Calibration Error' (Hallucination) risk?
-> 3. DKT assumes 'slip' and 'guess' are latent. How does my system account for 'Lucky Guesses' if the LLM sees a correct answer?"
+> "Evaluate this LKT implementation against the state-of-the-art:
+> 1. Does the 'Input Format' (Question Text + Outcome) provide enough signal for the LLM to capture 'Skill Transfer' (e.g., Algebra helping Physics)?
+> 2. The paper discusses 'Instruction Tuning'. Is my zero-shot prompt robust enough, or must I fine-tune on a dataset like ASSISTments?
+> 3. How does LKT compare to DKT in terms of 'interpretability'? Can I ask the LLM *why* it predicted 0.8?"
 
 ---
 

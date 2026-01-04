@@ -28,3 +28,9 @@
 - **Description**: `_vectorize_profile` is an async method but performs pure CPU-bound math.
 - **Impact**: Not a huge issue now, but conceptually it blocks the event loop slightly.
 - **Proposed Fix**: Keep as async but ensure no I/O blocking inside. (Low priority).
+
+## 5. Intelligence: Cold Start & Semantic Blindness
+- **Status**: ✅ **RESOLVED** (2026-01-04)
+- **Description**: Previous BKT/DKT models treated concepts as isolated IDs, failing to use semantic relationships for new students (Cold Start).
+- **Fix Implemented**: Upgraded to **Semantic Knowledge Tracing (LKT)**.
+- **Mechanism**: Hybrid LKT/DKT logic where the LLM predicts mastery using the *semantic context* of questions, allowing zero-shot estimation for new concepts.
