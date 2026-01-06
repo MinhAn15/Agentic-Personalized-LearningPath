@@ -19,10 +19,12 @@ graph TD
         QUERY --> LOAD
     end
 
-    subgraph Phase2_Scoring[Phase 2: Semantic Scoring]
-        LOAD --> SCORE[Semantic Scorer (0-1)]
+    subgraph Phase2_Scoring[Phase 2: JudgeLM Scoring]
+        LOAD --> SCORE[JudgeLM (Reference-as-Prior)]
         EXP --> SCORE
-        SCORE --> THRESHOLD{Score >= 0.8?}
+        SCORE --> TRACE[CoT Reasoning Trace]
+        TRACE --> CALC[Weighted Score (0-10)]
+        CALC --> THRESHOLD{Score >= 0.8?}
     end
 
     subgraph Phase3_Analysis[Phase 3: Error Analysis]

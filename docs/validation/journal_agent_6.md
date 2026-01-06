@@ -1,32 +1,29 @@
-# Scientific Validation Journal - Agent 6 (KAG / Memory Agent)
+# Scientific Refinement Journal: Agent 6 (KAG/MemGPT)
 
-## 1. Audit Summary
-**Date**: 2026-01-04
-**Auditor**: NotebookLM (Google Gemini) + Antigravity
-**Focus Paper**: 
-1. Packer et al. (2023) - MemGPT: Towards LLMs as Operating Systems
+**Agent Name**: KAG Agent
+**Refinement Date**: January 6, 2026
+**Scientific Baseline**: MemGPT (Packer et al., 2023)
 
-## 2. Findings (Audit Phase)
-| ID | Topic | Current State | Gap |
-|----|-------|---------------|-----|
-| A6-01 | System Interrupts | Reactive (User triggers only). | **Fixed** (Added 70% Pressure Check) |
-| A6-02 | Memory Management | No token monitoring. | **Fixed** (Added `WorkingMemory` class) |
-| A6-03 | Persistence | Stop-and-Wait execution. | **Fixed** (Added Heartbeat Loop) |
+## 1. Initial State (Audit Diagnosis)
+*   **Gap Identified**: The agent treated the Context Window as infinite (or just a simple list), lacking "Operating System" capabilities like Paging, Interrupts, or autonomous looping. It required manual triggers for every action.
+*   **Scientific Violation**: "Stop-and-Wait" logic violates the MemGPT principle of "LLMs as Operating Systems" which requires autonomous resource management.
 
-## 3. Refinement Strategy (Plan)
-We will upgrade `kag_agent.py` to become a **MemGPT-lite Orchestrator**:
+## 2. Refinement Actions
+*   **Implementation**:
+    *   **Tiered Memory**: Created `WorkingMemory` class with *System*, *Core* (Pinned), and *Queue* segments.
+    *   **OS Kernel**: Implemented a recursive `execute` loop (Heartbeat) that compiles context, calls tools, and recurses until a final answer is generated.
+    *   **Interrupts**: Added `is_pressure_high()` check (>70% tokens) which triggers `_auto_archive` (Evict -> Summarize -> Store).
+    *   **Function Tools**: Added discrete `core_memory_append` and `archival_memory_search` tools for the LLM to call.
+*   **Files Modified**: `backend/agents/kag_agent.py`.
 
-1.  **Architecture Change**:
-    *   Introduce `WorkingMemory` class (Simulated RAM).
-    *   Introduce `ArchivalStorage` interface (Neo4j / Vector).
+## 3. Verification Results
+*   **Script**: `scripts/test_agent_6_memgpt.py`
+*   **Outcome**:
+    *   [x] **Heartbeat Loop**: Confirmed recursive function chaining (LLM called tool, output fed back, LLM answered).
+    *   [x] **Memory Pressure**: Confirmed `_auto_archive` triggered when max tokens exceeded.
+    *   [x] **Context Compilation**: Confirmed Syste/Core/Queue segments assembled correctly.
 
-2.  **The "Heartbeat" Loop**:
-    *   Modify `execute` to run a loop: `while request_heartbeat: step()`.
-
-3.  **Memory Monitor**:
-    *   Implement `_check_memory_pressure()`: If context > 70%, inject `SYSTEM ALERT: MEMORY PRESSURE` into the message history.
-
-## 4. Implementation Steps
-1.  Define `WorkingMemory` structure.
-2.  Implement `FunctionTool` set (`retrieve_core_memory`, `archival_search`).
-3.  Refactor `execute` into an event loop.
+## 4. Documentation Sync
+*   **Theory**: Updated `SCIENTIFIC_BASIS.md` with specific MemGPT implementation details.
+*   **Flow**: Updated `AGENT_6_FLOW.md` to visualize the OS Kernel loop.
+*   **Prompts**: Updated `NOTEBOOKLM_PROMPTS.md` with the new memory architecture context.

@@ -32,3 +32,14 @@ We will upgrade `_score_response` to implement **JudgeLM** style scoring:
 ## 4. Verification
 *   **Script**: `scripts/verify_judgelm.py`
 *   **Metric**: Check if subtle errors (e.g., "Partial correct") receive granular scores (e.g., 0.5-0.7) backed by reasoning.
+
+## 5. Refinement (2026-01-06): JudgeLM Implementation
+**Trigger**: Scientific Audit revealed "Position Bias" and need for strict "Reference-as-Prior".
+**Action**:
+1.  **Strict Prompt**: Implemented Figure 5 Prompt from JudgeLM paper.
+    *   Reference = "Assistant 1" (Score 10).
+    *   Learner = "Assistant 2".
+2.  **Logic**: `_score_response` now outputs `10.0 {score}` notation.
+3.  **Rubric**: Injected weights for Correctness (0.6), Completeness (0.2), Clarity (0.2).
+**Verification**:
+*   `test_agent_5_judgelm.py`: Passed. Confirmed correct parsing and JSON fallback.

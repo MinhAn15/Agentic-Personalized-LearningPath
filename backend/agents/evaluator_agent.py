@@ -397,76 +397,91 @@ class EvaluatorAgent(BaseAgent):
         target_bloom_level: int = 2
     ) -> Dict[str, Any]:
         """
-        Score learner response using JudgeLM / G-Eval Methodology (Zhu 2023).
+        Score learner response using JudgeLM Methodology (Zhu et al., 2023).
         
-        Technique: Reference-as-Prior with CoT Grading.
-        - "Assistant 1" (Reference) is the anchor (Score 10/10).
-        - "Assistant 2" (Student) is compared against the Reference.
-        - CoT Trace: Forces analysis before scoring to reduce bias.
+        Technique: Reference-as-Prior (Assistant 1 = Golden).
+        Scientific Basis: "JudgeLM: Fine-tuned Large Language Models are Scalable Judges"
         """
         try:
+            # Construct strict JudgeLM Prompt (Figure 5 adapted)
             prompt = f"""
-            Task: Evaluate the Student's response against the Golden Reference.
-            
-            [Question Context]
-            Target Bloom Level: {target_bloom_level}
-            
-            [Assistant 1: GOLDEN REFERENCE]
-            Response: {expected_answer}
-            Reasoning: {explanation}
-            Score: 10.0 / 10.0 (Standard of Truth)
-            
-            [Assistant 2: STUDENT RESPONSE]
-            Response: {learner_response}
-            
-            [Evaluation Rubric]
-            1. Correctness (Weight 0.6): Factual alignment with Reference.
-            2. Completeness (Weight 0.2): Coverage of key points in Reference.
-            3. Clarity (Weight 0.2): Coherence and articulation.
-            
-            [Instruction]
-            Step 1: Compare Assistant 2 to Assistant 1. Identify gaps or misconceptions.
-            Step 2: Generate a "Justification Trace" explaining the quality.
-            Step 3: Assign a weighted score (0.0 to 10.0).
-            
-            Return ONLY valid JSON:
-            {{
-                "justification_trace": "Analysis of gaps...",
-                "score": 0.0-10.0,
-                "dimensions": {{
-                    "correctness": 0-10,
-                    "completeness": 0-10,
-                    "clarity": 0-10
-                }}
-            }}
+You are a helpful and precise assistant for checking the quality of the answer.
+
+[Question]
+The user asked a question requiring a Bloom Level {target_bloom_level} response.
+(Implied Question from Truth): "{explanation}"
+
+[The Start of Assistant 1's Answer]
+{expected_answer}
+[The End of Assistant 1's Answer]
+
+[The Start of Assistant 2's Answer]
+{learner_response}
+[The End of Assistant 2's Answer]
+
+[System]
+We would like to request your feedback on the performance of two AI assistants in response to the user question.
+Assistant 1 is the Reference Answer and receives a score of 10.
+Please rate the helpfulness, relevance, accuracy, and level of details of Assistant 2's response compared to Assistant 1.
+Assistant 2 receives an overall score on a scale of 1 to 10, where a higher score indicates better overall performance.
+
+[Rubric]
+- Correctness (Weight 0.6): Factual alignment with Reference.
+- Completeness (Weight 0.2): Coverage of key points.
+- Clarity (Weight 0.2): Coherence.
+
+Please first output a single line containing only two values indicating the scores for Assistant 1 and 2, respectively. The two scores are separated by a space.
+In the subsequent line, please provide a comprehensive explanation of your evaluation, avoiding any potential bias. 
+Finally, output a JSON block with the broken down dimensions.
+
+Output Format:
+10.0 <score_for_assistant_2>
+<Explanation_Trace>
+```json
+{{
+    "correctness": <0-10>,
+    "completeness": <0-10>,
+    "clarity": <0-10>
+}}
+```
             """
             
             response = await self.llm.acomplete(prompt)
             raw_text = response.text.strip()
+            self.logger.debug(f"JudgeLM Raw Output: {raw_text[:200]}...")
             
-            # Log raw trace for debugging
-            self.logger.debug(f"JudgeLM Raw Trace: {raw_text[:100]}...")
+            # Parsing Logic (Robust regex)
+            # Pattern 1: Look for "10.0 <score>" at start
+            score_match = re.search(r"^10(?:\.0)?\s+(\d+(?:\.\d+)?)", raw_text)
             
-            # Parse JSON
-            try:
-                # Helper to find JSON block
-                json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group())
-                    raw_score = float(data.get("score", 0.0))
-                    normalized_score = min(1.0, max(0.0, raw_score / 10.0))
-                    
-                    # Store trace for potential feedback augmentation
-                    # (Optional: return in result dict if needed)
-                    
-                    return {"success": True, "score": normalized_score}
-                else:
-                    self.logger.warning("JudgeLM: No JSON found in response")
-                    return {"success": False, "score": 0.0}
-            except Exception as e:
-                self.logger.warning(f"JudgeLM Parse Error: {e} - Raw: {raw_text}")
-                return {"success": False, "score": 0.0}
-                
+            # Pattern 2: Look for JSON block
+            json_match = re.search(r"```json(.*?)```", raw_text, re.DOTALL)
+            
+            final_score = 0.0
+            
+            if score_match:
+                raw_score = float(score_match.group(1))
+                final_score = min(1.0, max(0.0, raw_score / 10.0))
+            elif json_match:
+                # Fallback to JSON if the top line is missing
+                try:
+                    data = json.loads(json_match.group(1))
+                    # Average dimensions if main score missing
+                    c = data.get("correctness", 0)
+                    cp = data.get("completeness", 0)
+                    cl = data.get("clarity", 0)
+                    weighted = (c * 0.6) + (cp * 0.2) + (cl * 0.2)
+                    final_score = min(1.0, max(0.0, weighted / 10.0))
+                except:
+                    self.logger.warning("JudgeLM JSON Parse Failed")
+                    pass
+            
+            # Fail safe
+            if final_score == 0.0 and "10" not in raw_text:
+                 self.logger.warning(f"JudgeLM Parse Failed completely. Raw: {raw_text}")
+
+            return {"success": True, "score": final_score}
+
         except Exception as e:
             self.logger.error(f"JudgeLM Eval Error: {e}")
             return {"success": False, "score": 0.0}

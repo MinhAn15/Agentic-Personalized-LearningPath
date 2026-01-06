@@ -88,20 +88,61 @@ class KAGAgent(BaseAgent):
     # ==========================================
     
     class WorkingMemory:
-        """Simulates RAM for the Agent."""
-        def __init__(self, max_tokens=2048):
+        """
+        MemGPT-style Tiered Memory Architecture.
+        Segmented into:
+        1. System Instructions (Immutable)
+        2. Core Memory (Mutable, Pinned)
+        3. FIFO Queue (Mutable, Rolling)
+        """
+        def __init__(self, max_tokens=8192):
             self.max_tokens = max_tokens
-            self.current_context = [] # List of messages/facts
+            self.system_instructions = ""
+            self.core_memory = {} # Section -> Content
+            self.fifo_queue = []  # List of messages
             
-        def add(self, content: str):
-            self.current_context.append({"content": content, "timestamp": datetime.now()})
+        def set_system_instructions(self, content: str):
+            self.system_instructions = content
             
-        def get_context_size(self):
-            # Rough estimation (4 chars ~= 1 token)
-            return sum(len(c["content"]) for c in self.current_context) // 4
+        def append_core_memory(self, section: str, content: str):
+            if section not in self.core_memory:
+                self.core_memory[section] = ""
+            self.core_memory[section] += f"\n{content}"
             
-        def is_pressure_high(self):
-            return self.get_context_size() > (self.max_tokens * 0.7)
+        def replace_core_memory(self, section: str, content: str):
+            self.core_memory[section] = content
+            
+        def append_queue(self, message: Dict[str, Any]):
+            self.fifo_queue.append(message)
+            
+        def get_total_tokens(self) -> int:
+            # Simple heuristic: 4 chars ~ 1 token
+            sys_len = len(self.system_instructions)
+            core_len = sum(len(v) for v in self.core_memory.values())
+            queue_len = sum(len(str(m)) for m in self.fifo_queue)
+            return (sys_len + core_len + queue_len) // 4
+            
+        def is_pressure_high(self) -> bool:
+            return self.get_total_tokens() > (self.max_tokens * 0.7)
+            
+        def flush_queue(self, fraction=0.5) -> List[Dict[str, Any]]:
+            """Evict oldest messages from queue."""
+            cut_idx = int(len(self.fifo_queue) * fraction)
+            evicted = self.fifo_queue[:cut_idx]
+            self.fifo_queue = self.fifo_queue[cut_idx:]
+            return evicted
+            
+        def compile_prompt(self) -> str:
+            """Construct the full context window."""
+            core_block = "\n".join([f"### {k}\n{v}" for k,v in self.core_memory.items()])
+            return f"""
+{self.system_instructions}
+
+[CORE MEMORY]
+{core_block}
+
+[CONVERSATION HISTORY]
+            """
 
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None,
                  embedding_model=None, course_kg=None):
@@ -139,72 +180,244 @@ class KAGAgent(BaseAgent):
         if event_bus and hasattr(event_bus, 'subscribe'):
             event_bus.subscribe('EVALUATION_COMPLETED', self._on_evaluation_completed)
             self.logger.info("Subscribed to EVALUATION_COMPLETED")
+
+        # Initialize OS Prompt
+        self._init_os_prompt()
+
+    def _init_os_prompt(self):
+        """Load the OS-Level Persona into System Memory."""
+        persona = """
+You are MemGPT. You are not a chat bot, you are an Operating System for a Personal Knowledge Agent.
+Your task is to manage your own memory to assist the user long-term.
+
+[Memory Hierarchy Definitions]
+1. Main Context: What you can see right now. Limited space.
+2. Archival Storage: Your Knowledge Graph (Neo4j). Unlimited space, but you must search to see it.
+
+[Constraint]
+You cannot see data in Archival Storage unless you explicitly call `archival_memory_search`.
+If you receive a "System Alert: Memory Pressure", you MUST save important details from the conversation to Archival Storage or Core Memory before they are evicted.
+
+[Tools Available]
+- core_memory_append(section, content)
+- core_memory_replace(section, content)
+- archival_memory_insert(content)
+- archival_memory_search(query, page)
+"""
+        self.working_memory.set_system_instructions(persona.strip())
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """
-        Main execution method with MemGPT Heartbeat Loop.
-        
-        Scientific Basis: "Interrupts" and "Function Chaining" (MemGPT).
+        Main execution method (MemGPT OS Kernel).
+        Manages the Heartbeat Loop:
+        1. Check Interrupts (Memory Pressure).
+        2. Compile Context (System + Core + Queue).
+        3. LLM Generation.
+        4. Function Execution (Paging/Tools).
+        5. Yield or Recurse.
         """
         try:
             action = kwargs.get("action", "analyze")
             self.logger.debug(f"Executing action: {action}")
             
-            steps = 0
-            request_heartbeat = True
-            final_result = {}
+            # 0. Load Task into Queue (if not just a continuation)
+            task_desc = f"Action: {action}. Args: {json.dumps({k:v for k,v in kwargs.items() if k!='action'}, default=str)}"
+            self.working_memory.append_queue({"role": "user", "content": task_desc})
             
-            while request_heartbeat and steps < self.max_steps:
+            steps = 0
+            max_steps = self.max_steps
+            final_response = {}
+            
+            while steps < max_steps:
                 steps += 1
                 
-                # Monitor Memory Pressure (OS Interrupt)
+                # 1. OS Interrupt: Memory Pressure
                 if self.working_memory.is_pressure_high():
-                    self.logger.warning("⚠️ SYSTEM ALERT: MEMORY PRESSURE (>70%)")
-                    # In a full system, this would inject a system message prompt.
-                    # For now, we trigger an auto-save routine.
                     await self._auto_archive()
                 
-                # Execute Logic
-                if action == "generate_artifact":
-                    result = await self._generate_artifact(**kwargs)
-                elif action == "analyze":
-                    result = await self._analyze_system(**kwargs)
-                elif action == "sync_kg":
-                    result = await self._sync_dual_kg(**kwargs)
+                # 2. Compile Context
+                prompt_context = self.working_memory.compile_prompt()
+                
+                # 3. LLM Generation (System 2 Thinking)
+                # We expect the LLM to either:
+                # a) Call a function: [FUNCTION] name(args)
+                # b) Return a final answer
+                response = await self.llm.acomplete(prompt_context)
+                response_text = response.text.strip()
+                
+                self.working_memory.append_queue({"role": "assistant", "content": response_text})
+                
+                # 4. Parse Function Call (Simple Regex)
+                # Pattern: [FUNCTION] tool_name(args_json)
+                func_match = re.search(r"\[FUNCTION\]\s*(\w+)\((.*)\)", response_text, re.DOTALL)
+                
+                if func_match:
+                    func_name = func_match.group(1)
+                    func_args_str = func_match.group(2)
+                    self.logger.info(f"💓 Heartbeat: Calling {func_name}")
+                    
+                    try:
+                        # Safe eval/parsing of args
+                        # For robustness, we try JSON parse first, then loose eval if needed, or string passing
+                        # Given the prompt, we expect simple args.
+                        args = self._parse_function_args(func_args_str)
+                        
+                        tool_output = await self._execute_tool(func_name, args)
+                        
+                        # Append Output to Queue ("Function Output")
+                        self.working_memory.append_queue({
+                            "role": "system", 
+                            "content": f"Function {func_name} returned: {tool_output}"
+                        })
+                        
+                        # Loop continues (Heartbeat)
+                        continue
+                        
+                    except Exception as e:
+                        error_msg = f"Function Execution Failed: {e}"
+                        self.working_memory.append_queue({"role": "system", "content": error_msg})
+                        continue
+                
                 else:
-                    return {"success": False, "error": f"Unknown action: {action}"}
-                
-                # Check for Heartbeat request (Simulated for specific actions)
-                # In real MemGPT, the LLM response contains function_call + request_heartbeat flag.
-                # Here, we simulate it for complex "analyze" tasks that might need multi-step.
-                # For now, generic tasks return heartbeat=False.
-                request_heartbeat = result.get("request_heartbeat", False)
-                final_result = result
-                
-                if request_heartbeat:
-                    self.logger.info(f"💓 Heartbeat triggered (Step {steps})")
+                    # No function call -> Yield to User
+                    final_response = {"success": True, "response": response_text}
+                    break
             
-            return final_result
+            # Fallback for specific hardcoded logic (Legacy Compatibility)
+            # If the LLM didn't handle it fully, we might still run the legacy handlers
+            if action == "generate_artifact":
+                # For now, we still run the robust legacy code for artifact generation
+                # but we wrapped it in the context log above.
+                return await self._generate_artifact(**kwargs)
+            elif action == "analyze":
+                return await self._analyze_system(**kwargs)
+                
+            return final_response
         
         except Exception as e:
             self.logger.error(f"❌ KAG execution failed: {e}")
-            try:
-                await self.send_message(
-                    receiver="all",
-                    message_type="KAG_EXECUTION_FAILED",
-                    payload={
-                        "action": kwargs.get("action", "analyze"),
-                        "error": str(e)
-                    }
-                )
-            except Exception:
-                pass
             return {"success": False, "error": str(e)}
+
+    def _parse_function_args(self, args_str: str) -> Any:
+        try:
+            return json.loads(args_str)
+        except:
+            # Try to handle single string args or simple comma separation
+            if "," in args_str and not "{" in args_str:
+                return [x.strip().strip('"').strip("'") for x in args_str.split(",")]
+            return args_str.strip().strip('"').strip("'")
+
+    async def _execute_tool(self, func_name: str, args: Any) -> str:
+        """Dispatcher for MemGPT tools."""
+        if func_name == "core_memory_append":
+            # Expects list [section, content] or dict
+            if isinstance(args, list) and len(args) >= 2:
+                return self._core_memory_append(args[0], args[1])
+        elif func_name == "core_memory_replace":
+            if isinstance(args, list) and len(args) >= 2:
+                return self._core_memory_replace(args[0], args[1])
+        elif func_name == "archival_memory_insert":
+            content = args[0] if isinstance(args, list) else args
+            return await self._archival_memory_insert(content)
+        elif func_name == "archival_memory_search":
+            query = args[0] if isinstance(args, list) else args
+            return await self._archival_memory_search(query)
+            
+        return f"Error: Unknown tool '{func_name}'"
             
     async def _auto_archive(self):
-        """Simulate paging out to disk."""
-        self.logger.info("💾 Auto-Archiving Working Memory to Archival Storage...")
-        self.working_memory.current_context = [] # Flush
+        """
+        Handle Memory Pressure Interrupt (System 2).
+        Evicts 50% of queue --> Summarizes --> Archival Storage.
+        """
+        self.logger.warning("🚨 MEMORY PRESSURE: Triggering Auto-Archival Routine")
+        
+        # 1. Evict from Queue
+        evicted_messages = self.working_memory.flush_queue(fraction=0.5)
+        if not evicted_messages:
+            return
+            
+        # 2. Summarize (using a cheaper call or the main LLM)
+        summary_prompt = f"""
+        Summarize these evicted conversation logs into concise facts for long-term storage:
+        {json.dumps(evicted_messages, default=str)}
+        """
+        summary_response = await self.llm.acomplete(summary_prompt)
+        summary = summary_response.text
+        
+        # 3. Store in Archival (Neo4j) as a "SessionLog" or "Note"
+        # For simplicity in KAG, we append to a daily log node
+        await self._archival_memory_insert(f"Archived Context [{datetime.now()}]: {summary}")
+        
+        # 4. Add Summary back to Queue tip (so we don't lose context completely)
+        self.working_memory.append_queue({
+            "role": "system",
+            "content": f"Previous conversation summary: {summary}"
+        })
+        self.logger.info("✅ Auto-Archival Complete")
+
+    # ==========================================
+    # MEMGPT FUNCTION TOOLS
+    # ==========================================
+
+    def _core_memory_append(self, section: str, content: str):
+        """Tool: Append to Working Context (RAM)."""
+        self.working_memory.append_core_memory(section, content)
+        return f"Appended to Core Memory [{section}]: {content}"
+
+    def _core_memory_replace(self, section: str, content: str):
+        """Tool: Overwrite Working Context (RAM)."""
+        self.working_memory.replace_core_memory(section, content)
+        return f"Replaced Core Memory [{section}]: {content}"
+
+    async def _archival_memory_insert(self, content: str):
+        """Tool: Write to Long-Term Storage (Disk)."""
+        # In KAG, this means creating a NoteNode
+        if not self.state_manager.neo4j:
+            return "Error: Archival Storage offline."
+            
+        await self.state_manager.neo4j.run_query(
+            """
+            MATCH (l:Learner {learner_id: $learner_id})
+            CREATE (n:NoteNode {
+                content: $content,
+                type: 'ARCHIVAL',
+                created_at: datetime()
+            })
+            CREATE (l)-[:CREATED_NOTE]->(n)
+            """,
+            learner_id=self.agent_id, # Self-referential for system notes
+            content=content
+        )
+        return "Saved to Archival Storage."
+
+    async def _archival_memory_search(self, query: str, page: int = 0):
+        """Tool: Read from Long-Term Storage (Disk)."""
+        if not self.state_manager.neo4j:
+            return "Error: Archival Storage offline."
+            
+        # Hybrid Search: Vector + Keyword (simulated with Cypher contains for now)
+        limit = 5
+        skip = page * limit
+        
+        results = await self.state_manager.neo4j.run_query(
+            """
+            MATCH (n:NoteNode)
+            WHERE n.content CONTAINS $query OR n.key_insight CONTAINS $query
+            RETURN n.content as content, n.created_at as date
+            ORDER BY n.created_at DESC
+            SKIP $skip LIMIT $limit
+            """,
+            query=query,
+            skip=skip,
+            limit=limit
+        )
+        
+        if not results:
+            return f"No results found in Archival Storage for '{query}' (Page {page})."
+            
+        formatted = "\n".join([f"- [{r['date']}] {r['content'][:200]}..." for r in results])
+        return f"Archival Search Results (Page {page}):\n{formatted}\n(Use page={page+1} for more)"
 
     
     # ==========================================

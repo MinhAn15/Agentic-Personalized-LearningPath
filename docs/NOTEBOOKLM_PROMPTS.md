@@ -117,12 +117,12 @@ Use these prompts to validte the transition from Classical Algorithms to **SOTA 
 > - **Current**: Zettelkasten Notes in VectorDB.
 > - **Goal**: 'Tiered Memory System' (OS-style).
 > - **Architecture**:
->     1. **Main Context (RAM)**: Current Active Goal + Immediate Errors.
->     2. **External Context (Disk)**: Knowledge Graph + Vector Archive.
+>     1. **Working Context** (RAM): Segmented into System Instructions (Immutable), Core Memory (Pinned User Profile), and FIFO Queue (Conversation).
+>     2. **External Context** (Disk): Personal Knowledge Graph (Neo4j) accessed via Tools.
 > - **Mechanism (Implemented)**:
->     1. **WorkingMemory**: Class tracking current token usage vs max context.
->     2. **Interrupt**: `is_pressure_high()` checks if context > 70%. If true, injects "SYSTEM ALERT" and triggers `_auto_archive`.
->     3. **Heartbeat**: The `execute` method runs a `while` loop, allowing the agent to chain multiple actions (Search -> Read) before yielding to user."
+>     1. **Interrupts**: `is_pressure_high()` checks token usage. If >70%, triggers `_auto_archive` (Evict Queue -> Summarize -> Store in KG).
+>     2. **Heartbeat Loop**: `execute` uses a recursive loop to process `[FUNCTION]` calls from the LLM until a final answer is yielded.
+>     3. **Functions**: The Agent has explicit tools: `core_memory_append` (Write RAM), `archival_memory_search` (Read Disk), etc."
 
 **Prompt**:
 > "Analyze this MemGPT-inspired architecture.

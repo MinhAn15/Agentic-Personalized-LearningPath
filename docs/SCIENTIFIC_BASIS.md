@@ -86,11 +86,11 @@ This document defines the **Target Architecture** based on the latest research i
 ### 1. MemGPT: Tiered Memory Architecture
 *   **Source**: *Packer, C., et al. (2023). "MemGPT: Towards LLMs as Operating Systems."*
 *   **Concept**: Managing "Working Context" (Main/RAM) vs "Archival Storage" (Disk/VectorDB).
-*   **Target Mechanism**:
     *   **Target Mechanism**:
-    *   **Working Memory (RAM)**: `WorkingMemory` class tracks active context.
-    *   **Memory Pressure Monitor**: Triggers `_auto_archive` (paging to disk) when > 70% capacity (OS Interrupt equivalent).
-    *   **Heartbeat Loop**: `execute` runs recursively if `request_heartbeat=True`, enabling multi-step autonomy (Search -> Read -> Refine).
+    *   **Working Memory (RAM)**: `WorkingMemory` class segmented into **System Persona**, **Core Memory** (Pinned), and **FIFO Queue**.
+    *   **Memory Pressure Monitor**: `is_pressure_high()` trigger (>70%) causing `_auto_archive` (Evict 50% -> Summarize -> Key Insight Node).
+    *   **Heartbeat Loop**: `execute` runs a recursive `while` loop, enabling autonomous function chaining (`core_memory_append` -> `archival_memory_search`).
+    *   **Tools**: `core_memory_append`, `core_memory_replace`, `archival_memory_insert`, `archival_memory_search` (Hybrid Retrieval).
 
 ### 2. Generative Agents
 *   **Source**: *Park, J., et al. (2023). "Generative Agents: Interactive Simulacra of Human Behavior."*

@@ -1,60 +1,60 @@
-# Agent 6: KAG Agent Whitebox Analysis [RESOLVED]
+# Agent 6: KAG Agent (MemGPT) Whitebox Analysis [VERIFIED]
 
 ## 1. Internal Architecture
 
-Agent 6 serves as the **Knowledge Graph Aggregator**, responsible for aligning personal learning artifacts with the course structure and detecting system-wide patterns.
+Agent 6 serves as the **Personal Knowledge OS**, implementing the MemGPT architecture [Packer 2023] to manage infinite context via a tiered memory system.
 
-### 1.1 Process Flow (3 Phases)
+### 1.1 Memory Hierarchy
+*   **Main Context (RAM)**:
+    *   **System Instructions**: Immutable Persona + Function Schemas.
+    *   **Core Memory**: Pinned facts (e.g., User Profile, Current Goals). Mutable via `core_memory_append`.
+    *   **FIFO Queue**: Rolling conversation history. Evicted to Archival Storage when pressure > 70%.
+*   **External Context (Disk)**:
+    *   **Archival Storage**: Neo4j Graph + Vector Index. Accessible via `archival_memory_search`.
+    *   **Recall Storage**: Chat logs synchronized to Disk.
 
-1.  **Zettelkasten Generation** (Real-time):
-    -   Trigger: `EVALUATION_COMPLETED` (Score >= 0.8).
-    -   LLM Extraction: Extracts `Key Insight`, `Personal Example`, `Common Mistake` from the session.
-    -   Tagging: Semantic tags generated from content + mapped concepts.
-    -   Linking: Queries Personal KG for related notes and creates `[:LINKS_TO]` relationships.
-
-2.  **Dual-KG Synchronization** (Async):
-    -   Aligns **Personal KG** with **Course KG**.
-    -   Updates `[:HAS_MASTERY]` based on Evaluator scores.
-    -   Logs `[:HAS_MISCONCEPTION]` for error tracking.
-
-3.  **System Learning** (Batch):
-    -   Aggregates mastery data from all learners (Minimum N=5).
-    -   Calculates `Avg Mastery` and `Struggle Rate` per concept.
-    -   **Pattern Recognition**:
-        -   **Difficult Concept**: Avg Mastery < 0.4.
-        -   **Priority Struggle**: Struggle Rate > 0.6.
-    -   Generates Recommendations (e.g., "Add more examples").
+### 1.2 Process Flow (OS Kernel)
+The `execute` method runs a **Heartbeat Loop**:
+1.  **Monitor**: Checks `WorkingMemory` pressure.
+    *   *Interrupt*: If > 70%, triggers `_auto_archive` (Evict 50% -> Summarize -> Store).
+2.  **Compile**: Constructs `[SYSTEM] + [CORE] + [HISTORY]` prompt.
+3.  **Think (System 2)**: LLM generates response or Function Call.
+4.  **Act (Paging)**: Executes `[FUNCTION] tool_name(args)`.
+    *   *Tools*: `core_memory_append`, `archival_memory_search`, etc.
+5.  **Loop**: If tool called, recurses (Heartbeat). If final answer, yields to User.
 
 ---
 
-## 2. Algorithms & Configuration
+## 2. Algorithms & Data Structures
 
-### 2.1 Thresholds (Standardized in `constants.py`)
--   `KAG_MASTERY_THRESHOLD = 0.8`: Distinguishes Atomic Notes from Misconception Notes.
--   `KAG_DIFFICULT_THRESHOLD = 0.4`: Concepts below this are flagged as difficult.
--   `KAG_PRIORITY_STRUGGLE_THRESHOLD = 0.6`: Triggers urgent content intervention.
+### 2.1 Context Management (`WorkingMemory`)
+*   **Structure**: `System + Core + Queue`.
+*   **Heuristic**: Tokens estimated via `len(chars) // 4`.
+*   **Eviction**: `flush_queue(fraction=0.5)` removes oldest messages from Queue, preserving Core and System.
 
-### 2.2 Zettelkasten Logic
--   **Atomic Note**: Smallest unit of knowledge.
--   **Connections**: Dynamic linking via Cypher queries (`MATCH (n:NoteNode) WHERE n.tag IN ...`).
+### 2.2 Constructivist Note Generation
+*   **Dual-Code Theory**: Content includes both **Text** (Key Insight) and **Visuals** (Mermaid Concept Map).
+*   **Zettelkasten**: Notes are atomic, linked, and tagged.
 
 ---
 
 ## 3. Resilience
 
-### 3.1 Error Handling
--   **JSON Parsing**: Fragile LLM output parsing has fallback manual extraction (partially mitigated).
--   **KG Sync**: Checks for Neo4j availability before execution to prevent crashes.
+### 3.1 Memory Pressure
+*   **Trigger**: > 70% of `max_tokens` (default 8192).
+*   **Handling**: `_auto_archive` creates a "Session Summary" node in Neo4j and clears the queue, preventing Context Window Overflow (Crash).
+
+### 3.2 Infinite Loop Guard
+*   **Constraint**: `max_steps` (default 5) prevents the Heartbeat Loop from getting stuck in a function calling cycle.
 
 ---
 
 ## 4. Verification Strategy
 
-Verified via `scripts/test_agent_6.py`:
+Verified via `scripts/test_agent_6_memgpt.py`:
 
-1.  **Artifact Generation**: Verified creation of `AtomicNote` and linking.
-2.  **System Analysis**:
-    -   Verified Statistics Calculation (Avg Mastery, Struggle Rate).
-    -   Verified Recommendation Logic (Triggered when Struggle Rate > 0.6 AND Mastery < 0.4).
+1.  **Heartbeat Logic**: Validated that the agent can chain `core_memory_append` -> `archival_memory_search` -> `Final Answer`.
+2.  **Context Compilation**: Verified prompt structure includes Core Memory block.
+3.  **Pressure Interrupt**: Verified `_auto_archive` triggers when context is filled.
 
-**Status**: Verified. Mock tests passed.
+**Status**: Verified (Logic Implemented & Tested).

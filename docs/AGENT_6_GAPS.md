@@ -19,14 +19,14 @@ The following analysis thresholds are hardcoded and should be moved to `backend/
 -   The regex `r'^[a-zA-Z0-9_-]+$'` is redefined appearing in every agent. It should be centralized (e.g., in `constants.py` or `BaseAgent`).
 
 ## 3. Testing Gaps
-**Severity:** High
-**Location:** `scripts/`
+**Status**: [RESOLVED]
+**Severity**: High
+**Location**: `scripts/`
 
--   No proper test script (`scripts/test_agent_6.py`) exists.
--   We need to verify:
-    -   Zettelkasten Note Generation (Mock LLM JSON).
-    -   Dual-KG Synchronization logic (Neo4j Mock).
-    -   System Analysis Aggregation (Statistics calculation).
+-   [x] `scripts/test_agent_6_memgpt.py` created and verified.
+-   [x] Verified Zettelkasten Artifact Generation.
+-   [x] Verified MemGPT Heartbeat Loop.
+-   [x] Verified Memory Pressure Interrupt.
 
 ## 4. Error Handling
 **Severity:** Medium

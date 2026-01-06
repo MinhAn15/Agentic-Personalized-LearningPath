@@ -10,10 +10,11 @@ Agent 5 serves as the **Pedagogical Judge**, assessing learner performance using
     -   Loads Concept Metadata (Difficulty, Misconceptions) from Neo4j (Cached, TTL=1h).
     -   Loads Learner Profile (Current Mastery) from Personal KG.
 
-2.  **Semantic Scoring**:
-    -   LLM compares Learner Response vs Expected Answer.
-    -   Scale: 0.0 (Wrong) to 1.0 (Correct).
-    -   Fallback: Jaccard similarity if LLM fails.
+3.  **JudgeLM Scoring (SOTA)**:
+    -   **Technique**: Reference-as-Prior (Zhu 2023).
+    -   **Prompt**: "Assistant 1" (Golden) vs "Assistant 2" (Student).
+    -   **Format**: `10.0 {score}` notation + JSON CoT.
+    -   **Rubric**: Correctness (0.6), Completeness (0.2), Clarity (0.2).
 
 3.  **Error Classification** (if Score < 0.8):
     -   Taxonomy: `CONCEPTUAL` (Fundamental), `PROCEDURAL`, `INCOMPLETE`, `CARELESS`.
@@ -73,11 +74,10 @@ Standardized in `constants.py`:
 
 ## 4. Verification Strategy
 
-Verified via `scripts/test_agent_5.py`:
+Verified via `scripts/test_agent_5_judgelm.py`:
 
-1.  **Scoring Accuracy**: Verified 1.0 for correct, ~0.2 for conceptual error.
-2.  **Taxonomy**: Verified detection of `CONCEPTUAL` errors.
-3.  **Decision Boundaries**: Verified `PROCEED` at 0.85, `ALTERNATE` at 0.65.
-4.  **Alerting**: Verified `notify_failure` call on score 0.2.
+1.  **Prompt Structure**: Validated exact match with JudgeLM System Prompt (Figure 5).
+2.  **Scoring Notation**: Verified parsing of `10.0 X` and JSON fallback.
+3.  **Rubric Weights**: Verified roughly linear updates.
 
-**Status**: Verified. All mock tests passed.
+**Status**: Verified (Test Passed).

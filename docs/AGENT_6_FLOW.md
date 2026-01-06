@@ -11,46 +11,42 @@ graph TD
         TIMER[Scheduled Task] --> ANALYZE
     end
 
-    subgraph Phase1_Artifact[Phase 1: Zettelkasten Generation]
-        GENERATE --> EXTRACT[Extract Atomic Note]
-        EXTRACT --> RELATED[Find Related Notes]
-        RELATED --> TAG[Generate Semantic Tags]
-        TAG --> CREATE[Create NoteNode in Personal KG]
-        CREATE --> LINK[Link to Related Notes]
-        LINK --> EMIT_ART[Emit ARTIFACT_CREATED]
+    subgraph Phase1_OS_Kernel[Phase 1: MemGPT OS Kernel]
+        TRIGGER --> PRES_CHECK{Memory Pressure > 70%?}
+        PRES_CHECK -- Yes --> AUTO_ARCH[Auto-Archive: Evict & Summarize]
+        PRES_CHECK -- No --> COMPILE[Compile Context: System+Core+Queue]
+        
+        AUTO_ARCH --> COMPILE
+        COMPILE --> THINK[LLM: Generate Thought/Call]
+        
+        THINK -- Function Call --> EXEC_TOOL[Execute Tool]
+        EXEC_TOOL --> LOOP_BACK[Heartbeat: Recurse]
+        LOOP_BACK --> PRES_CHECK
+        
+        THINK -- Final Answer --> YIELD[Yield Response]
     end
 
-    subgraph Phase2_Sync[Phase 2: Dual-KG Synchronization]
-        EMIT_ART --> UPD_MASTERY[Update Mastery Node]
-        UPD_MASTERY --> SYNC_ERR[Sync Misconceptions]
-    end
-
-    subgraph Phase3_Analysis[Phase 3: System Learning]
-        ANALYZE --> AGGREGATE[Aggregate All Learner Graphs]
-        AGGREGATE --> STATS[Calculate Statistics]
-        STATS --> PATTERNS[Identify Bottleneck Concepts]
-        PATTERNS --> REC[Generate Recommendations]
-        REC --> PREDICT[Predict Interventions]
-        PREDICT --> EMIT_SYS[Emit KAG_ANALYSIS_COMPLETED]
+    subgraph Phase2_Tools[Phase 2: Memory Tools]
+        EXEC_TOOL -->|core_memory_append| RAM_UPD[Update Working Memory]
+        EXEC_TOOL -->|archival_memory_search| DISK_READ[Search Neo4j]
+        EXEC_TOOL -->|archival_memory_insert| DISK_WRITE[Create NoteNode]
     end
 ```
 
 ## 2. Core Workflows
 
-### 2.1 Zettelkasten Generation (Real-time)
-Triggered by `EVALUATION_COMPLETED` (Score >= 0.8).
-1.  **Extraction**: LLM extracts `key_insight`, `personal_example`, `common_mistake` from session.
-2.  **Grounding**: Finds related existing notes in Personal KG for context.
-3.  **Storage**: Creates `NoteNode` and links via `[:LINKS_TO]`.
+### 2.1 OS Kernel (Heartbeat Loop)
+The `execute` method runs a recursive loop (max 5 steps):
+1.  **Monitor**: Checks `WorkingMemory.is_pressure_high()` (Token Limit).
+2.  **Interrupt**: If high, evicts 50% of queue, summarizes, and stores to Archive.
+3.  **Act**: LLM decides to call a tool (e.g., `archival_memory_search`) or answer.
+4.  **Recurse**: If tool called, loop continues (Heartbeat) with tool output in context.
 
-### 2.2 Dual-KG Sync (Personal <-> Course)
-Ensures Personal KG stays aligned with Course KG updates.
--   **Mastery Sync**: Updates `[:HAS_MASTERY]` based on Evaluator scores.
--   **Misconception Sync**: Logs `[:HAS_MISCONCEPTION]` for persistent error tracking.
+### 2.2 Zettelkasten Generation (Legacy/Tool)
+*Exposed as `generate_artifact` tool.*
+1.  **Extraction**: LLM extracts `key_insight`, `personal_example`.
+2.  **Grounding**: Finds related existing notes.
+3.  **Storage**: Creates `NoteNode` in Neo4j.
 
-### 2.3 System Learning (Batch/Async)
-Aggregates data across ALL learners (N > 5).
--   **Bottleneck Detection**:
-    -   `Avg Mastery < 0.4` -> Difficult Concept.
-    -   `Struggle Rate > 0.6` -> Priority Intervention.
--   **Recommendation Engine**: Suggests content improvements (e.g., "Add more examples for SQL_JOIN").
+### 2.3 System Learning (Batch)
+Aggregates data across ALL learners to find bottleneck concepts.
