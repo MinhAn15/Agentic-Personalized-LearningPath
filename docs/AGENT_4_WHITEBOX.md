@@ -1,82 +1,82 @@
 # Agent 4: Tutor Agent Whitebox Analysis [RESOLVED]
 
-## 1. Internal Architecture
+## 1. Kiến trúc Nội tại (Internal Architecture)
 
-Agent 4 serves as the **AI Tutor**, delivering personalized Socratic guidance. It moves beyond simple Q&A by maintaining a pedagogical state machine and enforcing educational principles.
+Agent 4 đóng vai trò là **AI Tutor**, cung cấp hướng dẫn Socratic cá nhân hóa. Nó vượt xa khỏi mô hình Q&A đơn giản bằng cách duy trì một máy trạng thái sư phạm (pedagogical state machine) và thực thi các nguyên tắc giáo dục.
 
-### 1.1 Process Flow (7 Phases)
+### 1.1 Quy trình Xử lý (7 Pha)
 
-1.  **Context Gathering**:
-    -   Queries Neo4j (Course KG) for facts.
-    -   Queries Neo4j (Personal KG) for user history/mastery.
-    -   (Optional) Retrieves RAG documents.
+1.  **Context Gathering (Thu thập Ngữ cảnh)**:
+    -   Truy vấn Neo4j (Course KG) để lấy sự kiện/kiến thức.
+    -   Truy vấn Neo4j (Personal KG) để lấy lịch sử/độ thành thạo của người dùng.
+    -   (Tùy chọn) Truy xuất tài liệu RAG.
 
-2.  **Intent Classification**:
-    -   Uses LLM to categorize learner intent:
-        -   `HELP_SEEKING`: Frustrated, blocked -> Needs **Scaffolding**.
-        -   `SENSE_MAKING`: Curious, exploring -> Needs **Probing**.
+2.  **Intent Classification (Phân loại Ý định)**:
+    -   Sử dụng LLM để phân loại ý định người học:
+        -   `HELP_SEEKING`: Bối rối, bị chặn -> Cần **Scaffolding** (Giàn giáo hỗ trợ).
+        -   `SENSE_MAKING`: Tò mò, khám phá -> Cần **Probing** (Thăm dò sâu).
 
 3.  **Reverse Socratic State Machine**:
-    -   Determines the pedagogical *mode* of interaction.
-    -   Logic is deterministic based on `hint_level` and `mastery`, stochastic for advanced strategies (`TEACH_BACK`).
+    -   Quyết định *mô thức* (mode) tương tác sư phạm.
+    -   Logic mang tính tất định dựa trên `hint_level` và `mastery`, ngẫu nhiên cho các chiến lược nâng cao (`TEACH_BACK`).
 
-4.  **3-Layer Grounding (Anti-Hallucination)**:
-    -   parallel retrieval from 3 sources with weighted confidence.
-    -   **Conflict Detection**: If RAG contradicts Course KG (Similarity < 0.6), KG wins, and confidence is reduced (Penalty -0.1).
+4.  **3-Layer Grounding (Chống ảo giác)**:
+    -   Truy xuất song song từ 3 nguồn với độ tin cậy có trọng số.
+    -   **Conflict Detection (Phát hiện Xung đột)**: Nếu RAG mâu thuẫn Course KG (Similarity < 0.6), KG thắng, và độ tin cậy bị giảm (Phạt -0.1).
 
 5.  **Response Generation**:
-    -   LLM generates text guided by "Socratic Prompt" templates specific to the current state.
+    -   LLM sinh văn bản được hướng dẫn bởi các mẫu "Socratic Prompt" đặc thù cho trạng thái hiện tại.
 
 6.  **Harvard 7 Enforcement**:
-    -   Post-processing check to ensure response adheres to principles (e.g., Active Learning, Feedback).
+    -   Kiểm tra hậu xử lý (post-processing) để đảm bảo phản hồi tuân thủ các nguyên tắc (ví dụ: Active Learning, Feedback).
 
 7.  **State Persistence**:
-    -   Session state saved to Redis (`ttl=24h`).
+    -   Trạng thái phiên làm việc được lưu vào Redis (`ttl=24h`).
 
 ---
 
-## 2. Algorithms & Data Structures
+## 2. Thuật toán & Cấu trúc Dữ liệu
 
-### 2.1 Socratic State Logic
-Implemented in `_determine_socratic_state`:
+### 2.1 Logic Trạng thái Socratic
+Được cài đặt trong `_determine_socratic_state`:
 
-| State | Trigger Criteria |
+| Trạng thái (State) | Tiêu chí Kích hoạt (Trigger Criteria) |
 | :--- | :--- |
 | **REFUTATION** | `has_misconception=True` |
-| **SCAFFOLDING** | `intent=HELP_SEEKING` OR `hint_level=1` |
-| **PROBING** | `intent=SENSE_MAKING` OR default |
-| **TEACH_BACK** | `mastery > 0.7` AND `rounds > 2` (40% chance) |
-| **CONCLUSION** | `hint_level >= 4` OR `rounds >= 5` |
+| **SCAFFOLDING** | `intent=HELP_SEEKING` HOẶC `hint_level=1` |
+| **PROBING** | `intent=SENSE_MAKING` HOẶC mặc định |
+| **TEACH_BACK** | `mastery > 0.7` VÀ `rounds > 2` (40% cơ hội) |
+| **CONCLUSION** | `hint_level >= 4` HOẶC `rounds >= 5` |
 
-### 2.2 3-Layer Grounding Weights
-Standardized in `constants.py`:
+### 2.2 Trọng số 3-Layer Grounding
+Chuẩn hóa trong `constants.py`:
 
--   `TUTOR_W_DOC = 0.4` (Broad coverage)
--   `TUTOR_W_KG = 0.35` (Structured facts)
--   `TUTOR_W_PERSONAL = 0.25` (User context)
--   **Threshold**: 0.5 (below this = "I don't know")
-
----
-
-## 3. Resilience & Configuration
-
-### 3.1 Configuration Management
--   All thresholds (`0.6` conflict, `0.4` weights) are imported from `backend/core/constants.py`.
--   This allows global tuning of the "Tutor Personality" without code changes.
-
-### 3.2 Error Handling
--   **RAG Fallback**: If `vector_store` is missing (common in test/dev), RAG layer returns 0.0 confidence but doesn't crash the agent.
--   **Mocking**: Unit tests use `sys.modules` patching to handle `llama_index` dependencies gracefully.
+-   `TUTOR_W_DOC = 0.4` (Bao phủ rộng)
+-   `TUTOR_W_KG = 0.35` (Sự kiện có cấu trúc)
+-   `TUTOR_W_PERSONAL = 0.25` (Ngữ cảnh người dùng)
+-   **Ngưỡng (Threshold)**: 0.5 (dưới mức này = "I don't know")
 
 ---
 
-## 4. Verification Strategy
+## 3. Khả năng phục hồi & Cấu hình
 
-Verified via `scripts/test_agent_4.py`:
+### 3.1 Quản lý Cấu hình (Configuration Management)
+-   Tất cả các ngưỡng (`0.6` conflict, `0.4` weights) được import từ `backend/core/constants.py`.
+-   Cho phép tinh chỉnh toàn cục "Tutor Personality" mà không cần sửa code.
 
-1.  **State Machine Tests**: Confirmed correct transition from Probing -> Scaffolding based on intent.
-2.  **Protege Effect**: Verified `TEACH_BACK` triggers for high-mastery learners.
-3.  **Math Verification**: Validated Weighted Sum calculation for Grounding Confidence.
-4.  **Conflict Logic**: Verified confidence penalty when `_detect_conflict` returns True.
+### 3.2 Xử lý Lỗi (Error Handling)
+-   **RAG Fallback**: Nếu `vector_store` bị thiếu (thường gặp trong test/dev), lớp RAG trả về độ tin cậy 0.0 nhưng không làm crash agent.
+-   **Mocking**: Unit tests sử dụng `sys.modules` patching để xử lý các phụ thuộc `llama_index` một cách khéo léo.
 
-**Status**: Verified. All mock tests passed.
+---
+
+## 4. Chiến lược Kiểm thử (Verification Strategy)
+
+Đã xác minh qua `scripts/test_agent_4.py`:
+
+1.  **State Machine Tests**: Xác nhận chuyển đổi đúng từ Probing -> Scaffolding dựa trên intent.
+2.  **Protege Effect**: Xác minh `TEACH_BACK` kích hoạt cho người học có độ thành thạo cao.
+3.  **Math Verification**: Xác thực tính toán Tổng Trọng số (Weighted Sum) cho Độ tin cậy Grounding.
+4.  **Conflict Logic**: Xác minh hình phạt độ tin cậy khi `_detect_conflict` trả về True.
+
+**Trạng thái**: Đã xác minh (Verified). Tất cả mock tests đã thông qua.

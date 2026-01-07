@@ -1,48 +1,48 @@
 # Agent 2: Profiler Agent - Whitebox Analysis
 
-## 1. Context & Objectives
-The **Profiler Agent** is the "State Manager" of the personalized learning system. Unlike traditional LMSs that store static user data, Agent 2 maintains a dynamic, multidimensional **Learner Profile** that evolves in real-time.
-**Objective**: To construct a 10-dimensional feature vector $\mathbf{x}_t$ representing the learner's state, used by the Path Planner (Agent 3) for LinUCB bandit optimization.
+## 1. Bối cảnh & Mục tiêu
+**Profiler Agent** đóng vai trò là "State Manager" (Quản lý trạng thái) của hệ thống Personalized Learning. Khác với các hệ thống LMS truyền thống chỉ lưu dữ liệu tĩnh, Agent 2 duy trì một **Learner Profile** (Hồ sơ người học) đa chiều và cập nhật theo thời gian thực.
+**Mục tiêu**: Xây dựng một vector đặc trưng 10 chiều $\mathbf{x}_t$ đại diện cho trạng thái người học, được sử dụng bởi Path Planner (Agent 3) cho thuật toán tối ưu hóa LinUCB bandit.
 
-## 2. Theoretical Framework
+## 2. Cơ sở Lý thuyết (Theoretical Framework)
 
-### 2.1 The Learner Model (10-Dimensional Vector)
-We model the learner state $\mathcal{S}$ as a vector $\mathbf{x} \in \mathbb{R}^{10}$, comprising:
-1.  **Knowledge State ($x_0$)**: Average mastery across key concepts ($0 \le x_0 \le 1$).
-2.  **Learning Style ($x_{1-4}$)**: One-hot encoding of VARK (Visual, Aural, Read/Write, Kinesthetic).
-3.  **Skill Level ($x_5$)**: Normalized difficulty handling (Beginner=0.2, Intermediate=0.5, Advanced=0.8).
-4.  **Time Constraints ($x_6$)**: Normalized available time per session.
-5.  **Cognitive Load ($x_7$)**: Bloom's Taxonomy level (1=Remember to 6=Create), normalized to $[0,1]$.
-6.  **Velocity ($x_8$)**: Learning rate (concepts/hour).
-7.  **Scope ($x_9$)**: Relative size of the target goal.
+### 2.1 Mô hình Người học (Vector 10 chiều)
+Chúng tôi mô hình hóa trạng thái người học $\mathcal{S}$ dưới dạng vector $\mathbf{x} \in \mathbb{R}^{10}$, bao gồm:
+1.  **Knowledge State ($x_0$)**: Mức độ thành thạo trung bình qua các khái niệm chính ($0 \le x_0 \le 1$).
+2.  **Learning Style ($x_{1-4}$)**: Mã hóa One-hot theo mô hình VARK (Visual, Aural, Read/Write, Kinesthetic).
+3.  **Skill Level ($x_5$)**: Khả năng xử lý độ khó đã được chuẩn hóa (Beginner=0.2, Intermediate=0.5, Advanced=0.8).
+4.  **Time Constraints ($x_6$)**: Thời gian khả dụng mỗi phiên học (chuẩn hóa).
+5.  **Cognitive Load ($x_7$)**: Mức độ Bloom's Taxonomy (1=Remember đến 6=Create), chuẩn hóa về $[0,1]$.
+6.  **Velocity ($x_8$)**: Tốc độ học tập (concepts/hour).
+7.  **Scope ($x_9$)**: Kích thước tương đối của mục tiêu học tập.
 
-### 2.2 Cold Start Problem & Graph RAG
-To initialize $\mathbf{x}_0$ without prior data, we employ a **Diagnostic Assessment** using **Graph RAG**:
-1.  **Retrieval**: Given a goal (e.g., "Learn SQL"), we query the Knowledge Graph for "Topographic Anchors"—concepts with high centrality (PageRank).
-2.  **Generation**: The LLM generates 5 diagnostic questions based on these anchors.
-3.  **Estimation**: User responses are scored to estimate initial mastery and skill level.
+### 2.2 Vấn đề Cold Start & Graph RAG
+Để khởi tạo $\mathbf{x}_0$ mà không có dữ liệu lịch sử, chúng tôi sử dụng **Diagnostic Assessment** (Đánh giá chẩn đoán) kết hợp **Graph RAG**:
+1.  **Retrieval**: Với một mục tiêu (VD: "Learn SQL"), hệ thống truy vấn Knowledge Graph để tìm "Topographic Anchors" - các concept có độ trung tâm (PageRank) cao.
+2.  **Generation**: LLM sinh ra 5 câu hỏi chẩn đoán dựa trên các anchor này.
+3.  **Estimation**: Câu trả lời của người dùng được chấm điểm để ước lượng mức độ thành thạo và kỹ năng ban đầu.
 
-## 3. Algorithm Details
+## 3. Chi tiết Thuật toán
 
 ### 3.1 Profile Vectorization (`_vectorize_profile`)
-Transforms the JSON profile into the vector $\mathbf{x}$ for the Contextual Bandit:
+Chuyển đổi hồ sơ dạng JSON sang vector $\mathbf{x}$ cho Contextual Bandit:
 $$
 \mathbf{x} = [ \mu_{mastery}, \mathbb{I}_{vis}, \mathbb{I}_{aud}, \mathbb{I}_{read}, \mathbb{I}_{kin}, \eta_{skill}, \tau_{time}, \beta_{bloom}, \nu_{vel}, \sigma_{scope} ]
 $$
-Where $\mathbb{I}$ is the indicator function for learning style.
+Trong đó $\mathbb{I}$ là hàm chỉ thị (indicator function) cho learning style.
 
-### 3.2 Dynamic Interest Decay
-To reflect the forgetting curve and shifting interests, we apply an exponential decay to interest tags upon every major interaction:
+### 3.2 Dynamic Interest Decay (Suy giảm hứng thú động)
+Để phản ánh đường cong quên lãng (forgetting curve) và sự thay đổi hứng thú, chúng tôi áp dụng suy giảm theo hàm mũ cho các thẻ hứng thú (interest tags) sau mỗi tương tác lớn:
 $$
 I_{tag}(t+1) = I_{tag}(t) \times \lambda
 $$
-Where $\lambda = 0.95$ (decay factor). Tags falling below threshold $\epsilon = 0.1$ are pruned.
+Với $\lambda = 0.95$ (hệ số suy giảm). Các tag giảm xuống dưới ngưỡng $\epsilon = 0.1$ sẽ bị loại bỏ (pruned).
 
-### 3.3 Scalable Event Handling (Distributed Lock)
-Since the agent is stateful and reactive (Event-Driven), we implement specific handlers for concurrency control:
-*   **Race Condition**: Multiple agents (Evaluator, Timer) may update the profile simultaneously.
-*   **Solution**: **Redis Distributed Lock** (RedLock algorithm).
-*   **Mechanism**:
+### 3.3 Xử lý Sự kiện Mở rộng (Distributed Lock)
+Vì Agent có trạng thái (stateful) và phản ứng theo sự kiện (Event-Driven), chúng tôi cài đặt các trình xử lý đặc biệt để kiểm soát đồng thời (concurrency control):
+*   **Race Condition**: Nhiều agent (Evaluator, Timer) có thể cập nhật profile cùng lúc.
+*   **Giải pháp**: Sử dụng **Redis Distributed Lock** (thuật toán RedLock).
+*   **Cơ chế**:
     ```python
     lock = redis.lock(f"lock:learner:{id}")
     if lock.acquire():
@@ -51,23 +51,23 @@ Since the agent is stateful and reactive (Event-Driven), we implement specific h
         write(state)
         lock.release()
     ```
-This ensures Atomic State Updates in a distributed environment (Kubernetes).
+Giải pháp này đảm bảo Cập nhật Trạng thái Nguyên tử (Atomic State Updates) trong môi trường phân tán (Kubernetes).
 
-## 4. Implementation Logic
+## 4. Logic Triển khai (Implementation Logic)
 
 ### 4.1 Persistence Layer (Dual-Write)
-1.  **PostgreSQL**: Canonical source of truth (ACID compliance).
-2.  **Neo4j**: Personal Knowledge Graph ("Shadow Graph").
-    *   **Nodes**: `:Learner`, `:MasteryNode` (link to Course Concepts), `:ErrorEpisode`.
+1.  **PostgreSQL**: Nguồn chân lý (Canonical source of truth) đảm bảo tính ACID.
+2.  **Neo4j**: Personal Knowledge Graph ("Shadow Graph" - Đồ thị bóng).
+    *   **Nodes**: `:Learner`, `:MasteryNode` (liên kết tới Course Concepts), `:ErrorEpisode`.
     *   **Edges**: `[:HAS_MASTERY]`, `[:HAS_ERROR]`.
-3.  **Redis**: Hot State Cache (TTL 1 hour) for low-latency read by Agent 3.
+3.  **Redis**: Hot State Cache (TTL 1 giờ) để Agent 3 đọc với độ trễ thấp.
 
-### 4.2 Bloom's Taxonomy Estimation
-Bloom's level is dynamically estimated from quiz results:
+### 4.2 Ước lượng Bloom's Taxonomy
+Cấp độ Bloom được ước lượng động từ kết quả bài quiz:
 $$
 Bloom = 0.6 \cdot Score + 0.25 \cdot Difficulty + 0.15 \cdot QType_{boost}
 $$
-Where $QType_{boost}$ favors synthesis/application questions over factual recall.
+Trong đó $QType_{boost}$ ưu tiên các câu hỏi tổng hợp/áp dụng hơn là nhớ lại kiến thức.
 
-## 5. Conclusion
-Agent 2 provides the "Context" ($\mathbf{x}_t$) required for the Agentic RL loop. By combining Graph RAG for initialization and Event-Driven updates for evolution, it solves the Cold Start problem while maintaining high responsiveness.
+## 5. Kết luận
+Agent 2 cung cấp "Context" ($\mathbf{x}_t$) cần thiết cho vòng lặp Agentic RL. Bằng cách kết hợp Graph RAG để khởi tạo và cập nhật theo sự kiện (Event-Driven) để tiến hóa, nó giải quyết vấn đề Cold Start trong khi vẫn duy trì khả năng phản hồi cao.

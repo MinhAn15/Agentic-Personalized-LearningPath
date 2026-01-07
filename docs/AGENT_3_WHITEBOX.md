@@ -1,97 +1,97 @@
 # Agent 3: Path Planner Whitebox Analysis [RESOLVED]
 
-## 1. Internal Architecture
+## 1. Kiến trúc Nội tại (Internal Architecture)
 
-Agent 3 is the system's "navigator," responsible for generating the optimal sequence of learning concepts. Unlike static rule-based planners, it employs a hybrid approach combining **Graph Traversal (Adaptive Chaining)** and **Reinforcement Learning (LinUCB)**.
+Agent 3 là "người điều hướng" (navigator) của hệ thống, chịu trách nhiệm tạo ra chuỗi khái niệm học tập tối ưu. Khác với các bộ lập kế hoạch dựa trên luật tĩnh (static rule-based), nó sử dụng phương pháp lai kết hợp giữa **Graph Traversal (Adaptive Chaining)** và **Reinforcement Learning (LinUCB)**.
 
-### 1.1 Process Flow (6 Phases)
+### 1.1 Quy trình Xử lý (6 Pha)
 
 1.  **Input & Context Loading**:
-    -   Receives `learner_id`, `goal`, and `last_result`.
-    -   Loads robust Leaerner Profile (vector + preferred style).
-    -   Queries Personal Knowledge Graph (Neo4j) to identify candidates.
+    -   Nhận `learner_id`, `goal`, và `last_result`.
+    -   Tải Learner Profile mạnh mẽ (vector + phong cách ưu tiên).
+    -   Truy vấn Personal Knowledge Graph (Neo4j) để xác định các ứng viên (candidates).
 
-2.  **Smart Filtering**:
-    -   **Personal Subgraph Expansion**: Instead of scanning the entire KG, it starts from known concepts (`:MasteryNode` in Neo4j) and expands to immediate neighbors (`NEXT`, `REQUIRES`). This ensures O(1) scalability relative to graph size.
+2.  **Smart Filtering (Lọc thông minh)**:
+    -   **Personal Subgraph Expansion**: Thay vì quét toàn bộ KG, phương pháp bắt đầu từ các khái niệm đã biết (`:MasteryNode` trong Neo4j) và mở rộng sang các lân cận trực tiếp (`NEXT`, `REQUIRES`). Điều này đảm bảo khả năng mở rộng O(1) so với kích thước đồ thị.
 
-3.  **Probabilistic Mastery Gate (Scientific Upgrade)**:
-    -   Replacing binary pass/fail logic.
-    -   Formula: `gate_prob = min(1.0, current_score / GATE_FULL_PASS_SCORE)`
+3.  **Probabilistic Mastery Gate (Nâng cấp Khoa học)**:
+    -   Thay thế logic đạt/trượt nhị phân (binary pass/fail).
+    -   Công thức: `gate_prob = min(1.0, current_score / GATE_FULL_PASS_SCORE)`
     -   Logic:
-        -   If `random() > gate_prob`: **Force Remediation** (BACKWARD mode).
-        -   Else: Allow normal progression (FORWARD/ACCELERATE).
-    -   *Benefit:* Prevents "lucky guesses" from causing long-term knowledge gaps.
+        -   Nếu `random() > gate_prob`: **Force Remediation** (Chế độ BACKWARD - Ép buộc học lại).
+        -   Ngược lại: Cho phép tiến trình bình thường (FORWARD/ACCELERATE).
+    -   *Lợi ích:* Ngăn chặn việc "đoán mò" (lucky guesses) tạo ra các lỗ hổng kiến thức dài hạn.
 
-4.  **Adaptive Chaining (Heuristic Layer)**:
-    -   Determines the *direction* of movement based on `ChainingMode`:
-        -   **FORWARD (Standard)**: Follows `NEXT` edges.
-        -   **BACKWARD (Remediation)**: Follows `REQUIRES` edges (prerequisites).
-        -   **ACCELERATE (High Mastery)**: Skips intermediate nodes if prerequisites met.
-        -   **REVIEW (Spaced Repetition)**: Random 10% chance (configurable via `REVIEW_CHANCE`) to revisit old concepts.
+4.  **Adaptive Chaining (Lớp Heuristic)**:
+    -   Xác định *hướng* di chuyển dựa trên `ChainingMode`:
+        -   **FORWARD (Standard)**: Đi theo cạnh `NEXT`.
+        -   **BACKWARD (Remediation)**: Đi theo cạnh `REQUIRES` (tiên quyết).
+        -   **ACCELERATE (High Mastery)**: Bỏ qua các nút trung gian nếu đã thỏa mãn tiên quyết.
+        -   **REVIEW (Spaced Repetition)**: Ngẫu nhiên 10% cơ hội (cấu hình qua `REVIEW_CHANCE`) để xem lại concept cũ.
 
-5.  **LinUCB Selection (Stochastic Layer)**:
-    -   Selects the *best single step* from the valid candidates.
-    -   Uses Contextual Bandit algorithm (Li et al., 2010).
+5.  **LinUCB Selection (Lớp Ngẫu nhiên - Stochastic)**:
+    -   Chọn *bước đi đơn lẻ tốt nhất* từ các ứng viên hợp lệ.
+    -   Sử dụng thuật toán Contextual Bandit (Li et al., 2010).
 
 6.  **Output Generation**:
-    -   Produces `LearningPath` JSON.
-    -   Calculates success probability and pacing.
+    -   Tạo đối tượng JSON `LearningPath`.
+    -   Tính toán xác suất thành công và tốc độ (pacing).
 
 ---
 
-## 2. Algorithms & Data Structures
+## 2. Thuật toán & Cấu trúc Dữ liệu
 
-### 2.1 LinUCB Implementation
--   **Context**: 10-dimensional vector from Learner Profile.
--   **Arms**: Each Concept ID in the candidate list is an arm.
--   **State**: Per-arm matrices stored in Redis (`linucb:{concept_id}`).
-    -   `A` (10x10): Covariance matrix (inverse approximated).
-    -   `b` (10x1): Reward history vector.
--   **Selection Goal**: Maximize Upper Confidence Bound (UCB).
+### 2.1 Cài đặt LinUCB
+-   **Context**: Vector 10 chiều từ Learner Profile.
+-   **Arms**: Mỗi Concept ID trong danh sách ứng viên là một cánh tay (arm).
+-   **State**: Ma trận cho mỗi arm được lưu trong Redis (`linucb:{concept_id}`).
+    -   `A` (10x10): Ma trận hiệp phương sai (xấp xỉ nghịch đảo).
+    -   `b` (10x1): Vector lịch sử phần thưởng (reward history).
+-   **Mục tiêu Lựa chọn**: Tối đa hóa Upper Confidence Bound (UCB).
 
 ### 2.2 Adaptive Chaining Logic
-The agent maintains a state machine for `ChainingMode`:
+Agent duy trì một máy trạng thái cho `ChainingMode`:
 
-| Trigger | Mode | Action |
+| Trigger (Kích hoạt) | Mode | Hành động |
 | :--- | :--- | :--- |
-| `last_result="PROCEED"` | **FORWARD** | Move to next concept in sequence. |
-| `last_result="REMEDIATE"` | **BACKWARD** | Identify unmastered prerequisites. |
-| `last_result="MASTERED"` | **ACCELERATE** | Check 2-hop neighbors (`NEXT` -> `NEXT`). |
-| `random() < REVIEW_CHANCE` | **REVIEW** | Select unvisited or old concepts. |
+| `last_result="PROCEED"` | **FORWARD** | Di chuyển tới concept kế tiếp trong chuỗi. |
+| `last_result="REMEDIATE"` | **BACKWARD** | Xác định các điều kiện tiên quyết chưa thành thạo. |
+| `last_result="MASTERED"` | **ACCELERATE** | Kiểm tra các lân cận 2 bước (`NEXT` -> `NEXT`). |
+| `random() < REVIEW_CHANCE` | **REVIEW** | Chọn các concept chưa học hoặc đã cũ. |
 
 ---
 
-## 3. Resilience & Concurrency [FIXED]
+## 3. Khả năng phục hồi & Đồng thời [FIXED]
 
 ### 3.1 Distributed Locking (Redis)
-**Gap Identified**: Concurrent feedback events (e.g., rapid quiz completion) caused race conditions in LinUCB matrix updates (`read-modify-write`).
+**Vấn đề (Gap Identified)**: Các sự kiện phản hồi đồng thời (ví dụ: hoàn thành quiz nhanh) gây ra race conditions trong cập nhật ma trận LinUCB (`read-modify-write`).
 
-**Solution**:
--   Implemented `redis.lock(name=f"lock:concept:{concept_id}", timeout=5)` inside `_on_evaluation_feedback`.
--   Ensures atomic updates to the global `A` and `b` matrices for each concept.
--   **Impact**: Prevents matrix corruption and divergent learning policies.
+**Giải pháp**:
+-   Triển khai `redis.lock(name=f"lock:concept:{concept_id}", timeout=5)` bên trong `_on_evaluation_feedback`.
+-   Đảm bảo cập nhật nguyên tử (atomic updates) cho các ma trận toàn cục `A` và `b` của mỗi concept.
+-   **Tác động**: Ngăn chặn hỏng ma trận và phân kỳ chính sách học tập.
 
 ### 3.2 Configuration Management
-**Gap Identified**: Hardcoded thresholds (`0.8`, `0.7`) scattered in code.
-**Solution**:
--   Centralized all thresholds in `backend/core/constants.py`.
--   Imported into Agent 3 (`MASTERY_PROCEED_THRESHOLD`, `GATE_FULL_PASS_SCORE`).
--   Enhances maintainability and experimental tuning.
+**Vấn đề**: Các ngưỡng (`0.8`, `0.7`) bị hardcode rải rác trong code.
+**Giải pháp**:
+-   Tập trung tất cả thresholds trong `backend/core/constants.py`.
+-   Import vào Agent 3 (`MASTERY_PROCEED_THRESHOLD`, `GATE_FULL_PASS_SCORE`).
+-   Tăng cường khả năng bảo trì và tinh chỉnh thực nghiệm.
 
 ### 3.3 Lazy Initialization & Error Handling
--   **JSON Handling**: Added missing imports to prevent `NameError`.
--   **Mock Resilience**: Test runner explicitly mocks `redis.pipeline` as synchronous to match real-world usage patterns, preventing `coroutine` attribute errors during testing.
+-   **JSON Handling**: Thêm các import còn thiếu để ngăn lỗi `NameError`.
+-   **Mock Resilience**: Test runner giả lập `redis.pipeline` dưới dạng đồng bộ (synchronous) để khớp với mẫu sử dụng thực tế, ngăn lỗi thuộc tính `coroutine` trong quá trình test.
 
 ---
 
-## 4. Verification Strategy
+## 4. Chiến lược Kiểm thử (Verification Strategy)
 
-The agent is verified using `scripts/test_agent_3.py` which supports:
+Agent được kiểm thử thông qua `scripts/test_agent_3.py` hỗ trợ:
 1.  **Mock Mode**:
-    -   Simulates Neo4j graph and Redis state.
-    -   Patches `random` to test Probabilistic Gate deterministically.
-    -   Verifies Lock acquisition.
+    -   Giả lập đồ thị Neo4j và trạng thái Redis.
+    -   Patch `random` để kiểm thử Probabilistic Gate một cách tất định (deterministic).
+    -   Xác minh việc chiếm dụng Lock.
 2.  **Real Mode**:
-    -   Connects to live services for end-to-end flow validation.
+    -   Kết nối tới live services để kiểm thử luồng đầu cuối (end-to-end).
 
-**Status**: Verified. All tests passed locally.
+**Trạng thái**: Đã xác minh (Verified). Tất cả test cục bộ đã thông qua.

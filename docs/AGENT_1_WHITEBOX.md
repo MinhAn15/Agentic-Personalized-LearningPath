@@ -1,4 +1,4 @@
-# 🕵️ Whitebox Analysis: Agent 1 (Knowledge Extraction)
+# Whitebox Analysis: Agent 1 (Knowledge Extraction)
 
 **File chính**: `backend/agents/knowledge_extraction_agent.py`
 **Version**: 2.1 (Refined for Scalability & Reliability)
@@ -8,6 +8,7 @@
 ## Bối cảnh & Mục tiêu
 
 Trong hệ thống Personalized Learning Path, **Agent 1 ("The Librarian")** đóng vai trò nền tảng. Nhiệm vụ của nó là chuyển đổi dữ liệu thô (File PDF, Text, Transcript) thành tri thức có cấu trúc (**Course Knowledge Graph**).
+
 Nếu Agent 1 sai sót (Concept rác, quan hệ sai), toàn bộ luồng phía sau (Profiler, Path Planner) sẽ sai theo.
 Do đó, Agent 1 được thiết kế với các tiêu chí khắt khe: **Chính xác**, **Ổn định (Idempotent)** và **Mở rộng (Scalable)**.
 
@@ -56,14 +57,14 @@ Pipeline của Agent 1 hoạt động theo mô hình **Parallel Semantic Process
 
 **Code minh họa kiến trúc Semaphore:**
 ```python
-# Semaphore giới hạn số lượng concurrent tasks
+# Semaphore limits concurrent tasks
 semaphore = asyncio.Semaphore(self.MAX_CONCURRENCY)
 
 async def _process_with_limit(chunk):
     async with semaphore:
         return await self._process_single_chunk(chunk)
 
-# Chạy song song tất cả các chunks
+# Run all chunks in parallel
 tasks = [_process_with_limit(chunk) for chunk in chunks]
 results = await asyncio.gather(*tasks, return_exceptions=True)
 ```

@@ -1,0 +1,134 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Agentic System - Demo Flows</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+    </script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .card { background: white; padding: 20px; margin-bottom: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        h2 { color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .mermaid { text-align: center; margin-top: 20px; }
+        .description { color: #666; font-style: italic; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Agentic System Flows</h1>
+        <p style="text-align:center">Scientific Refinement (2025)</p>
+        
+        
+        <div class="card">
+            <h2>🤖 Agent 1: Knowledge Extraction (The "Hippocampus")</h2>
+            <div class="description">Visual Flow</div>
+            <div class="mermaid">
+graph LR
+    Doc["Document: 'Calculus.pdf'"] --> Chunker["Chunker: 512 Tokens"]
+    Chunker --> Extractor
+    subgraph "LightRAG Process (Offline)"
+        Extractor -->|Extract| Node["Concept: Calculus"]
+        Extractor -->|Extract| Edge["Relation: Enables -> Physics"]
+        Edge -->|Enrich| Key["Keywords: 'Rate of Change', 'Motion'"]
+    end
+    Key --> Neo4j["Neo4j Graph (Knowledge Base)"]
+    Node --> Neo4j
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>🧠 Agent 2: Profiler (The "Semantic Mapped")</h2>
+            <div class="description">Visual Flow</div>
+            <div class="mermaid">
+graph TD
+    Hist["History: None"] --> LLM
+    Q["Question: 'What is a derivative?'"] --> LLM
+    
+    subgraph "Semantic LKT"
+        LLM -->|Analyze Semantics| Concept["Concept: Limits/Slope"]
+        Concept -->|Estimate Difficulty| Diff["Hard: 0.7"]
+        Diff -->|Output| Score["Predicted Mastery: 0.3"]
+    end
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>🧭 Agent 3: Path Planner (The "Strategist")</h2>
+            <div class="description">Visual Flow</div>
+            <div class="mermaid">
+graph TD
+    Start((Current State)) --> B1[Path A: Easy]
+    Start --> B2[Path B: Hard]
+    
+    subgraph "Lookahead (Depth=2)"
+        B1 --> C1[Future: Dead End]
+        B2 --> C2[Future: High Mastery]
+    end
+    
+    C1 -- Score: 0.2 --> Prune[X]
+    C2 -- Score: 0.9 --> Select[✓]
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>🧑‍🏫 Agent 4: Tutor (The "Metacognitive Teacher")</h2>
+            <div class="description">Visual Flow</div>
+            <div class="mermaid">
+sequenceDiagram
+    Student->>Tutor: "I'm stuck."
+    Note right of Tutor: Hidden CoT Phase
+    Tutor->>Tutor: 1. Diagnosis: Missing definition
+    Tutor->>Tutor: 2. Strategy: Scaffolding
+    Tutor->>Tutor: 3. Draft: "Remember the slope..."
+    Tutor->>Student: "Let's review the definition of slope."
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>⚖️ Agent 5: Evaluator (The "AI Judge")</h2>
+            <div class="description">Visual Flow</div>
+            <div class="mermaid">
+graph TD
+    Ans[Student Answer] --> Judge
+    Ref[Golden Answer] --> Judge
+    
+    subgraph "G-Eval"
+        Judge --> Trace[Justification Trace]
+        Trace --> Criteria{Criteria Check}
+        Criteria -->|Correctness| S1[Score]
+        Criteria -->|Clarity| S2[Score]
+    end
+    
+    S1 & S2 --> Final[Final Score: 8.5]
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>💾 Agent 6: KAG (The "Operating System")</h2>
+            <div class="description">Visual Flow</div>
+            <div class="mermaid">
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Monitoring: User Input
+    
+    state "OS Kernel" as OS {
+        Monitoring --> PressureCheck: Token Limit?
+        PressureCheck --> AutoArchive: Yes (>70%)
+        PressureCheck --> Think: No
+        
+        Think --> ToolExec: Function Call
+        ToolExec --> Think: Heartbeat (Loop)
+        Think --> Yield: Final Answer
+    }
+    
+    Yield --> Idle
+            </div>
+        </div>
+        
+    </div>
+</body>
+</html>

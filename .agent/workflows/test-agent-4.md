@@ -1,29 +1,33 @@
 ---
-description: Test Agent 4 (Tutor Agent) functionality
+description: Explore and Verify Agent 4 (Tutor / Chain of Thought).
 ---
+# Agent 4: Tutor (The "Metacognitive Teacher")
 
-Steps to verify Agent 4 logic, specifically the Socratic State Machine, 3-Layer Grounding, and Harvard Enforcer.
+This workflow guides you through understanding the **scientific basis**, **implementation**, and **verification** of Agent 4.
 
-1. **Mock Mode Test**
-   Runs the agent in isolation using mocks for Neo4j, Redis, LLM, and LlamaIndex. Verifies:
-   - Socratic State transitions (Probing -> Scaffolding, Protege Effect).
-   - 3-Layer Grounding Score Calculation.
-   - Conflict Detection & Confidence Penalty.
+## 1. 🔬 Scientific Basis (Theory)
+Agent 4 implements **Chain of Thought (CoT) (Wei 2022)**, ensuring the Tutor "thinks" (plans scaffolding) before "speaking" (sending a hint), simulating human pedagogical reasoning.
+- **Read Theory**: `docs/SCIENTIFIC_BASIS.md` (Section 3.4).
+- **View Whitebox**: `docs/AGENT_4_WHITEBOX.md`
 
-   ```bash
-   python scripts/test_agent_4.py --mode mock
-   ```
+## 2. 🗺️ Visual Architecture
+Understanding the flow from Student Stuck -> Hidden CoT Phase -> Final Pedagogical Response.
+- **View Diagram**: Open `docs/presentation/demo_dashboard.html` (Agent 4 Card).
 
-2. **Real Mode Test (Optional)**
-   Runs the agent against live local Neo4j and Redis instances.
-   *ensure Redis and Neo4j are running before executing*
+## 3. 🧪 Live Verification
+Run the test script to see the "Hidden Thought Trace".
 
-   ```bash
-   # python scripts/test_agent_4.py --mode real
-   ```
+```bash
+python scripts/test_agent_4_cot.py
+```
 
-3. **Check Logs**
-   Review the output for:
-   - `✅ Confidence Score Correct`
-   - `✅ Conflict Penalty Applied`
+### What to Watch For:
+- **[CoT TRACE]**: "Internal Monologue" logs (e.g., "Student is struggling with X... I should provide a hint about Y").
+- **[RESPONSE]**: The final helpful message sent to the student.
+
+## 4. 🔍 Code Deep Dive
+Specialize in the `respond` method.
+- **File**: `backend/agents/tutor_agent.py`
+- **Key Method**: `_generate_cot_response` (The Thinking Before Speaking logic).
+
    - `✅ MOCK TEST PASSED`

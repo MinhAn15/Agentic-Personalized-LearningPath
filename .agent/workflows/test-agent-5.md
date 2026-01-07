@@ -1,30 +1,33 @@
 ---
 description: Test Agent 5 (Evaluator Agent) functionality
 ---
+description: Explore and Verify Agent 5 (Evaluator / JudgeLM).
+---
+# Agent 5: Evaluator (The "AI Judge")
 
-Steps to verify Agent 5 logic, specifically the Multi-Factor Rubric, Error Classification, and 5-Path Decision Engine.
+This workflow guides you through understanding the **scientific basis**, **implementation**, and **verification** of Agent 5.
 
-1. **Mock Mode Test**
-   Runs the agent in isolation using mocks for Neo4j, Redis, LLM, and LlamaIndex. Verifies:
-   - Scoring Logic (0.0 - 1.0 scale).
-   - Error Classification (Conceptual, Procedural, Careless).
-   - 5-Path Decision Boundaries (Mastered, Proceed, Alternate, Remediate, Retry).
-   - Mastery Weighted Moving Average (WMA) calculation.
-   - Alerting Logic (Score < 0.4).
+## 1. 🔬 Scientific Basis (Theory)
+Agent 5 implements **JudgeLM (Zhu 2023)**, using a "Gold Reference" and "Rubric" to evaluate student answers with high correlation to human grading, mitigating LLM bias.
+- **Read Theory**: `docs/SCIENTIFIC_BASIS.md` (Section 3.5).
+- **View Whitebox**: `docs/AGENT_5_WHITEBOX.md`
 
-   ```bash
-   python scripts/test_agent_5.py --mode mock
-   ```
+## 2. 🗺️ Visual Architecture
+Understanding the flow from Student Answer + Reference -> G-Eval Criteria -> Final Score.
+- **View Diagram**: Open `docs/presentation/demo_dashboard.html` (Agent 5 Card).
 
-2. **Real Mode Test (Optional)**
-   Runs the agent against live local Neo4j and Redis instances.
-   *ensure Redis and Neo4j are running before executing*
+## 3. 🧪 Live Verification
+Run the test script to see the "Justification Trace" and Score.
 
-   ```bash
-   # python scripts/test_agent_5.py --mode real
-   ```
+```bash
+python scripts/test_agent_5_judgelm.py
+```
 
-3. **Check Logs**
-   Review the output for:
-   - `✅ Evaluation complete`
-   - `✅ MOCK TEST PASSED`
+### What to Watch For:
+- **"justification_trace"**: Detailed reasoning (e.g., "Student successfully mentioned X but failed to explain Y").
+- **"score"**: A float value (0.0 - 1.0) aligning with the justification.
+
+## 4. 🔍 Code Deep Dive
+Specialize in the `evaluate` method.
+- **File**: `backend/agents/evaluator_agent.py`
+- **Key Method**: `_score_judgelm` (The Evaluation logic).

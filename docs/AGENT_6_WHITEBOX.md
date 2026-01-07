@@ -1,60 +1,63 @@
 # Agent 6: KAG Agent (MemGPT) Whitebox Analysis [VERIFIED]
 
-## 1. Internal Architecture
+## 1. Kiến trúc Nội tại (Internal Architecture)
 
-Agent 6 serves as the **Personal Knowledge OS**, implementing the MemGPT architecture [Packer 2023] to manage infinite context via a tiered memory system.
+Agent 6 đóng vai trò là **Personal Knowledge OS** (Hệ điều hành Tri thức Cá nhân), triển khai kiến trúc MemGPT [Packer 2023] để quản lý ngữ cảnh vô hạn thông qua hệ thống bộ nhớ phân tầng.
 
-### 1.1 Memory Hierarchy
+### 1.1 Phân cấp Bộ nhớ (Memory Hierarchy)
+
 *   **Main Context (RAM)**:
-    *   **System Instructions**: Immutable Persona + Function Schemas.
-    *   **Core Memory**: Pinned facts (e.g., User Profile, Current Goals). Mutable via `core_memory_append`.
-    *   **FIFO Queue**: Rolling conversation history. Evicted to Archival Storage when pressure > 70%.
+    *   **System Instructions**: Persona Bất biến + Function Schemas.
+    *   **Core Memory**: Các sự kiện được ghim (ví dụ: User Profile, Current Goals). Có thể thay đổi (Mutable) thông qua `core_memory_append`.
+    *   **FIFO Queue**: Lịch sử hội thoại cuốn chiếu. Bị đẩy (Evicted) sang Archival Storage khi áp lực bộ nhớ > 70%.
 *   **External Context (Disk)**:
-    *   **Archival Storage**: Neo4j Graph + Vector Index. Accessible via `archival_memory_search`.
-    *   **Recall Storage**: Chat logs synchronized to Disk.
+    *   **Archival Storage**: Neo4j Graph + Vector Index. Truy cập qua `archival_memory_search`.
+    *   **Recall Storage**: Log chat được đồng bộ xuống Disk.
 
-### 1.2 Process Flow (OS Kernel)
-The `execute` method runs a **Heartbeat Loop**:
-1.  **Monitor**: Checks `WorkingMemory` pressure.
-    *   *Interrupt*: If > 70%, triggers `_auto_archive` (Evict 50% -> Summarize -> Store).
-2.  **Compile**: Constructs `[SYSTEM] + [CORE] + [HISTORY]` prompt.
-3.  **Think (System 2)**: LLM generates response or Function Call.
-4.  **Act (Paging)**: Executes `[FUNCTION] tool_name(args)`.
-    *   *Tools*: `core_memory_append`, `archival_memory_search`, etc.
-5.  **Loop**: If tool called, recurses (Heartbeat). If final answer, yields to User.
+### 1.2 Quy trình Xử lý (OS Kernel)
 
----
+Phương thức `execute` chạy một **Vòng lặp Heartbeat (Heartbeat Loop)**:
 
-## 2. Algorithms & Data Structures
-
-### 2.1 Context Management (`WorkingMemory`)
-*   **Structure**: `System + Core + Queue`.
-*   **Heuristic**: Tokens estimated via `len(chars) // 4`.
-*   **Eviction**: `flush_queue(fraction=0.5)` removes oldest messages from Queue, preserving Core and System.
-
-### 2.2 Constructivist Note Generation
-*   **Dual-Code Theory**: Content includes both **Text** (Key Insight) and **Visuals** (Mermaid Concept Map).
-*   **Zettelkasten**: Notes are atomic, linked, and tagged.
+1.  **Monitor (Giám sát)**: Kiểm tra áp lực `WorkingMemory`.
+    *   *Interrupt*: Nếu > 70%, kích hoạt `_auto_archive` (Đẩy 50% -> Tóm tắt -> Lưu trữ).
+2.  **Compile (Biên dịch)**: Xây dựng prompt gồm `[SYSTEM] + [CORE] + [HISTORY]`.
+3.  **Think (System 2)**: LLM sinh phản hồi hoặc Function Call.
+4.  **Act (Paging)**: Thực thi `[FUNCTION] tool_name(args)`.
+    *   *Tools*: `core_memory_append`, `archival_memory_search`, v.v.
+5.  **Loop**: Nếu tool được gọi, đệ quy (Heartbeat). Nếu là câu trả lời cuối cùng (final answer), trả về cho User.
 
 ---
 
-## 3. Resilience
+## 2. Thuật toán & Cấu trúc Dữ liệu
 
-### 3.1 Memory Pressure
-*   **Trigger**: > 70% of `max_tokens` (default 8192).
-*   **Handling**: `_auto_archive` creates a "Session Summary" node in Neo4j and clears the queue, preventing Context Window Overflow (Crash).
+### 2.1 Quản lý Ngữ cảnh (`WorkingMemory`)
+*   **Cấu trúc**: `System + Core + Queue`.
+*   **Heuristic**: Token được ước lượng qua `len(chars) // 4`.
+*   **Eviction**: `flush_queue(fraction=0.5)` loại bỏ các tin nhắn cũ nhất khỏi Queue, bảo toàn Core và System.
 
-### 3.2 Infinite Loop Guard
-*   **Constraint**: `max_steps` (default 5) prevents the Heartbeat Loop from getting stuck in a function calling cycle.
+### 2.2 Sinh ghi chú Kiến tạo (Constructivist Note Generation)
+*   **Dual-Code Theory**: Nội dung bao gồm cả **Văn bản** (Key Insight) và **Hình ảnh** (Mermaid Concept Map).
+*   **Zettelkasten**: Ghi chú mang tính nguyên tử (atomic), được liên kết và gắn thẻ.
 
 ---
 
-## 4. Verification Strategy
+## 3. Khả năng phục hồi (Resilience)
 
-Verified via `scripts/test_agent_6_memgpt.py`:
+### 3.1 Áp lực Bộ nhớ (Memory Pressure)
+*   **Trigger (Kích hoạt)**: > 70% của `max_tokens` (mặc định 8192).
+*   **Xử lý**: `_auto_archive` tạo một node "Session Summary" trong Neo4j và xóa queue, ngăn chặn Tràn Cửa sổ Ngữ cảnh (Context Window Overflow/Crash).
 
-1.  **Heartbeat Logic**: Validated that the agent can chain `core_memory_append` -> `archival_memory_search` -> `Final Answer`.
-2.  **Context Compilation**: Verified prompt structure includes Core Memory block.
-3.  **Pressure Interrupt**: Verified `_auto_archive` triggers when context is filled.
+### 3.2 Bảo vệ Vòng lặp Vô hạn
+*   **Ràng buộc**: `max_steps` (mặc định 5) ngăn chặn Heartbeat Loop bị kẹt trong chu kỳ gọi hàm liên tục.
 
-**Status**: Verified (Logic Implemented & Tested).
+---
+
+## 4. Chiến lược Kiểm thử (Verification Strategy)
+
+Đã xác minh qua `scripts/test_agent_6_memgpt.py`:
+
+1.  **Heartbeat Logic**: Xác thực rằng agent có thể chuỗi hóa `core_memory_append` -> `archival_memory_search` -> `Final Answer`.
+2.  **Context Compilation**: Xác minh cấu trúc prompt bao gồm khối Core Memory.
+3.  **Pressure Interrupt**: Xác minh `_auto_archive` kích hoạt khi ngữ cảnh bị đầy.
+
+**Trạng thái**: Đã xác minh (Verified Logic Implemented & Tested).
