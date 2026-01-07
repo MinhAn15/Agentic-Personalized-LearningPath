@@ -43,14 +43,179 @@ Các tham số này được tinh chỉnh dựa trên thực nghiệm để cân
 
 ---
 
+### 2.5 Global Theme (Domain Context) - LightRAG Principle
+
+**Cơ sở khoa học:**
+
+| Paper/Concept | Năm | Đóng góp cho Global Theme |
+|---------------|-----|---------------------------|
+| **LightRAG** (Guo et al.) | 2024 | Dual-level retrieval: Low-level (entities) + **High-level (global themes)**. Global theme giúp LLM hiểu ngữ cảnh tổng thể. |
+| **Prompt Engineering** (OpenAI) | 2023 | Context trong prompt giúp constrain output, giảm hallucination. |
+| **Knowledge Graph** | - | Domain làm root node, giúp organize entities theo hierarchy. |
+
+**Nguyên lý ứng dụng:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Global Theme = Domain                                          │
+│  (e.g., "sql", "machine_learning")                             │
+│                                                                 │
+│  Inject vào TẤT CẢ prompts:                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │ Chunking    │  │ Layer 1     │  │ Layer 2-3   │             │
+│  │ (DSHP-LLM)  │  │ (Concepts)  │  │ (Relations) │             │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
+│         └────────────────┼────────────────┘                     │
+│                          ▼                                      │
+│             "Domain: {domain}" in ALL prompts                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Thiết kế Domain System:**
+
+| Aspect | Chi tiết |
+|--------|----------|
+| **Source** | Admin nhập khi upload document (required) |
+| **Predefined List** | `config/domains.py` với danh sách domains |
+| **Add New** | Admin có thể tạo domain mới nếu chưa có |
+| **Purpose** | Giúp LLM hiểu context, **KHÔNG dùng để filter** |
+| **Cross-domain** | Concepts có thể thuộc nhiều domains (e.g., SQL Server → sql, bi) |
+
+**Lưu ý quan trọng:** Domain **KHÔNG phải metadata filtering**. Một concept có thể xuất hiện ở nhiều domains khác nhau. Domain chỉ để guide LLM extraction chính xác hơn.
+
+---
+
 ## 3. Process (Luồng xử lý chi tiết)
 
 Pipeline của Agent 1 hoạt động theo mô hình **Parallel Semantic Processing**.
 
 ### 3.1 Giai đoạn 1: Semantic Chunking (Phân đoạn ngữ nghĩa)
+
+**Cơ sở Khoa học (Papers bổ trợ):**
+
+| Paper | Năm | Đóng góp cho Chunking |
+|-------|-----|----------------------|
+| **Reflexion** (Shinn et al.) | 2023 | Kỹ thuật self-critique cho phép LLM tự đánh giá và sửa lỗi phân đoạn. |
+| **LightRAG** (Guo et al.) | 2024 | Nguyên lý bảo toàn "semantic boundaries" - không cắt giữa ý. |
+| **Chain-of-Thought** (Wei et al.) | 2022 | Reasoning-based prompting để phân tích cấu trúc tài liệu. |
+
+**Triển khai thực tế (Adaptive Pipeline):**
+
+Thay vì dùng các phương pháp truyền thống (Fixed-size window, Regex), hệ thống áp dụng **Adaptive Agentic Chunking** với 3 chế độ:
+
+| Chế độ | Điều kiện | Input type | Phương pháp |
+|--------|-----------|------------|-------------|
+| **Standard** | < 10K tokens | Plain text | 3-Phase Pipeline |
+| **MultiDocFusion** | > 10K tokens | Plain text | 5-Stage Hierarchical |
+| **Vision** | PDF/PPT/Image | Binary file | Gemini Vision → MultiDocFusion |
+
+### 3.1.1 Vision Mode (Gemini Vision) - MultiDocFusion Paper
+
+Khi input là **file binary** (PDF, PPT, Image), hệ thống sử dụng **Gemini Vision** để:
+
+```
+File Binary → Base64 Encode → Gemini Vision API → {paragraphs[], hierarchy{}} → DSHP-LLM → DFS → Chunks
+```
+
+**Tại sao cần Vision?**
+- Paper MultiDocFusion (EMNLP 2025) dùng Vision model để detect visual layout
+- Plain text extraction mất thông tin về heading sizes, fonts, spacing
+- Vision model nhìn thấy cấu trúc trực quan → hierarchy chính xác hơn
+
+**Prompt cho Gemini Vision:**
+```
+Analyze the visual layout of this document and extract:
+1. All text paragraphs in reading order
+2. The hierarchical structure (sections, subsections)
+3. Identify headings based on visual cues (font size, boldness)
+
+Return JSON: {paragraphs: [...], hierarchy: {title, children: [...]}}
+```
+
+**Fallback Strategy:**
+- Nếu Vision fail → `pymupdf` text extraction → MultiDocFusion pipeline
+- Nếu file không hỗ trợ → Standard text pipeline
+
+### 3.1.2 Standard Pipeline (Docs < 10K tokens)
+
+**Chế độ 1: Standard Pipeline (Docs < 10K tokens)**
+
+1. **Architect Phase**: LLM phân tích *ý nghĩa* toàn bộ văn bản và đề xuất Table of Contents.
+2. **Refiner Phase (Reflexion)**: LLM tự phản biện ("Example bị tách?", "Section quá nhỏ?").
+3. **Executor Phase**: Trích xuất nội dung thực tế bằng fuzzy matching.
+
+**Chế độ 2: MultiDocFusion Pipeline (Docs > 10K tokens) - EMNLP 2025**
+
+| Stage | Mô tả | Phương thức kỹ thuật | Input → Output |
+|-------|-------|---------------------|----------------|
+| **1. Pre-split** | Tách theo paragraphs (multi-level fallback) | 4-level: `\n\n` → `\n` → sentence → fixed-size | `Document → List[Paragraph]` |
+| **2. DSHP-LLM** | LLM xây dựng Hierarchical Tree | LLM Prompt → JSON Tree structure | `Paragraphs → Tree{title, level, children[], paragraphs[]}` |
+| **3. DFS Grouping** | Duyệt tree depth-first | Recursive DFS traversal, leaf nodes → sections | `Tree → List[Section{start_text, end_text, purpose}]` |
+| **4. Refiner** | LLM tự phản biện (Reflexion) | Same as Standard Pipeline | `Sections → Refined Sections` |
+| **5. Executor** | Trích xuất nội dung thực tế | Fuzzy text matching (`_fuzzy_find`) | `Refined Sections → List[SemanticChunk]` |
+
+**Stage 1 - Pre-split (Multi-level Fallback):**
+
+| Level | Strategy | Khi nào dùng | Fallback condition |
+|-------|----------|--------------|-------------------|
+| **1** | `split('\n\n')` | Plain text, Markdown | < 3 paragraphs → Level 2 |
+| **2** | `split('\n')` + chunk by size | PDF/OCR extraction | < 3 paragraphs → Level 3 |
+| **3** | Sentence split (`. ? !`) | Continuous text | < 3 paragraphs → Level 4 |
+| **4** | Fixed-size chunks (~2000 chars) | Last resort (messy text) | Always succeeds |
+
+
+**Chi tiết kỹ thuật từng Stage:**
+
+**Stage 2 - DSHP-LLM (Document Section Hierarchical Parsing):**
+
+Áp dụng **Discourse Structure Theory** (Mann & Thompson, 1988): Câu đầu thường chứa topic sentence.
+
+```python
+# First 3 Sentences extraction (thay vì fixed 100 chars)
+def extract_first_sentences(text, n=3, max_chars=400):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    return ' '.join(sentences[:n])[:max_chars]
+
+# Prompt gửi LLM
+prompt = f"""
+Document Domain: {domain}
+Document Title: {title}
+Paragraphs: 
+[P0] {extract_first_sentences(para_0)}
+[P1] {extract_first_sentences(para_1)}
+
+Task: Build HIERARCHICAL TREE, return JSON:
+{{"title": "Root", "children": [...]}}
+"""
+```
+
+**Stage 3 - DFS Grouping Algorithm:**
+```python
+def _dfs_group_tree(tree, paragraphs):
+    sections = []
+    def traverse(node, path=[]):
+        if not node.children:  # Leaf node
+            content = join(paragraphs[i] for i in node.paragraphs)
+            sections.append({
+                "title": node.title,
+                "start_text": content[:50],
+                "end_text": content[-50:]
+            })
+        else:
+            for child in node.children:
+                traverse(child, path + [node.title])
+    traverse(tree)
+    return sections
+```
+
+**Cấu hình:**
+- `LARGE_DOC_TOKEN_THRESHOLD = 10000` (~40K chars, estimated 4 chars/token)
+- `DEFAULT_PARAGRAPH_MIN_CHARS = 100` (paragraphs nhỏ hơn được merge)
+- `domain` parameter: User có thể truyền domain hint (SQL, ML, etc.)
+
 *   **Mục tiêu**: Chia nhỏ văn bản dài thành các đoạn nhỏ có ý nghĩa trọn vẹn (không cắt giữa chừng câu hoặc ý).
-*   **Phương pháp**: Sử dụng LLM để xác định ranh giới (Boundaries).
-*   **Kết quả**: List các `SemanticChunk`.
+*   **Phương pháp**: Adaptive routing dựa trên document size.
+*   **Kết quả**: List các `SemanticChunk` với metadata sư phạm (`pedagogical_purpose`).
 
 ### 3.2 Giai đoạn 2: Information Extraction (Trích xuất song song)
 Đây là trái tim của Agent. Thay vì chạy tuần tự (Sequential), Agent sử dụng `asyncio.gather` để bắn nhiều request lên LLM cùng lúc.
@@ -70,19 +235,67 @@ results = await asyncio.gather(*tasks, return_exceptions=True)
 ```
 
 **Trong mỗi Chunk, quy trình 3 lớp (3-Layer Extraction) diễn ra:**
-1.  **Layer 1 (Concepts)**: Tìm các thực thể chính (VD: "Polymorphism", "Foreign Key").
-    *   *Kỹ thuật Stable ID*: Concept ID được tạo theo công thức `{domain}.{clean_name}`. VD: `sql.joins.inner`. Không còn phụ thuộc vào ngữ cảnh ngẫu nhiên của LLM.
-2.  **Layer 2 (Relationships)**: Tìm quan hệ giữa các thực thể vừa tìm được (VD: `A IS_PREREQUISITE_OF B`).
-3.  **Layer 3 (Metadata)**: Gán nhãn Bloom's Taxonomy (Understand, Apply) để phục vụ cho việc gợi ý bài tập sau này.
+
+| Layer | Mục đích | Domain Injection | Input | Output |
+|-------|----------|------------------|-------|--------|
+| **Layer 1** | Concept Extraction | ✅ `Domain/Subject Area: {domain}` | `SemanticChunk.content` | `List[Concept{id, name, context}]` |
+| **Layer 2** | Relationship Extraction | ✅ `{domain_context}` in template | `List[concept_id]` | `List[Relationship]` |
+| **Layer 3** | Metadata Enrichment | ✅ `{domain_context}` prefix | `Concept` list | `{bloom_level, tags[]}` |
+
+**Layer 1 - Concept Extraction (Chi tiết):**
+- **Input**: `SemanticChunk` với `content`, `chunk_type`, `pedagogical_purpose`
+- **Domain Context**: Inject ở đầu prompt (Global Theme)
+- **LLM Prompt**:
+  ```
+  You are extracting learning concepts from a document section.
+  Domain/Subject Area: SQL  # ← DOMAIN INJECTED HERE
+  Document: SQL Basics Tutorial
+  Section: ...
+  ```
+- **ID Generation**: `ConceptIdBuilder._sanitize()` tạo Stable ID:
+  - `"SELECT Statement"` → `sql.select_statement`
+  - `"SELECT Query"` → `sql.select_query`
+- **Output**: `List[Concept]` với `concept_code = {domain}.{snake_case_name}`
+- **Code Reference**: `_extract_concepts_from_chunk()` line 499-568
+
+**Layer 2 - Relationship Extraction (Chi tiết):**
+- **Input**: Danh sách `concept_id` từ Layer 1 + original chunk content
+- **Domain Context**: `{domain_context}` placeholder trong `LIGHTRAG_RELATIONSHIP_EXTRACTION_PROMPT`
+- **Prompt Pattern**: LightRAG (Guo et al., 2024) - Knowledge Graph extraction
+- **7 Relationship Types**:
+  - `PREREQUISITE_OF`, `RELATED_TO`, `PART_OF`, `EXAMPLE_OF`, `DERIVED_FROM`, `USED_IN`, `CONTRASTS_WITH`
+- **Output per relation**: `{source_id, target_id, type, keywords[], weight, confidence}`
+- **Code Reference**: `_extract_relationships_from_chunk()` line 628-665, `prompts.py` line 52-87
+
+**Layer 3 - Metadata Enrichment (Chi tiết):**
+- **Input**: `Concept` object + chunk context
+- **Domain Context**: `{domain_context}` prepended to prompt
+- **Classification Tasks**:
+  - Bloom's Taxonomy: `REMEMBER → UNDERSTAND → APPLY → ANALYZE → EVALUATE → CREATE`
+  - Time Estimate: 15-120 phút (dựa trên complexity)
+  - Semantic Tags: 3-5 keywords cho search/filter
+- **Output**: Updated `Concept` với enriched metadata
+- **Code Reference**: `_enrich_metadata()` line 669-720
 
 ### 3.3 Giai đoạn 3: Entity Resolution (Hợp nhất thực thể)
-*   **Vấn đề**: File A nói về "Inner Join", File B nói về "INNER JOIN". Nếu không xử lý, Graph sẽ có 2 nút riêng biệt.
-*   **Giải pháp (Refined)**: Sử dụng **Fulltext Search** + **Vector Search**.
-    1.  Agent query Neo4j Index để tìm các candidate có tên *gần giống* (`~0.8`).
-    2.  So sánh Embedding vector của định nghĩa (Definition).
-    3.  Nếu trùng khớp -> Merge vào node cũ (Canonical). Nếu mới -> Tạo node mới.
 
-**Tối ưu hóa**: Thay vì load toàn bộ Graph vào RAM (O(N)), kỹ thuật Candidate Retrieval chỉ lấy 10-20 node liên quan (O(1)), giúp hệ thống scale lên hàng triệu concept vẫn mượt mà.
+**Vấn đề**: `SELECT_STATEMENT` vs `SELECT_QUERY` có thể là cùng 1 khái niệm.
+
+**Giải pháp (3-Way Similarity)**:
+
+| Component | Weight | Phương pháp |
+|-----------|--------|-------------|
+| Semantic | 60% | Embedding cosine similarity |
+| Structural | 30% | Prerequisite overlap (Jaccard) |
+| Contextual | 10% | Tag overlap (Jaccard) |
+
+**Quy trình 2 giai đoạn**:
+1. **Within-Batch Dedup**: Agglomerative clustering trong batch mới (threshold 0.80)
+2. **External Merge**: So sánh với Neo4j existing concepts (threshold 0.80)
+
+**Threshold**: `MERGE_THRESHOLD = 0.80` (giảm từ 0.85 để merge aggressive hơn)
+
+**Tối ưu hóa**: Two-Stage Resolution - Candidate Retrieval (Top-K=20) trước Deep Comparison → O(1) thay vì O(N).
 
 ### 3.4 Giai đoạn 4: Persistence (Lưu trữ)
 Sử dụng `Neo4jBatchUpserter` để ghi dữ liệu theo lô (Batch), giảm số lượng Transaction, tăng tốc độ ghi gấp 10-50 lần so với ghi từng node.

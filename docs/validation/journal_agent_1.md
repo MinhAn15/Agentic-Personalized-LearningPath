@@ -35,6 +35,11 @@
   - **Script**: `scripts/test_agent_1.py` passed in mock mode.
   - **Result**: Confirmed `content_keywords` are extracted at chunk level and `keywords` are attached to relationships.
   - **Resolution**: **Gap 1 (Keyword Graph)** is officially closed via LightRAG implementation.
+- [2026-01-07] **Entity Resolution Enhancement**:
+  - **Change**: Lowered `MERGE_THRESHOLD` from 0.85 to **0.80** for more aggressive deduplication.
+  - **Reason**: `SELECT_STATEMENT` vs `SELECT_QUERY` should merge if semantically similar.
+  - **Code**: `entity_resolver.py` L84-86.
+  - **Doc Sync**: Updated `SCIENTIFIC_BASIS.md`, `NOTEBOOKLM_PROMPTS.md`, `AGENT_1_WHITEBOX.md`, `agent-1.md` workflow.
 *   **Action**: Updating `SCIENTIFIC_BASIS.md` to define LightRAG as "Edge-Attribute Thematic Indexing".
 *   **Action**: Modifying `knowledge_extraction_agent.py`:
     *   Updated `KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT` to request `relationship_keywords`.

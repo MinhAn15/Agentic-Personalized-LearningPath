@@ -16,6 +16,35 @@ This document defines the **Target Architecture** based on the latest research i
     *   **Content Keywords**: High-level topics extracted at the chunk level, indexed in the `DocumentRegistry` to serve as the "Hippocampal Index" into the heavier Vector Storage.
     *   *Note*: This implementation unifies LightRAG's dual-graph approach with HippoRAG's associative indexing theory.
 
+
+### 2. Global Theme (Domain Context) - NEW
+*   **Source**: *LightRAG (Guo 2024)* - Dual-level retrieval with high-level themes.
+*   **Concept**: Global context improves LLM extraction accuracy by providing domain awareness.
+*   **Mechanism**:
+    *   Domain determined at document upload: Admin input → Auto-suggest → LLM fallback.
+    *   Domain injected into **ALL prompts** (Chunking, Layer 1-3).
+    *   Domain is for **LLM guidance only**, NOT for filtering (cross-domain concepts allowed).
+*   **Implementation**: `config/domains.py` with `DomainRegistry` class.
+
+### 3. 3-Layer Extraction Pipeline (with Domain Context)
+*   **Source**: *Reflexion (Shinn 2023)*, *Chain-of-Thought (Wei 2022)*.
+*   **Mechanism**:
+    *   **Layer 1 (Concepts)**: LLM with `Domain/Subject Area: {domain}` → `name`, `context`, `description`.
+    *   **Layer 2 (Relationships)**: LightRAG Prompt with `{domain_context}` → 7 types + `keywords` + `weight`.
+    *   **Layer 3 (Metadata)**: Bloom's Taxonomy with `{domain_context}` → Time Estimate, Tags.
+*   **Parallelism**: Layers 2 & 3 run concurrently via `asyncio.gather`.
+*   **Code Reference**: `knowledge_extraction_agent.py` lines 499-720.
+
+### 4. Entity Resolution (3-Way Similarity)
+*   **Source**: *Navarro (2001). "Approximate String Matching"*.
+*   **Mechanism**:
+    *   **Semantic**: 60% weight (Embedding cosine similarity).
+    *   **Structural**: 30% weight (Prerequisite overlap via Jaccard).
+    *   **Contextual**: 10% weight (Tag overlap via Jaccard).
+    *   **Threshold**: `MERGE_THRESHOLD = 0.80` (Configurable).
+*   **Scalability**: Two-Stage Resolution (Candidate Retrieval Top-K=20, then Deep Comparison).
+
+
 ---
 
 ## Agent 2: Learner Profiler

@@ -52,7 +52,7 @@ IMPORTANT:
 LIGHTRAG_RELATIONSHIP_EXTRACTION_PROMPT = """
 # Source: LightRAG (Guo et al., 2024)
 # Goal: Extract relationships with "Global Thematic Keywords" for edge-attribute indexing.
-
+{domain_context}
 Identify relationships between these concepts:
 
 {concept_list}

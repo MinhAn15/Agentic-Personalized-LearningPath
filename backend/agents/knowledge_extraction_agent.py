@@ -189,6 +189,28 @@ class KnowledgeExtractionAgent(BaseAgent):
             document_type = (kwargs.get("document_type") or "LECTURE").strip()
             force_reprocess = kwargs.get("force_reprocess", False)
             
+            # GLOBAL THEME: Domain is REQUIRED for accurate LLM extraction
+            # Source: LightRAG (Guo 2024) - global theme helps LLM understand context
+            user_domain = kwargs.get("domain")
+            if not user_domain:
+                # Try auto-suggest from document title/content
+                from backend.config.domains import get_domain_registry
+                registry = get_domain_registry()
+                suggested = registry.suggest_domain(f"{document_title} {document_content[:500]}")
+                if suggested:
+                    user_domain = suggested.code
+                    self.logger.info(f"🎯 Auto-suggested domain: {user_domain}")
+                else:
+                    # Fallback to LLM classification (existing behavior)
+                    user_domain = await self._extract_domain(document_title, document_content)
+                    self.logger.info(f"🤖 LLM-classified domain: {user_domain}")
+            else:
+                user_domain = user_domain.lower().strip()
+                self.logger.info(f"📌 Admin-provided domain: {user_domain}")
+            
+            # Store domain for use in extraction layers
+            self._current_domain = user_domain
+            
             if not document_content:
                 return self._error_response("document_content is required")
             
@@ -222,11 +244,13 @@ class KnowledgeExtractionAgent(BaseAgent):
             
             # ========================================
             # STEP 2: Pure Agentic Chunking (AI-driven)
+            # Routes to MultiDocFusion for large docs (>10K tokens)
             # ========================================
             chunks = await self.chunker.chunk_with_ai(
                 document_content, 
                 document_id,
-                document_title
+                document_title,
+                domain=user_domain  # Pass domain for MultiDocFusion context
             )
             chunk_stats = self.chunker.get_stats(chunks)
             
@@ -247,7 +271,7 @@ class KnowledgeExtractionAgent(BaseAgent):
             async def semaphore_wrapped_process(chunk, idx, total):
                 async with semaphore:
                     self.logger.debug(f"Processing chunk {idx+1}/{total} (Parallel): {chunk.source_heading}")
-                    return await self._process_single_chunk(chunk, document_title, document_id)
+                    return await self._process_single_chunk(chunk, document_title, document_id, self._current_domain)
 
             tasks = [
                 semaphore_wrapped_process(chunk, i, len(chunks)) 
@@ -438,19 +462,19 @@ class KnowledgeExtractionAgent(BaseAgent):
             
             return self._error_response(str(e))
 
-    async def _process_single_chunk(self, chunk, document_title, document_id):
+    async def _process_single_chunk(self, chunk, document_title, document_id, domain: str = None):
         """Helper for parallel processing of a single chunk"""
         try:
-            # Layer 1: Concept extraction
-            chunk_concepts = await self._extract_concepts_from_chunk(chunk, document_title)
+            # Layer 1: Concept extraction (with Global Theme domain context)
+            chunk_concepts = await self._extract_concepts_from_chunk(chunk, document_title, domain)
             
-            # Layer 2: Relationship extraction (LightRAG)
+            # Layer 2: Relationship extraction (LightRAG + Global Theme)
             chunk_relationships = await self._extract_relationships_from_chunk(
-                chunk, chunk_concepts
+                chunk, chunk_concepts, domain
             )
             
-            # Layer 3: Metadata enrichment
-            enriched_concepts = await self._enrich_metadata(chunk_concepts)
+            # Layer 3: Metadata enrichment (with domain context)
+            enriched_concepts = await self._enrich_metadata(chunk_concepts, domain)
             
             # Layer 4: Content Keywords (LightRAG)
             content_keywords = await self._extract_content_keywords(chunk)
@@ -473,17 +497,25 @@ class KnowledgeExtractionAgent(BaseAgent):
     # ===========================================
     
     async def _extract_concepts_from_chunk(
-        self, chunk: SemanticChunk, document_title: str
+        self, chunk: SemanticChunk, document_title: str, domain: str = None
     ) -> List[Dict[str, Any]]:
         """
         Extract concepts from a single chunk.
         
         LLM provides raw fields (name, context, description, etc.)
         Backend builds concept_code using ConceptIdBuilder.
+        
+        Args:
+            chunk: SemanticChunk to extract from
+            document_title: Document title for context
+            domain: Global Theme domain for LLM context (LightRAG principle)
         """
+        # GLOBAL THEME: Include domain in prompt for better LLM accuracy
+        domain_context = f"\nDomain/Subject Area: {domain.upper()}" if domain else ""
+        
         prompt = f"""
 You are extracting learning concepts from a document section.
-
+{domain_context}
 Document: {document_title}
 Section: {chunk.source_heading}
 Content:
@@ -518,8 +550,9 @@ If no concepts found, return empty array: []
             response = await self.llm.acomplete(prompt)
             raw_concepts = self._parse_json_array(response.text)
             
-            # Build concept IDs using backend logic (import is at top of file)
-            domain = await self._extract_domain(document_title, chunk.content)
+            # Use provided domain or fallback to extraction
+            if not domain:
+                domain = await self._extract_domain(document_title, chunk.content)
             builder = get_concept_id_builder(domain=domain)
             
             for concept in raw_concepts:
@@ -593,10 +626,15 @@ Return ONLY the domain name, nothing else. Example: sql
         return first_word[:10].replace(" ", "_")
     
     async def _extract_relationships_from_chunk(
-        self, chunk: SemanticChunk, concepts: List[Dict]
+        self, chunk: SemanticChunk, concepts: List[Dict], domain: str = None
     ) -> List[Dict[str, Any]]:
         """
         Extract relationships between concepts with SPR-compliant fields.
+        
+        Args:
+            chunk: SemanticChunk for context
+            concepts: List of concepts to find relationships between
+            domain: Global Theme domain for LLM context (LightRAG principle)
         
         SPR Spec Fields:
         - relationship_type: One of 7 types
@@ -612,8 +650,12 @@ Return ONLY the domain name, nothing else. Example: sql
             for c in concepts
         ])
         
+        # GLOBAL THEME: Include domain context for better relationship accuracy
+        domain_context = f"\nDomain/Subject Area: {domain.upper()}\n" if domain else ""
+        
         prompt = LIGHTRAG_RELATIONSHIP_EXTRACTION_PROMPT.format(
-            concept_list=concept_list
+            concept_list=concept_list,
+            domain_context=domain_context
         )
         try:
             response = await self.llm.acomplete(prompt)
@@ -622,10 +664,19 @@ Return ONLY the domain name, nothing else. Example: sql
             self.logger.error(f"Relationship extraction error: {e}")
             return []
     
-    async def _enrich_metadata(self, concepts: List[Dict]) -> List[Dict]:
-        """Layer 3: Enrich with metadata"""
+    async def _enrich_metadata(self, concepts: List[Dict], domain: str = None) -> List[Dict]:
+        """
+        Layer 3: Enrich with metadata.
+        
+        Args:
+            concepts: List of concepts to enrich
+            domain: Global Theme domain for LLM context (LightRAG principle)
+        """
         if not concepts:
             return []
+        
+        # GLOBAL THEME: Include domain context for better classification
+        domain_context = f"Domain/Subject Area: {domain.upper()}\n\n" if domain else ""
         
         # FIX Issue 2: Include full concept context for better Bloom level assessment
         concept_details = "\n".join([
@@ -634,7 +685,7 @@ Return ONLY the domain name, nothing else. Example: sql
         ])
         
         prompt = f"""
-Add metadata to these concepts:
+{domain_context}Add metadata to these concepts:
 
 {concept_details}
 

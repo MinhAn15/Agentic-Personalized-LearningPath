@@ -17,7 +17,12 @@ Use these prompts to validte the transition from Classical Algorithms to **SOTA 
 > - **Architecture Decision**: Instead of maintaining a separate 'Keyword Graph' (which doubles schema complexity), I am implementing **'Edge-Attribute Thematic Indexing'** combined with **'Chunk-Level Content Keywords'**. 
 > - **Mechanism**: 
 >     1. **Low-Level**: Every relationship edge (e.g., A -> B) carries `keywords` and a `summary` property.
->     2. **High-Level**: Global "Content Keywords" are extracted per document chunk and indexed in `DocumentRegistry` for broad thematic search."
+>     2. **High-Level**: Global "Content Keywords" are extracted per document chunk and indexed in `DocumentRegistry` for broad thematic search.
+> - **3-Layer Extraction Pipeline**:
+>     1. **Layer 1 (Concepts)**: LLM extracts `name`, `context`, `description`. Backend generates **Stable ID** via `ConceptIdBuilder._sanitize()`.
+>     2. **Layer 2 (Relationships)**: LightRAG Prompt extracts 7 relationship types + `keywords` + `weight` (runs parallel with Layer 3).
+>     3. **Layer 3 (Metadata)**: Bloom's Taxonomy, Time Estimate, Semantic Tags (runs parallel with Layer 2).
+> - **Entity Resolution**: 3-Way Similarity (Semantic 60%, Structural 30%, Contextual 10%) with `MERGE_THRESHOLD = 0.80`."
 
 **Prompt**:
 > "Evaluate this 'Edge-Attribute' implementation of LightRAG against the original paper.

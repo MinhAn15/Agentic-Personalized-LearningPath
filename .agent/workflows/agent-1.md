@@ -8,21 +8,29 @@ This workflow provides a comprehensive technical view of Agent 1, from Scientifi
 // turbo-all
 
 1.  **🔬 Scientific Basis (Whitebox Analysis)**
-    *Review the dual-graph indexing theory (LightRAG).*
+    *Review the dual-graph indexing theory (LightRAG), Global Theme/Domain Context, and 3-Layer Extraction mechanism.*
     `view_file docs/AGENT_1_WHITEBOX.md`
 
-2.  **🏗️ Code Structure: Pipeline Entry**
-    *The `execute()` method orchestrates parallel document processing.*
-    `view_file backend/agents/knowledge_extraction_agent.py --start_line 171 --end_line 260`
+2.  **🌐 NEW: Global Theme (Domain Context) - LightRAG Principle**
+    *Domain registry with predefined domains and add-new mechanism.*
+    `view_file backend/config/domains.py`
 
-3.  **🧠 Code Structure: Entity Extraction**
-    *The `_extract_entities_and_relations()` method implementation.*
-    `view_file backend/agents/knowledge_extraction_agent.py --start_line 429 --end_line 460`
+3.  **🏗️ Code Structure: Pipeline Entry**
+    *The `execute()` method with domain determination (Admin → Auto-suggest → LLM fallback).*
+    `view_file backend/agents/knowledge_extraction_agent.py --start_line 185 --end_line 275`
 
-4.  **🧪 Code Structure: Resolution Logic**
-    *How fuzzy matching works for deduplication.*
-    `view_file backend/agents/knowledge_extraction_agent.py --start_line 744 --end_line 805`
+4.  **🧠 Code Structure: 3-Layer Extraction (with Domain Injection)**
+    *Layer 1 (Concepts + Domain), Layer 2 (Relationships + Domain), Layer 3 (Metadata + Domain).*
+    `view_file backend/agents/knowledge_extraction_agent.py --start_line 465 --end_line 570`
 
-5.  **✅ Verification**
+5.  **🔗 Code Structure: Entity Resolution**
+    *3-Way Similarity với MERGE_THRESHOLD=0.80 để dedup semantic duplicates.*
+    `view_file backend/utils/entity_resolver.py --start_line 68 --end_line 150`
+
+6.  **🧪 Code Structure: Fulltext Search Fallback**
+    *How fuzzy matching works for deduplication trong Neo4j.*
+    `view_file backend/agents/knowledge_extraction_agent.py --start_line 770 --end_line 840`
+
+7.  **✅ Verification**
     *Run the test script to verify the offline ingestion pipeline.*
     `python scripts/test_agent_1.py`

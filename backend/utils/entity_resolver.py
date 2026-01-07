@@ -81,7 +81,9 @@ class EntityResolver:
     W_CONTEXTUAL = 0.10  # Metadata overlap (Tags)
     
     # Thresholds
-    MERGE_THRESHOLD = 0.85  # Combined score for auto-merge
+    # FIX: Lowered from 0.85 to 0.80 for more aggressive dedup
+    # Reasoning: "SELECT_STATEMENT" vs "SELECT_QUERY" should merge if semantically similar
+    MERGE_THRESHOLD = 0.80  # Combined 3-way score for auto-merge
     
     # Scalability: Two-Stage Resolution Parameters
     TOP_K_CANDIDATES = 20   # Max candidates to retrieve per concept
