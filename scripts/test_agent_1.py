@@ -138,6 +138,7 @@ async def run_mock_mode(document_content, document_title):
     # To truly mock LLM, we'd need to mock 'agent.llm_service'
     
     # Setting up a mock LLM response for _extract_concepts_from_chunk
+    # Updated to match new signature: (chunk, document_title, domain)
     agent._extract_concepts_from_chunk = AsyncMock(return_value=[
         {
             "concept_id": "TestConcept", 
@@ -146,6 +147,7 @@ async def run_mock_mode(document_content, document_title):
             "type": "concept"
         }
     ])
+    # Updated to match new signature: (chunk, concepts, domain)
     agent._extract_relationships_from_chunk = AsyncMock(return_value=[
         {
             "source": "Test Concept", 
@@ -156,7 +158,8 @@ async def run_mock_mode(document_content, document_title):
         }
     ])
     agent._extract_content_keywords = AsyncMock(return_value=["Mock Theme A", "Mock Theme B"])
-    agent._enrich_metadata = AsyncMock(side_effect=lambda x: x)
+    # Updated to match new signature: (concepts, domain) - lambda needs 2 args
+    agent._enrich_metadata = AsyncMock(side_effect=lambda concepts, domain=None: concepts)
     agent._extract_domain = AsyncMock(return_value="mock_domain")
 
     # Mock RAG Vector Persistence to avoid real Embedding API calls

@@ -94,4 +94,92 @@ Agent được kiểm thử thông qua `scripts/test_agent_3.py` hỗ trợ:
 2.  **Real Mode**:
     -   Kết nối tới live services để kiểm thử luồng đầu cuối (end-to-end).
 
-**Trạng thái**: Đã xác minh (Verified). Tất cả test cục bộ đã thông qua.
+### 4.3 Latency Analysis (ToT vs LinUCB)
+
+**LLM Call Count per Planning Session:**
+
+| Component | Calls per Beam | Total (b=3, d=3) |
+|-----------|----------------|------------------|
+| **Thought Generator** | 1 per node | 3 × 3 = 9 calls |
+| **State Evaluator** | 1 per candidate | 3 × 3 = 9 calls |
+| **Total** | | ~18 LLM calls |
+
+**Latency Breakdown:**
+
+| Mode | LLM Calls | Est. Time |
+|------|-----------|-----------|
+| **ToT (Full)** | 18 | ~9 seconds |
+| **ToT (Shallow, d=2)** | 12 | ~6 seconds |
+| **LinUCB (Fallback)** | 0 | ~100ms |
+
+**Optimization Strategies:**
+
+| Strategy | Impact | Implementation |
+|----------|--------|----------------|
+| **Caching** | -50% calls | Cache thought generator results per concept |
+| **Shallow Search** | -33% calls | Reduce depth to d=2 for known paths |
+| **Async Parallel** | -40% time | Evaluate multiple candidates concurrently |
+| **LinUCB Hybrid** | -70% calls | Use ToT only for first planning, LinUCB for re-planning |
+
+**ToT vs LinUCB Comparison:**
+
+| Aspect | ToT (Tree of Thoughts) | LinUCB (Bandit) |
+|--------|------------------------|-----------------|
+| **Latency** | ~9s | ~100ms |
+| **Quality** | Higher (lookahead) | Good (exploitation) |
+| **Exploration** | Strategic (System 2) | Random (UCB) |
+| **Cold Start** | Excellent | Poor |
+| **Use Case** | Initial planning | Re-planning, real-time |
+
+**Thesis Position**: ToT for initial curriculum, LinUCB for incremental updates.
+
+---
+
+## 5. Evaluation Methodology (Đánh giá chất lượng)
+
+### 5.1 Path Quality Metrics
+
+| Metric | Definition | Target |
+|--------|------------|--------|
+| **Completion Rate** | % learners who complete the generated path | ≥ 70% |
+| **Time to Mastery** | Average time to reach 80% mastery on goal | 20% faster than baseline |
+| **Prerequisite Violations** | # concepts attempted without prerequisites | 0 (hard constraint) |
+| **Backtrack Rate** | % sessions requiring BACKWARD chaining | ≤ 30% |
+
+### 5.2 ToT-Specific Metrics
+
+| Metric | Definition | Target |
+|--------|------------|--------|
+| **Beam Diversity** | Avg unique concepts across beams | ≥ 2 per search |
+| **Pruning Effectiveness** | % low-value paths correctly pruned | ≥ 80% |
+| **Strategic Value Accuracy** | Correlation between predicted and actual success | ρ ≥ 0.6 |
+
+### 5.3 Ground Truth & Baseline
+
+**Baseline Comparison:**
+- **Random Path**: Select next concept randomly
+- **Greedy Path**: Always select highest mastery neighbor
+- **Rule-based Path**: Fixed prerequisite ordering
+
+**Expected Results:**
+
+| Method | Completion Rate | Time to Mastery |
+|--------|-----------------|-----------------|
+| Random | ~40% | Baseline |
+| Greedy | ~55% | -5% |
+| Rule-based | ~60% | -10% |
+| **ToT (Ours)** | **≥70%** | **-20%** |
+
+### 5.4 Limitations
+
+| Limitation | Impact | Mitigation |
+|------------|--------|------------|
+| No large-scale user study | Cannot validate real engagement | Synthetic learner simulation |
+| LLM cost | ToT expensive for scaling | LinUCB hybrid mode |
+| Semantic drift | LLM may generate invalid concepts | Graph validation layer |
+
+---
+
+## 6. Kết luận
+
+Agent 3 kết hợp **Tree of Thoughts** (cho chất lượng cao) với **LinUCB** (cho tốc độ) để tạo curriculum tối ưu. ToT được sử dụng cho initial planning với lookahead strategy, trong khi LinUCB handle real-time re-planning với latency thấp.

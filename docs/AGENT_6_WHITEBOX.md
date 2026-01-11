@@ -61,3 +61,72 @@ Phương thức `execute` chạy một **Vòng lặp Heartbeat (Heartbeat Loop)*
 3.  **Pressure Interrupt**: Xác minh `_auto_archive` kích hoạt khi ngữ cảnh bị đầy.
 
 **Trạng thái**: Đã xác minh (Verified Logic Implemented & Tested).
+
+---
+
+## 5. Evaluation Methodology (Đánh giá chất lượng)
+
+### 5.1 Memory Management Metrics
+
+| Metric | Definition | Target |
+|--------|------------|--------|
+| **Pressure Trigger Rate** | % sessions hitting >70% memory | ≤ 20% |
+| **Auto-Archive Success** | % successful context evictions | ≥ 99% |
+| **Context Utilization** | Average memory usage per session | 50-70% |
+| **Overflow Prevention** | # sessions crashed due to context limit | 0 |
+
+### 5.2 Heartbeat Loop Metrics
+
+| Metric | Definition | Target |
+|--------|------------|--------|
+| **Avg Steps per Execution** | Mean heartbeat iterations | 2-3 |
+| **Max Steps Reached** | % sessions hitting max_steps=5 | ≤ 5% |
+| **Tool Chain Success** | % multi-tool chains completing | ≥ 95% |
+
+**Latency Analysis:**
+
+| Scenario | Steps | LLM Calls | Est. Time |
+|----------|-------|-----------|-----------|
+| Simple query | 1 | 1 | ~500ms |
+| Tool + Answer | 2 | 2 | ~1s |
+| Full chain (max) | 5 | 5 | ~2.5s |
+
+### 5.3 Zettelkasten Metrics
+
+| Metric | Definition | Target |
+|--------|------------|--------|
+| **Note Atomicity** | Avg concepts per note | 1-2 |
+| **Link Density** | Avg links per note | ≥ 2 |
+| **Recall Precision** | % relevant notes retrieved | ≥ 80% |
+
+### 5.4 System Learning Metrics
+
+| Metric | Definition | Target |
+|--------|------------|--------|
+| **Bottleneck Detection** | % known difficult concepts identified | ≥ 90% |
+| **Pattern Recognition** | % common errors correctly aggregated | ≥ 85% |
+| **Recommendation Adoption** | % recommendations implemented | ≥ 50% |
+
+### 5.5 MemGPT vs Baseline Comparison
+
+| Approach | Context Limit | Latency | Memory Quality |
+|----------|---------------|---------|----------------|
+| Fixed Window | 8K tokens | Fast | Loses old context |
+| Sliding Window | 8K tokens | Fast | Loses semantic coherence |
+| RAG Only | Unlimited | Medium | No episodic memory |
+| **MemGPT (Ours)** | **Unlimited** | **Medium** | **Preserves key insights** |
+
+### 5.6 Limitations
+
+| Limitation | Impact | Mitigation |
+|------------|--------|------------|
+| Summarization quality | May lose important details | Multi-level summarization |
+| Retrieval accuracy | May recall irrelevant context | Hybrid search (vector + graph) |
+| Heartbeat latency | Up to 5 LLM calls | Parallel tool execution (future) |
+
+---
+
+## 6. Kết luận
+
+Agent 6 triển khai **MemGPT** (Packer 2023) để quản lý ngữ cảnh vô hạn thông qua tiered memory architecture. `WorkingMemory` class với memory pressure monitoring và auto-archive đảm bảo hệ thống không bao giờ crash do context overflow, trong khi Zettelkasten note generation tạo personal knowledge base cho learner.
+

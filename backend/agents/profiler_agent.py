@@ -545,21 +545,17 @@ Return ONLY valid JSON:
             # Generate diagnostic questions
             questions = await self._generate_diagnostic_questions(concepts, topic)
             
-            mastery_estimates = {}
-            level_multiplier = {
-                "beginner": 0.1,
-                "intermediate": 0.5,
-                "advanced": 0.8,
-                "unknown": 0.2
-            }.get(current_level.lower(), 0.2)
-            
-            for concept in concepts:
-                concept_id = concept.get("concept_id") or concept.get("name", "").upper().replace(" ", "_")
-                difficulty = concept.get("difficulty", 2)
-                
-                # Estimate mastery
-                base_mastery = level_multiplier * (1 - (difficulty - 1) * 0.1)
-                mastery_estimates[concept_id] = max(0.0, min(1.0, base_mastery))
+            # ==========================================
+            # LKT: Language Knowledge Tracing (Lee 2024)
+            # Use LLM to predict mastery based on semantic understanding
+            # instead of simple heuristics
+            # ==========================================
+            mastery_estimates = await self._predict_mastery_lkt(
+                learner_id=learner_id,
+                concepts=concepts,
+                current_level=current_level,
+                topic=topic
+            )
             
             return {
                 "success": True,
@@ -572,6 +568,148 @@ Return ONLY valid JSON:
         except Exception as e:
             self.logger.error(f"Diagnostic assessment error: {e}")
             return {"success": False, "error": str(e)}
+    
+    # ==========================================
+    # LKT: Language Knowledge Tracing Implementation
+    # Source: Lee et al. (2024) "Language Model Can Do Knowledge Tracing"
+    # ==========================================
+    
+    async def _predict_mastery_lkt(
+        self,
+        learner_id: str,
+        concepts: List[Dict],
+        current_level: str,
+        topic: str,
+        interaction_history: List[Dict] = None
+    ) -> Dict[str, float]:
+        """
+        LKT (Language Knowledge Tracing) - Predict mastery using LLM.
+        
+        Key Innovation (per Lee 2024):
+        - Replace LSTM-based DKT with Pre-trained Language Model
+        - Use semantic understanding for Cold Start (zero-shot prediction)
+        - Format interaction history as text for LLM context
+        
+        Args:
+            learner_id: Learner identifier
+            concepts: List of concepts to predict mastery for
+            current_level: Stated skill level (beginner/intermediate/advanced)
+            topic: Learning topic
+            interaction_history: Optional prior interactions for sequential prediction
+        
+        Returns:
+            Dict mapping concept_id -> predicted mastery (0.0-1.0)
+        """
+        mastery_estimates = {}
+        
+        # Format interaction history (LKT core mechanism)
+        history_text = self._format_interaction_history(interaction_history or [])
+        
+        # Build concept list for batch prediction
+        concept_list = "\n".join([
+            f"- {c.get('name', c.get('concept_id'))}: difficulty {c.get('difficulty', 2)}/5"
+            for c in concepts
+        ])
+        
+        # LKT Prompt: Semantic mastery prediction
+        prompt = f"""You are a Knowledge Tracing system predicting learner mastery.
+
+LEARNER CONTEXT:
+- Topic: {topic}
+- Stated Level: {current_level}
+- Interaction History: {history_text if history_text else "None (Cold Start)"}
+
+CONCEPTS TO ASSESS:
+{concept_list}
+
+TASK: Predict the probability (0.0 to 1.0) that this learner has mastered each concept.
+
+REASONING GUIDELINES:
+1. Cold Start: With no history, use semantic difficulty + stated level
+   - Beginner: 0.1-0.3 for basic, 0.0-0.1 for advanced concepts
+   - Intermediate: 0.3-0.5 for basic, 0.1-0.3 for advanced
+   - Advanced: 0.5-0.8 for basic, 0.3-0.5 for advanced
+2. With History: Consider success/failure patterns on related concepts
+3. Semantic Transfer: If learner mastered "SELECT", they likely have partial mastery of "WHERE"
+
+Return ONLY valid JSON object:
+{{
+  "predictions": [
+    {{"concept_id": "CONCEPT_1", "mastery": 0.35, "reasoning": "Beginner level, medium difficulty"}},
+    {{"concept_id": "CONCEPT_2", "mastery": 0.15, "reasoning": "Beginner level, high difficulty"}}
+  ]
+}}
+"""
+        try:
+            response = await self.llm.acomplete(prompt)
+            response_text = response.text
+            
+            # Parse JSON response
+            json_start = response_text.find("{")
+            json_end = response_text.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                result = json.loads(response_text[json_start:json_end])
+                predictions = result.get("predictions", [])
+                
+                for pred in predictions:
+                    concept_id = pred.get("concept_id")
+                    mastery = pred.get("mastery", 0.2)
+                    # Clamp to valid range
+                    mastery_estimates[concept_id] = max(0.0, min(1.0, float(mastery)))
+                
+                self.logger.info(f"🧠 LKT predicted mastery for {len(predictions)} concepts")
+                
+        except Exception as e:
+            self.logger.warning(f"LKT prediction failed, using fallback: {e}")
+            # Fallback to simple heuristic if LLM fails
+            mastery_estimates = self._fallback_mastery_heuristic(concepts, current_level)
+        
+        # Ensure all concepts have predictions
+        for concept in concepts:
+            concept_id = concept.get("concept_id") or concept.get("name", "").upper().replace(" ", "_")
+            if concept_id not in mastery_estimates:
+                # Fallback for missing predictions
+                difficulty = concept.get("difficulty", 2)
+                level_mult = {"beginner": 0.1, "intermediate": 0.5, "advanced": 0.8}.get(current_level.lower(), 0.2)
+                mastery_estimates[concept_id] = max(0.0, min(1.0, level_mult * (1 - (difficulty - 1) * 0.1)))
+        
+        return mastery_estimates
+    
+    def _format_interaction_history(self, history: List[Dict]) -> str:
+        """
+        Format interaction history for LKT (per Lee 2024 paper).
+        
+        Format: [CLS] Concept1 \n Question1 [CORRECT] Concept2 \n Question2 [INCORRECT] ...
+        """
+        if not history:
+            return ""
+        
+        formatted = "[CLS] "
+        for interaction in history[-10:]:  # Last 10 interactions (context window limit)
+            concept = interaction.get("concept_id", "Unknown")
+            question = interaction.get("question_text", "")[:50]  # Truncate
+            result = "[CORRECT]" if interaction.get("correct", False) else "[INCORRECT]"
+            formatted += f"{concept}\n{question} {result}\n"
+        
+        return formatted.strip()
+    
+    def _fallback_mastery_heuristic(self, concepts: List[Dict], current_level: str) -> Dict[str, float]:
+        """Fallback heuristic when LKT prediction fails."""
+        mastery_estimates = {}
+        level_multiplier = {
+            "beginner": 0.1,
+            "intermediate": 0.5,
+            "advanced": 0.8,
+            "unknown": 0.2
+        }.get(current_level.lower(), 0.2)
+        
+        for concept in concepts:
+            concept_id = concept.get("concept_id") or concept.get("name", "").upper().replace(" ", "_")
+            difficulty = concept.get("difficulty", 2)
+            base_mastery = level_multiplier * (1 - (difficulty - 1) * 0.1)
+            mastery_estimates[concept_id] = max(0.0, min(1.0, base_mastery))
+        
+        return mastery_estimates
 
     async def _generate_diagnostic_concepts(self, topic: str) -> List[Dict]:
         """Generate representative concepts for a topic if not in KG"""
