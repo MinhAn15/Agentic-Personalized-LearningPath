@@ -1058,8 +1058,19 @@ Return JSON object mapping concept_id to metadata:
                 # Layer 3: Metadata enrichment
                 enriched_concepts = await self._enrich_metadata(chunk_concepts)
                 
+                # Compute embeddings (NEW for Vector Search)
+                embed_model = await self._get_embedding_model()
+                
                 # Convert to snapshot format
                 for concept in enriched_concepts:
+                    # Compute embedding
+                    embedding_vector = []
+                    try:
+                        concept_text = f"{concept.get('name', '')}: {concept.get('description', '')}"
+                        embedding_vector = await embed_model.aget_text_embedding(concept_text)
+                    except Exception as e:
+                        self.logger.error(f"⚠️ Failed to compute embedding for {concept.get('name')}: {e}")
+
                     concept_snapshots.append({
                         "concept_id": concept.get("concept_id"),
                         "name": concept.get("name", ""),
@@ -1071,7 +1082,8 @@ Return JSON object mapping concept_id to metadata:
                         "difficulty": concept.get("difficulty", 2),
                         "learning_objective": concept.get("learning_objective", ""),
                         "examples": concept.get("examples", []),
-                        "confidence": 0.85  # Default confidence
+                        "confidence": 0.85,
+                        "embedding": embedding_vector  # Pass to provenance
                     })
                 
                 for rel in chunk_relationships:

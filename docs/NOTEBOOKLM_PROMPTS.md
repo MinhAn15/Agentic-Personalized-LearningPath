@@ -43,13 +43,16 @@ Use these prompts to validte the transition from Classical Algorithms to **SOTA 
 >     1. **Input Format**: I flatten the student's history into a semantic string: `[CLS] ConceptA \n QuestionA [CORRECT] ConceptB...`
 >     2. **Prediction**: I append the target concept/question and a `[MASK]` token.
 >     3. **Inference**: The LLM predicts the probability of `[CORRECT]` filling the mask based on the full semantic context (not just IDs).
->     4. **Cold Start**: For new students, the model relies purely on the semantic difficulty of the `Question` text."
+>    *   **Goal Identification**: Using **Neo4j Vector Index (v5.15+)** for Hybrid Retrieval.
+        *   User query "Learn AI" -> Vector Search (Gemini 768-dim) -> `course_concept_index`.
+        *   Filters results by Graph Community to resolve ambiguity.
+    *   **Cold Start**: For new students, the model relies purely on the semantic difficulty of the `Question` text."
 
 **Prompt**:
-> "Evaluate this LKT implementation against the state-of-the-art:
-> 1. Does the 'Input Format' (Question Text + Outcome) provide enough signal for the LLM to capture 'Skill Transfer' (e.g., Algebra helping Physics)?
-> 2. The paper discusses 'Instruction Tuning'. Is my zero-shot prompt robust enough, or must I fine-tune on a dataset like ASSISTments?
-> 3. How does LKT compare to DKT in terms of 'interpretability'? Can I ask the LLM *why* it predicted 0.8?"
+> "Evaluate this LKT + Hybrid Retrieval implementation:
+> 1. Does the 'Input Format' (Question Text + Outcome) provide enough signal for the LLM to capture 'Skill Transfer'?
+> 2. Is using Neo4j Vector Index sufficient for Goal Identification, or do I need a separate Intent Classification model?
+> 3. How does LKT compare to DKT in terms of 'interpretability'?"
 
 ---
 

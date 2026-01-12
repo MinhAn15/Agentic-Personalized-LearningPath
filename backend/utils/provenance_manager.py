@@ -49,6 +49,7 @@ class ConceptSnapshot:
     learning_objective: str = ""
     examples: List[str] = None
     confidence: float = 0.8
+    embedding: List[float] = None  # NEW: Vector embedding (768-dim)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -63,7 +64,8 @@ class ConceptSnapshot:
             "difficulty": self.difficulty,
             "learning_objective": self.learning_objective,
             "examples": self.examples or [],
-            "confidence": self.confidence
+            "confidence": self.confidence,
+            "embedding": self.embedding or []
         }
 
 
@@ -251,6 +253,7 @@ class ProvenanceManager:
                 learning_objective: row.learning_objective,
                 examples: row.examples,
                 confidence: row.confidence,
+                embedding: row.embedding,
                 created_at: datetime()
             })
             
@@ -363,6 +366,7 @@ class ProvenanceManager:
                 c.learning_objective = COALESCE(best.learning_objective, c.learning_objective),
                 c.examples = COALESCE(best.examples, c.examples),
                 c.canonical_confidence = best.confidence,
+                c.embedding = COALESCE(best.embedding, c.embedding),
                 c.updated_at = datetime()
             
             RETURN count(c) AS rebuilt
@@ -392,6 +396,7 @@ class ProvenanceManager:
                 c.learning_objective = COALESCE(best.learning_objective, c.learning_objective),
                 c.examples = COALESCE(best.examples, c.examples),
                 c.canonical_confidence = best.confidence,
+                c.embedding = COALESCE(best.embedding, c.embedding),
                 c.updated_at = datetime()
             
             RETURN count(c) AS rebuilt

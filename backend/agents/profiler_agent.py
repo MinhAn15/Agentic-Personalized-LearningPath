@@ -343,19 +343,66 @@ class ProfilerAgent(BaseAgent):
                 "agent_id": self.agent_id
             }
     
+    async def _get_embedding_model(self):
+        """Lazy load Gemini Embedding model"""
+        if not hasattr(self, 'embedding_model') or not self.embedding_model:
+            self.embedding_model = GeminiEmbedding(
+                model_name="models/embedding-001",
+                api_key=self.settings.GOOGLE_API_KEY
+            )
+        return self.embedding_model
+
+    async def _find_goal_node_hybrid(self, user_goal: str, top_k: int = 3) -> List[Dict]:
+        """
+        Find Goal Node using Hybrid Retrieval (Vector + Graph).
+        
+        1. Vector Search: User Goal -> Embed -> Neo4j Vector Index -> Top K Nodes
+        2. Graph Filter: Prefer nodes with outgoing learning paths or CourseConcept label.
+        
+        Ref: SCIENTIFIC_BASIS.md Section 3.5.1
+        """
+        try:
+            embed_model = await self._get_embedding_model()
+            goal_embedding = await embed_model.aget_text_embedding(user_goal)
+            
+            neo4j = self.state_manager.neo4j
+            
+            # Hybrid Query: Vector Score + Bloom Level Boost (favor APPLY/ANALYZE for goals)
+            query = """
+            CALL db.index.vector.queryNodes('course_concept_index', $k, $embedding)
+            YIELD node, score
+            WHERE node:CourseConcept
+            
+            // Optional: Boost score if concept is a 'goal' type (e.g. higher order thinking)
+            WITH node, score,
+                 CASE node.bloom_level
+                    WHEN 'CREATE' THEN 1.2
+                    WHEN 'EVALUATE' THEN 1.1
+                    WHEN 'ANALYZE' THEN 1.05
+                    ELSE 1.0
+                 END AS boost
+            
+            RETURN node.concept_id AS id, 
+                   node.name AS name, 
+                   node.bloom_level AS bloom,
+                   score * boost AS final_score
+            ORDER BY final_score DESC
+            """
+            
+            results = await neo4j.run_query(query, k=top_k, embedding=goal_embedding)
+            return results
+        except Exception as e:
+            self.logger.error(f"Hybrid retrieval failed: {e}")
+            return []
+
     async def _parse_goal_with_intent(
         self, learner_message: str, learner_name: str
     ) -> Dict[str, Any]:
         """
-        Parse learner goal with Intent Extraction.
-        
-        Extracts:
-        - Topic: Main subject to learn
-        - Purpose: Why (job, project, curiosity)
-        - Constraint: Time limit
-        - Current Level: Skill assessment
+        Parse learner goal with Intent Extraction + Hybrid Retrieval.
         """
         try:
+            # 1. LLM Extraction
             prompt = f"""
 You are analyzing a learner's goal. Extract structured information.
 
@@ -381,23 +428,38 @@ Return ONLY valid JSON:
   "current_skill_level": "BEGINNER",
   "preferred_learning_style": "VISUAL",
   "recommendations": ["Start with SELECT statements", "Practice with real datasets"],
-  "estimated_hours": 20,
-  "current_mastery": []
+  "estimated_hours": 20
 }}
 """
             response = await self.llm.acomplete(prompt)
             response_text = response.text
             
+            profile_data = {}
             try:
                 json_start = response_text.find("{")
                 json_end = response_text.rfind("}") + 1
                 if json_start >= 0 and json_end > json_start:
                     profile_data = json.loads(response_text[json_start:json_end])
-                    return {"success": True, "profile_data": profile_data}
             except json.JSONDecodeError as e:
                 self.logger.error(f"JSON parsing error: {e}")
+                return {"success": False, "error": "Could not parse goal"}
+
+            # 2. Hybrid Retrieval Refinement
+            # Use vector search to map "topic" to actual CourseConcepts
+            if "goal" in profile_data:
+                goal_nodes = await self._find_goal_node_hybrid(profile_data["goal"])
+                if goal_nodes:
+                    best_match = goal_nodes[0]
+                    self.logger.info(f"🎯 Goal Node Mapped: '{profile_data['topic']}' -> '{best_match['name']}' (Score: {best_match['final_score']:.2f})")
+                    # Update topic to be precise
+                    profile_data["topic"] = best_match["id"] # Use ID for internal logic
+                    profile_data["topic_name"] = best_match["name"] # Keep human name
             
-            return {"success": False, "error": "Could not parse goal"}
+            return {"success": True, "profile_data": profile_data}
+            
+        except Exception as e:
+             self.logger.error(f"Goal parsing failed: {e}")
+             return {"success": False, "error": str(e)}
         
         except Exception as e:
             self.logger.error(f"Goal parsing error: {e}")

@@ -83,8 +83,8 @@ No memory                →         Tiered memory (MemGPT)
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **LLM** | Google Gemini | All agents use this for reasoning |
-| **Embeddings** | Gemini Embedding | Semantic similarity |
-| **Graph DB** | Neo4j | Course KG + Personal KG |
+| **Embeddings** | Gemini Embedding | Semantic similarity (768-dim) |
+| **Graph DB** | Neo4j (v5.19) | Course KG + Personal KG + **Vector Index** |
 | **Relational DB** | PostgreSQL | User data, sessions |
 | **Cache** | Redis | State, locks, hot data |
 | **Backend** | Python + FastAPI | API layer |

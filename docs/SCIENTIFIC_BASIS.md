@@ -58,6 +58,19 @@ This document defines the **Target Architecture** based on the latest research i
     *   **Logic**: Using the LLM to predict the probability of correctness for the next step based on the full semantic context, not just ID sequences.
     *   **Cold Start**: Leveraging the LLM's pre-trained knowledge to predict mastery even with zero history, purely from the semantic difficulty of the question.
 
+### 2. Goal Node Identification (Hybrid Retrieval) - NEW
+*   **Source**: *Neo4j Graph Data Science* & *Vector Search Best Practices (2024)*.
+*   **Concept**: Combining **Semantic Search** (for vague user intent) with **Graph Locality** (for precise curriculum mapping).
+*   **Target Mechanism**:
+    *   **Neo4j Vector Index (v5.15+)**: 
+        *   Index Name: `course_concept_index`.
+        *   Dimensions: 768 (Gemini Embedding).
+        *   Metric: Cosine Similarity.
+    *   **Hybrid Query**:
+        *   `db.index.vector.queryNodes` finds Top-K semantic matches.
+        *   `MATCH (n)-[:REQUIRES*]->(root)` filters for fundamental concepts if user is beginner.
+    *   **Ambiguity Resolution**: If variance in vector scores is high (>0.1), trigger a Clarification Dialogue instead of guessing the goal.
+
 ---
 
 ## Agent 3: Path Planner

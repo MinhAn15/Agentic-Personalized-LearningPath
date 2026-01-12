@@ -16,9 +16,9 @@ Chúng tôi mô hình hóa trạng thái người học $\mathcal{S}$ dưới d�
 6.  **Velocity ($x_8$)**: Tốc độ học tập (concepts/hour).
 7.  **Scope ($x_9$)**: Kích thước tương đối của mục tiêu học tập.
 
-### 2.2 Vấn đề Cold Start & Graph RAG
-Để khởi tạo $\mathbf{x}_0$ mà không có dữ liệu lịch sử, chúng tôi sử dụng **Diagnostic Assessment** (Đánh giá chẩn đoán) kết hợp **Graph RAG**:
-1.  **Retrieval**: Với một mục tiêu (VD: "Learn SQL"), hệ thống truy vấn Knowledge Graph để tìm "Topographic Anchors" - các concept có độ trung tâm (PageRank) cao.
+### 2.2 Vấn đề Cold Start & Hybrid Retrieval
+Để khởi tạo $\mathbf{x}_0$ mà không có dữ liệu lịch sử, chúng tôi sử dụng **Diagnostic Assessment** (Đánh giá chẩn đoán) kết hợp **Hybrid Retrieval**:
+1.  **Retrieval**: Với một mục tiêu (VD: "Learn SQL"), hệ thống dùng **Neo4j Vector Index** để tìm "Topographic Anchors" gần nhất về ngữ nghĩa, kết hợp bộ lọc đồ thị.
 2.  **Generation**: LLM sinh ra 5 câu hỏi chẩn đoán dựa trên các anchor này.
 3.  **Estimation**: **LKT (Language Knowledge Tracing)** dự đoán mức độ thành thạo dựa trên semantic understanding.
 
