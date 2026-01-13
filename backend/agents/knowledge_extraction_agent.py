@@ -171,6 +171,10 @@ class KnowledgeExtractionAgent(BaseAgent):
         if self._provenance_manager is None:
             self._provenance_manager = ProvenanceManager(self.state_manager.neo4j)
         return self._provenance_manager
+
+    async def _get_embedding_model(self):
+        """Get embedding model (helper for async consistency)"""
+        return self.embedding_model
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """
@@ -479,6 +483,9 @@ class KnowledgeExtractionAgent(BaseAgent):
             # Layer 4: Content Keywords (LightRAG)
             content_keywords = await self._extract_content_keywords(chunk)
             
+            # Layer 5: Embedding Computation (Standard Pipeline)
+            enriched_concepts = await self._compute_embeddings(enriched_concepts)
+            
             # Add provenance to each concept
             for concept in enriched_concepts:
                 concept["source_document_id"] = document_id
@@ -496,6 +503,33 @@ class KnowledgeExtractionAgent(BaseAgent):
     # EXTRACTION METHODS
     # ===========================================
     
+    async def _compute_embeddings(self, concepts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Compute embeddings for a list of concepts"""
+        if not concepts:
+            return concepts
+            
+        embed_model = await self._get_embedding_model()
+        
+        for concept in concepts:
+            # Skip if already has embedding
+            if concept.get("embedding") and len(concept["embedding"]) > 0:
+                continue
+                
+            try:
+                # Semantic Signature: Name + Description + Context
+                # Include tags for better disambiguation power
+                tags = " ".join(concept.get("semantic_tags", []) or [])
+                text = f"{concept.get('name', '')} | {concept.get('context', '')} | {concept.get('description', '')} | {tags}"
+                
+                embedding = await embed_model.aget_text_embedding(text)
+                concept["embedding"] = embedding
+            except Exception as e:
+                self.logger.error(f"⚠️ Failed to compute embedding for {concept.get('name')}: {e}")
+                # Don't fail the concept, just missing embedding
+                concept["embedding"] = []
+                
+        return concepts
+
     async def _extract_concepts_from_chunk(
         self, chunk: SemanticChunk, document_title: str, domain: str = None
     ) -> List[Dict[str, Any]]:
@@ -1059,18 +1093,11 @@ Return JSON object mapping concept_id to metadata:
                 enriched_concepts = await self._enrich_metadata(chunk_concepts)
                 
                 # Compute embeddings (NEW for Vector Search)
-                embed_model = await self._get_embedding_model()
+                # Reuse helper to modify concepts in-place
+                enriched_concepts = await self._compute_embeddings(enriched_concepts)
                 
                 # Convert to snapshot format
                 for concept in enriched_concepts:
-                    # Compute embedding
-                    embedding_vector = []
-                    try:
-                        concept_text = f"{concept.get('name', '')}: {concept.get('description', '')}"
-                        embedding_vector = await embed_model.aget_text_embedding(concept_text)
-                    except Exception as e:
-                        self.logger.error(f"⚠️ Failed to compute embedding for {concept.get('name')}: {e}")
-
                     concept_snapshots.append({
                         "concept_id": concept.get("concept_id"),
                         "name": concept.get("name", ""),
@@ -1083,7 +1110,7 @@ Return JSON object mapping concept_id to metadata:
                         "learning_objective": concept.get("learning_objective", ""),
                         "examples": concept.get("examples", []),
                         "confidence": 0.85,
-                        "embedding": embedding_vector  # Pass to provenance
+                        "embedding": concept.get("embedding", [])  # Pass to provenance
                     })
                 
                 for rel in chunk_relationships:

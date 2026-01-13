@@ -87,3 +87,59 @@
 ### Final Status: ✅ ALL 9 QUESTIONS PASS
 
 **Agent 1 Critique Complete** - Ready for thesis defense.
+
+---
+
+## Session 3: CODE VERIFICATION (2026-01-13)
+
+### Phase 1: DEEP DIVE (Vector Search Consistency)
+
+**Critique:**
+A deep code verification revealed a significant inconsistency in the Vector Search implementation.
+- **Issue**: The "Provenance V2" pipeline (used for overwriting existing documents) correctly integrated embedding computation. However, the "Standard V2" pipeline (used for initial document ingestion) completely lacked this step, meaning new concepts would not have embeddings unless they went through an overwrite cycle.
+- **Root Cause**: The embedding logic was implemented inline within `execute_with_provenance` but not abstracted for reuse in `execute` or `_process_single_chunk`. Additionally, the `Neo4jBatchUpserter` utility (used by the standard pipeline) was not updated to write the `embedding` property to Neo4j.
+
+**Resolution:**
+1.  **Refactoring**: Extracted embedding logic into a shared `_compute_embeddings` helper method in `KnowledgeExtractionAgent`.
+2.  **Standardization**: Updated `_process_single_chunk` (Standard Pipeline) to call this helper, ensuring all new concepts get embeddings immediately.
+3.  **Persistence Fix**: Updated `Neo4jBatchUpserter` to explicitly handle and persist the `embedding` field in Cypher `ON CREATE` and `ON MATCH` clauses.
+4.  **Verification**: Confirmed that `ProvenanceManager` (used by the other pipeline) also correctly handles embeddings via the Snapshot-Rebuild pattern.
+
+**Status:** ✅ **Resolved** (Codebase is now consistent and scientifically valid regarding Vector Search support).
+
+---
+
+## Session 4: DOCUMENTATION CROSS-REFERENCE (2026-01-13)
+
+### Files Compared
+- `AGENT_1_WHITEBOX.md` (593 lines) - Whitebox Analysis
+- `AGENT_1_KNOWLEDGE_EXTRACTION.md` (216 lines) - Developer Reference
+
+### Cross-Reference Results
+
+| Aspect | WHITEBOX.md | KNOWLEDGE_EXTRACTION.md | Status |
+|--------|-------------|------------------------|--------|
+| **Entity Resolution Weights** | W_SEMANTIC=60%, W_STRUCTURAL=30%, W_CONTEXTUAL=10% | Same (lines 114-117) | ✅ Consistent |
+| **Merge Threshold** | MERGE_THRESHOLD=0.85 | Same (line 148) | ✅ Consistent |
+| **Top-K Candidates** | TOP_K=20 | Same (lines 111, 149) | ✅ Consistent |
+| **Batch Size** | BATCH_SIZE=100 | Same (line 150) | ✅ Consistent |
+| **Chunking Sizes** | CHUNK_MIN=500, CHUNK_MAX=4000 | Same (lines 151-152) | ✅ Consistent |
+| **Pipeline Phases** | 6 phases documented | 7 phases (includes Event Handling) | ✅ Compatible |
+| **LightRAG Adaptation** | Section 2.6 explains deviation | Pipeline diagram shows hybrid arch | ✅ Consistent |
+
+### Enhancement from KNOWLEDGE_EXTRACTION.md
+
+The developer reference provides additional detail not in WHITEBOX:
+
+1. **Mermaid Pipeline Diagram** (lines 12-75): Visual 7-phase architecture
+2. **Weighted Average Formula** (line 121): $V_{final} = \frac{\sum (V_i \times Confidence_i)}{\sum Confidence_i}$
+3. **4-Pillar Contextual Embedding** (line 115): `Name | Context | Description | Tags`
+4. **Event Schema** (lines 193-196): Full `COURSEKG_UPDATED` payload
+
+### Finding: ✅ FULLY CONSISTENT
+
+Both documents are aligned and complement each other:
+- `WHITEBOX.md` - Thesis-oriented analysis (scientific justification)
+- `KNOWLEDGE_EXTRACTION.md` - Developer reference (implementation details)
+
+**No inconsistencies found. Agent 1 documentation is complete.**

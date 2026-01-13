@@ -96,7 +96,8 @@ class Neo4jBatchUpserter:
                     "learning_objective": concept.get("learning_objective", ""),
                     "examples": concept.get("examples", []),
                     "extraction_version": concept.get("extraction_version", "v3"),
-                    "source_document_id": source_document_id
+                    "source_document_id": source_document_id,
+                    "embedding": concept.get("embedding", [])  # Support Vector Search
                 })
             
             # UNWIND batch upsert with COALESCE to preserve existing values
@@ -115,6 +116,7 @@ class Neo4jBatchUpserter:
                 c.examples = row.examples,
                 c.extraction_version = row.extraction_version,
                 c.source_document_ids = [row.source_document_id],
+                c.embedding = row.embedding,
                 c.created_at = datetime(),
                 c.updated_at = datetime()
             ON MATCH SET
@@ -137,6 +139,7 @@ class Neo4jBatchUpserter:
                     THEN c.source_document_ids 
                     ELSE c.source_document_ids + row.source_document_id 
                 END,
+                c.embedding = CASE WHEN size(row.embedding) > 0 THEN row.embedding ELSE c.embedding END,
                 c.updated_at = datetime()
             RETURN count(c) AS upserted
             """
