@@ -83,7 +83,7 @@ def generate_html(diagrams):
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(final_html)
     
-    print(f"✅ Dashboard generated: {os.path.abspath(OUTPUT_FILE)}")
+    print(f"[OK] Dashboard generated: {os.path.abspath(OUTPUT_FILE)}")
 
 if __name__ == "__main__":
     diagrams = parse_markdown(MARKDOWN_FILE)
