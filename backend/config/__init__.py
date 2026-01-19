@@ -44,7 +44,16 @@ class Settings(BaseSettings):
     # LLM (Google Gemini via LlamaIndex)
     # ============================================
     GOOGLE_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "models/gemini-2.0-flash-lite" # Deprecated favor of LLM_MODEL, kept for backward compat
+    
+    # Unified LLM Configuration (Factory Pattern)
+    LLM_PROVIDER: str = "gemini" # gemini, openai, perplexity, mock
+    LLM_MODEL: str = "models/gemini-2.0-flash-lite"
+    
+    OPENAI_API_KEY: Optional[str] = None
+    PERPLEXITY_API_KEY: Optional[str] = None
+
+    MOCK_LLM: bool = True  # Enable mock mode for testing/demo when API quota is exceeded
     
     # ============================================
     # Chroma Vector Database

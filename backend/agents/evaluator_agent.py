@@ -25,7 +25,7 @@ from backend.core.constants import (
     THRESHOLD_ALTERNATE,
     THRESHOLD_ALERT
 )
-from llama_index.llms.gemini import Gemini
+from backend.core.llm_factory import LLMFactory
 from backend.services.instructor_notification import InstructorNotificationService
 
 logger = logging.getLogger(__name__)
@@ -35,37 +35,7 @@ logger = logging.getLogger(__name__)
 class EvaluatorAgent(BaseAgent):
     """
     Evaluator Agent - Assess learner understanding and provide feedback.
-    
-    Responsibility:
-    - Score learner responses (0-1)
-    - Classify error types (CORRECT, CARELESS, INCOMPLETE, PROCEDURAL, CONCEPTUAL)
-    - Detect misconceptions
-    - Generate personalized feedback (address THEIR specific error)
-    - Make path decisions (PROCEED/REMEDIATE/ALTERNATE/MASTERED)
-    - Update learner progress in database
-    
-    Process Flow:
-    1. Receive learner response + concept + expected answer
-    2. Score response using LLM (0-1 scale)
-    3. Classify error type (if incorrect)
-    4. Detect misconceptions (what's wrong with their thinking?)
-    5. Generate personalized feedback (not generic "wrong")
-    6. Make path decision (what's next?)
-    7. Update learner mastery in database
-    8. Emit event to Path Planner (may need to adjust path)
-    
-    Example:
-        Learner response: "WHERE combines two tables"
-        Expected: "WHERE filters rows"
-            ↓
-        Score: 0.2 (very wrong)
-        Error type: CONCEPTUAL (fundamental misunderstanding)
-        Misconception: "Confuses WHERE with JOIN"
-        Feedback: "I see the confusion - WHERE filters, JOIN combines.
-                   Let me clarify the difference..."
-        Decision: REMEDIATE (review JOIN concept first)
-            ↓
-        Update: Set WHERE mastery to 0.2, flag for remediation
+    ...
     """
     
     # FIX Issue 8: Define pattern at class level (compiled once)
@@ -105,10 +75,7 @@ class EvaluatorAgent(BaseAgent):
         super().__init__(agent_id, AgentType.EVALUATOR, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.llm = llm or Gemini(
-            model=self.settings.GEMINI_MODEL,
-            api_key=self.settings.GOOGLE_API_KEY
-        )
+        self.llm = llm or LLMFactory.get_llm()
         self.logger = logging.getLogger(f"EvaluatorAgent.{agent_id}")
         
         # Store KG references
@@ -154,6 +121,7 @@ class EvaluatorAgent(BaseAgent):
             learner_response: str - Learner's answer
             expected_answer: str - What they should answer
             correct_answer_explanation: str - Why it's right
+            force_real: bool - Override mock settings
             
         Returns:
             Dict with evaluation results
@@ -165,6 +133,7 @@ class EvaluatorAgent(BaseAgent):
             learner_response = (kwargs.get("learner_response") or "").strip()
             expected_answer = (kwargs.get("expected_answer") or "").strip()
             correct_answer_explanation = kwargs.get("correct_answer_explanation", "")
+            force_real = kwargs.get("force_real", False)
             
             # Validate required inputs
             if not all([learner_id, concept_id, learner_response]):
@@ -242,7 +211,8 @@ class EvaluatorAgent(BaseAgent):
             score_result = await self._score_response(
                 learner_response=learner_response,
                 expected_answer=expected_answer,
-                explanation=correct_answer_explanation
+                explanation=correct_answer_explanation,
+                force_real=force_real
             )
             
             score = score_result["score"]  # 0-1
@@ -257,7 +227,8 @@ class EvaluatorAgent(BaseAgent):
                 error_result = await self._classify_error(
                     learner_response=learner_response,
                     expected_answer=expected_answer,
-                    concept=concept  # FIX Issue 1: Add concept context
+                    concept=concept,  # FIX Issue 1: Add concept context
+                    force_real=force_real
                 )
                 error_type = ErrorType(error_result["error_type"])
                 
@@ -265,7 +236,8 @@ class EvaluatorAgent(BaseAgent):
                 misconception_result = await self._detect_misconception(
                     learner_response=learner_response,
                     concept=concept,
-                    error_type=error_type
+                    error_type=error_type,
+                    force_real=force_real
                 )
                 misconception = misconception_result.get("misconception")
                 
@@ -275,7 +247,8 @@ class EvaluatorAgent(BaseAgent):
                     expected_answer=expected_answer,
                     error_type=error_type,
                     misconception=misconception,
-                    explanation=correct_answer_explanation
+                    explanation=correct_answer_explanation,
+                    force_real=force_real
                 )
                 feedback = feedback_result["feedback"]
             else:
@@ -394,7 +367,8 @@ class EvaluatorAgent(BaseAgent):
         learner_response: str,
         expected_answer: str,
         explanation: str,
-        target_bloom_level: int = 2
+        target_bloom_level: int = 2,
+        force_real: bool = False
     ) -> Dict[str, Any]:
         """
         Score learner response using JudgeLM Methodology (Zhu et al., 2023).
@@ -402,6 +376,9 @@ class EvaluatorAgent(BaseAgent):
         Technique: Reference-as-Prior (Assistant 1 = Golden).
         Scientific Basis: "JudgeLM: Fine-tuned Large Language Models are Scalable Judges"
         """
+        if self.settings.MOCK_LLM and not force_real:
+             return {"success": True, "score": 0.9}
+
         try:
             # Construct strict JudgeLM Prompt (Figure 5 adapted)
             prompt = f"""
@@ -490,9 +467,13 @@ Output Format:
         self,
         learner_response: str,
         expected_answer: str,
-        concept: Dict[str, Any] = None  # FIX Issue 1: Add concept parameter
+        concept: Dict[str, Any] = None,  # FIX Issue 1: Add concept parameter
+        force_real: bool = False
     ) -> Dict[str, Any]:
         """Classify error type with concept context"""
+        if self.settings.MOCK_LLM and not force_real:
+             return {"success": True, "error_type": "CORRECT" if expected_answer else "CARELESS"}
+
         try:
             # FIX Issue 1: Include concept name for context
             concept_name = concept.get("name", "Unknown") if concept else "Unknown"
@@ -533,9 +514,13 @@ Output Format:
         self,
         learner_response: str,
         concept: Dict[str, Any],
-        error_type: ErrorType
+        error_type: ErrorType,
+        force_real: bool = False
     ) -> Dict[str, Any]:
         """Detect learner's misconception with reference to known misconceptions"""
+        if self.settings.MOCK_LLM and not force_real:
+             return {"success": True, "misconception": None}
+
         try:
             if error_type == ErrorType.CORRECT:
                 return {"success": True, "misconception": None}
@@ -574,9 +559,14 @@ Output Format:
         expected_answer: str,
         error_type: ErrorType,
         misconception: Optional[str],
-        explanation: str
+        explanation: str,
+        force_real: bool = False
     ) -> Dict[str, Any]:
+
         """Generate personalized feedback"""
+        if self.settings.MOCK_LLM and not force_real:
+             return {"success": True, "feedback": "Evaluation Mock: Great job! Your answer matches the expected outcome."}
+
         try:
             prompt = f"""
             Generate personalized feedback addressing THEIR specific error.
@@ -790,6 +780,9 @@ Output Format:
         """
         Predict mastery probability using LKT Prompting.
         """
+        if self.settings.MOCK_LLM:
+             return 0.85
+
         try:
             # Construct the LKT Masked Prompt
             prompt = f"""

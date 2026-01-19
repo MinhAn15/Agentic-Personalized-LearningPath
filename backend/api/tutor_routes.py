@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/tutoring", tags=["tutoring"])
 
+from backend.models.schemas import TutorInput
+
 # Global agent instance
 _tutor_agent = None
 
@@ -15,14 +17,6 @@ def set_tutor_agent(agent):
     """Set tutor agent instance"""
     global _tutor_agent
     _tutor_agent = agent
-
-class TutorQuestionRequest(BaseModel):
-    """Request to get tutoring on a concept"""
-    learner_id: str
-    question: str
-    concept_id: str
-    hint_level: Optional[int] = 1  # 0-5, how much guidance to give
-    conversation_history: Optional[List] = None
 
 class TutorResponse(BaseModel):
     """Tutor's response to learner question"""
@@ -34,7 +28,7 @@ class TutorResponse(BaseModel):
     execution_time_ms: float
 
 @router.post("/ask")
-async def ask_tutor(request: TutorQuestionRequest) -> TutorResponse:
+async def ask_tutor(request: TutorInput) -> TutorResponse:
     """
     Ask tutor for help with a concept.
     
@@ -50,7 +44,8 @@ async def ask_tutor(request: TutorQuestionRequest) -> TutorResponse:
         "learner_id": "user_123",
         "question": "What does WHERE do in SQL?",
         "concept_id": "SQL_WHERE",
-        "hint_level": 1
+        "hint_level": 1,
+        "force_real": false
     }
     
     Example response:
@@ -76,7 +71,8 @@ async def ask_tutor(request: TutorQuestionRequest) -> TutorResponse:
             question=request.question,
             concept_id=request.concept_id,
             hint_level=request.hint_level,
-            conversation_history=request.conversation_history or []
+            conversation_history=request.conversation_history or [],
+            force_real=request.force_real
         )
         
         execution_time = (time.time() - start_time) * 1000  # ms
@@ -136,7 +132,7 @@ async def get_concept_help(learner_id: str, concept_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/increase-hint")
-async def increase_hint(request: TutorQuestionRequest):
+async def increase_hint(request: TutorInput):
     """
     Request more detailed guidance (increase hint level).
     
@@ -156,7 +152,7 @@ async def increase_hint(request: TutorQuestionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/decrease-hint")
-async def decrease_hint(request: TutorQuestionRequest):
+async def decrease_hint(request: TutorInput):
     """
     Request less guidance (decrease hint level).
     

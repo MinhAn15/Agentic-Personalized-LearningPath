@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+from backend.models.schemas import KAGInput
 import logging
 import time
 
@@ -15,53 +16,10 @@ def set_kag_agent(agent):
     global _kag_agent
     _kag_agent = agent
 
-class AnalysisRequest(BaseModel):
-    """Request to analyze system-wide patterns"""
-    analysis_depth: Optional[str] = "shallow"  # "shallow" or "deep"
-    min_learners: Optional[int] = 10
-
 @router.post("/analyze")
-async def analyze_patterns(request: AnalysisRequest) -> Dict[str, Any]:
+async def analyze_patterns(request: KAGInput) -> Dict[str, Any]:
     """
-    Analyze aggregated learner patterns.
-    
-    This endpoint:
-    1. Retrieves all learner Personal KGs
-    2. Merges into aggregated view
-    3. Calculates statistics
-    4. Identifies patterns (difficult concepts, misconceptions)
-    5. Generates course recommendations
-    6. Predicts intervention points
-    
-    Example request:
-    {
-        "analysis_depth": "deep",
-        "min_learners": 10
-    }
-    
-    Example response:
-    {
-        "success": true,
-        "num_learners_analyzed": 100,
-        "statistics": {
-            "SQL_WHERE": {"avg_mastery": 0.72, "struggle_rate": 0.24},
-            "SQL_JOIN": {"avg_mastery": 0.35, "struggle_rate": 0.65}
-        },
-        "patterns": {...},
-        "insights": [
-            "⚠️ SQL_JOIN: Only 35% mastery, 65% struggle",
-            "60% of JOIN failures had weak WHERE foundation"
-        ],
-        "recommendations": [
-            "📚 Strengthen SQL_WHERE prerequisites",
-            "📝 Create WHERE vs JOIN comparison",
-            "🎯 Add SQL_WHERE practice exercises"
-        ],
-        "predictions": [
-            "🚀 Next cohort: Allocate 2x time for SQL_WHERE",
-            "🚩 Flag learners struggling with SQL_WHERE early"
-        ]
-    }
+    Analyze aggregated learner patterns via KAG Agent (MemGPT).
     """
     try:
         if not _kag_agent:
@@ -69,15 +27,19 @@ async def analyze_patterns(request: AnalysisRequest) -> Dict[str, Any]:
         
         start_time = time.time()
         
+        # Pass full payload + force_real flag
         result = await _kag_agent.execute(
-            analysis_depth=request.analysis_depth,
-            min_learners=request.min_learners
+            action=request.action,
+            force_real=request.force_real,
+            **request.payload
         )
         
         execution_time = (time.time() - start_time) * 1000  # ms
         
         if not result.get("success"):
-            raise HTTPException(status_code=500, detail=result.get("error"))
+            # Check if it's just a partial failure or critical
+            if "error" in result:
+                 logger.warning(f"KAG Execution warning: {result['error']}")
         
         result["execution_time_ms"] = execution_time
         

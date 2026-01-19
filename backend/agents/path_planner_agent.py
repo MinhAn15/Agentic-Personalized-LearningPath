@@ -148,6 +148,15 @@ class PathPlannerAgent(BaseAgent):
         Explore learning paths using Tree of Thoughts (Beam Search).
         Source: Yao et al. (2023)
         """
+        if self.settings.MOCK_LLM:
+             self.logger.warning("Mocking ToT Path Planning (MOCK_LLM=True)")
+             # Force 'concept_python_variables' if in candidates.
+             # In a real scenario, this would choose the best next step.
+             mock_target = 'concept_python_variables'
+             if mock_target in concept_ids:
+                 return [mock_target]
+             return concept_ids[:1] # Default fallback capable
+
         if not current_concept:
              # Cold start: Use internal graph or fallback logic
              return concept_ids[:1]
@@ -467,7 +476,7 @@ class PathPlannerAgent(BaseAgent):
             
             # Step 2: Get Course KG (SMART FILTERING - use Personal Subgraph)
             neo4j = self.state_manager.neo4j
-            topic = learner_profile.get("topic", "")
+            topic = kwargs.get("topic") or learner_profile.get("topic", "")
             
             # Strategy 1: Start from learner's MasteryNodes, expand to connected concepts
             course_concepts = await neo4j.run_query(
@@ -491,6 +500,14 @@ class PathPlannerAgent(BaseAgent):
                 topic=topic
             )
             
+            if self.settings.MOCK_LLM:
+                 course_concepts = [{
+                     "concept_id": "concept_python_variables",
+                     "name": "Python Variables",
+                     "difficulty": 1,
+                     "time_estimate": 10
+                 }]
+
             # Fallback: If still no concepts, get most central concepts related to topic
             if not course_concepts:
                 self.logger.warning(f"No concepts found via Personal KG, falling back to centrality-based selection for topic: {topic}")

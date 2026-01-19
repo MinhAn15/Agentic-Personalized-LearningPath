@@ -1030,3 +1030,6 @@ class SemanticChunker(AgenticChunker):
                 )
         except RuntimeError:
             return asyncio.run(self.chunk_with_ai(document, document_id))
+
+# Alias for backward compatibility
+SemanticChunker = AgenticChunker

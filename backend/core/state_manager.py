@@ -40,15 +40,8 @@ class CentralStateManager:
             True if successful
         """
         try:
-            if isinstance(value, dict):
-                value = json.dumps(value)
-            
-            if ttl:
-                await self.redis.setex(key, ttl, value)
-            else:
-                await self.redis.set(key, value)
-            
-            return True
+            # Delegate serialization and TTL to RedisClient wrapper
+            return await self.redis.set(key, value, ttl=ttl)
         except Exception as e:
             self.logger.error(f"Failed to set state {key}: {e}")
             return False
@@ -64,17 +57,8 @@ class CentralStateManager:
             Cached value or None if not found
         """
         try:
-            value = await self.redis.get(key)
-            if value is None:
-                return None
-            
-            if isinstance(value, bytes):
-                value = value.decode('utf-8')
-            
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return value
+            # Delegate to RedisClient wrapper
+            return await self.redis.get(key)
         except Exception as e:
             self.logger.error(f"Failed to get state {key}: {e}")
             return None

@@ -1,0 +1,52 @@
+{
+  "learner_id": "5bd05da8-c1c1-4b96-b630-342a463461f4",
+  "demographic": {
+    "age": 35,
+    "language": "vi",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "learning_goal": [
+    "data_analysis",
+    "machine_learning"
+  ],
+  "learning_style": "AUDITORY",
+  "skill_level": "ADVANCED",
+  "available_time": 90,
+  "preferences": {
+    "pace": "medium",
+    "verbosity": "normal",
+    "hint_level": 2,
+    "difficulty_next": "HARD"
+  },
+  "constraints": {
+    "blackout_hours": [],
+    "priority_skills": []
+  },
+  "interest_tags": {},
+  "concept_mastery_map": {
+    "sql_basics": 0.8230009515105503,
+    "sql_joins": 0.7643467430175493,
+    "python_basics": 0.8754450241011232,
+    "python_functions": 0.738161301325154
+  },
+  "completed_concepts": [],
+  "error_patterns": [],
+  "session_history": [],
+  "interaction_log": [],
+  "artifact_ids": [],
+  "avg_mastery_level": 0.8002385049885943,
+  "learning_velocity": 0.0,
+  "engagement_score": 0.0,
+  "mastery_progression": {},
+  "version": 0,
+  "created_at": "2026-01-19T23:04:27.781482",
+  "last_updated": "2026-01-19T23:04:27.781482",
+  "last_updated_by": "system",
+  "name": "David Pham",
+  "goal": "data_analysis, machine_learning",
+  "time_available": 90,
+  "preferred_learning_style": "AUDITORY",
+  "current_skill_level": "ADVANCED",
+  "current_mastery": [],
+  "prerequisites_met": []
+}

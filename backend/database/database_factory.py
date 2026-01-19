@@ -38,37 +38,53 @@ class DatabaseFactory:
         self.logger = logging.getLogger("DatabaseFactory")
     
     async def initialize(self) -> bool:
-        """Initialize all database connections"""
-        try:
-            self.logger.info("🔌 Initializing database connections...")
+        """Initialize all database connections with retry logic"""
+        import asyncio
+        max_retries = 30  # Increased to 30 for stability
+        retry_delay = 2   # seconds
+
+        for attempt in range(max_retries):
+            try:
+                self.logger.info(f"🔌 Initializing database connections (Attempt {attempt + 1}/{max_retries})...")
+                
+                # PostgreSQL
+                if not self.postgres:
+                     self.postgres = PostgreSQLClient(self.settings.DATABASE_URL)
+                
+                # Try Postgres first
+                pg_connected = await self.postgres.connect()
+                
+                # Neo4j
+                if not self.neo4j:
+                    self.neo4j = Neo4jClient(
+                        self.settings.NEO4J_URI,
+                        self.settings.NEO4J_USER,
+                        self.settings.NEO4J_PASSWORD
+                    )
+                neo4j_connected = await self.neo4j.connect()
+
+                # Redis
+                if not self.redis:
+                    self.redis = RedisClient(self.settings.REDIS_URL)
+                redis_connected = await self.redis.connect()
+                
+                if pg_connected and neo4j_connected and redis_connected:
+                    self.logger.info("✅ All databases connected successfully")
+                    return True
+                else:
+                    self.logger.warning(f"⚠️ Connection failed (PG: {pg_connected}, Neo4j: {neo4j_connected}, Redis: {redis_connected}). Retrying in {retry_delay}s...")
+                    # Close failed connections to reset state
+                    if not pg_connected: await self.postgres.disconnect()
+                    if not neo4j_connected: await self.neo4j.disconnect()
+                    if not redis_connected: await self.redis.disconnect()
+                    
+                    await asyncio.sleep(retry_delay)
             
-            # PostgreSQL
-            self.postgres = PostgreSQLClient(self.settings.DATABASE_URL)
-            if not await self.postgres.connect():
-                self.logger.error("❌ PostgreSQL connection failed")
-                return False
-            
-            # Neo4j
-            self.neo4j = Neo4jClient(
-                self.settings.NEO4J_URI,
-                self.settings.NEO4J_USER,
-                self.settings.NEO4J_PASSWORD
-            )
-            if not await self.neo4j.connect():
-                self.logger.error("❌ Neo4j connection failed")
-                return False
-            
-            # Redis
-            self.redis = RedisClient(self.settings.REDIS_URL)
-            if not await self.redis.connect():
-                self.logger.error("❌ Redis connection failed")
-                return False
-            
-            self.logger.info("✅ All databases connected successfully")
-            return True
-        except Exception as e:
-            self.logger.error(f"❌ Initialization failed: {e}")
-            return False
+            except Exception as e:
+                self.logger.error(f"❌ Initialization error attempt {attempt + 1}: {e}")
+                await asyncio.sleep(retry_delay)
+        
+        return False
     
     async def health_check(self) -> Dict[str, bool]:
         """Check health of all databases"""

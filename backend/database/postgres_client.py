@@ -123,6 +123,8 @@ class PostgreSQLClient:
     async def create_learner(self, learner_id: str, profile: Dict) -> bool:
         """Create learner record"""
         try:
+            import json
+            profile_json = json.dumps(profile)
             async with self.pool.acquire() as conn:
                 await conn.execute(
                     """
@@ -130,7 +132,7 @@ class PostgreSQLClient:
                     VALUES ($1, $2)
                     """,
                     learner_id,
-                    profile
+                    profile_json
                 )
             self.logger.debug(f"✅ Created learner: {learner_id}")
             return True

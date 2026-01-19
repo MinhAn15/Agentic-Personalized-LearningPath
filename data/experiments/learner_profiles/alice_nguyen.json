@@ -1,0 +1,47 @@
+{
+  "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+  "demographic": {
+    "age": 22,
+    "language": "vi",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "learning_goal": [
+    "sql_basics",
+    "sql_joins"
+  ],
+  "learning_style": "VISUAL",
+  "skill_level": "BEGINNER",
+  "available_time": 60,
+  "preferences": {
+    "pace": "medium",
+    "verbosity": "normal",
+    "hint_level": 2,
+    "difficulty_next": "MEDIUM"
+  },
+  "constraints": {
+    "blackout_hours": [],
+    "priority_skills": []
+  },
+  "interest_tags": {},
+  "concept_mastery_map": {},
+  "completed_concepts": [],
+  "error_patterns": [],
+  "session_history": [],
+  "interaction_log": [],
+  "artifact_ids": [],
+  "avg_mastery_level": 0.0,
+  "learning_velocity": 0.0,
+  "engagement_score": 0.0,
+  "mastery_progression": {},
+  "version": 0,
+  "created_at": "2026-01-19T23:04:27.779433",
+  "last_updated": "2026-01-19T23:04:27.779433",
+  "last_updated_by": "system",
+  "name": "Alice Nguyen",
+  "goal": "sql_basics, sql_joins",
+  "time_available": 60,
+  "preferred_learning_style": "VISUAL",
+  "current_skill_level": "BEGINNER",
+  "current_mastery": [],
+  "prerequisites_met": []
+}

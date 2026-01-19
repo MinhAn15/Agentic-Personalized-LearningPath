@@ -11,6 +11,7 @@ from enum import Enum
 from backend.core.base_agent import BaseAgent, AgentType
 from backend.core.note_generator import AtomicNoteGenerator
 from backend.core.kg_synchronizer import KGSynchronizer
+from backend.core.llm_factory import LLMFactory
 from backend.models.artifacts import (
     ArtifactType, AtomicNote, MisconceptionNote, ArtifactState
 )
@@ -24,7 +25,6 @@ from backend.core.constants import (
     KAG_MODERATE_STRUGGLE_THRESHOLD,
     KAG_STRUGGLE_MASTERY_THRESHOLD
 )
-from llama_index.llms.gemini import Gemini
 
 logger = logging.getLogger(__name__)
 
@@ -35,52 +35,17 @@ logger = logging.getLogger(__name__)
 class KAGAgent(BaseAgent):
     """
     KAG Agent - Knowledge Graph Aggregator (per Thesis).
-    
-    Features:
-    1. Zettelkasten Artifact Generation
-       - Extract Atomic Notes (Definition + Personal Example)
-       - Generate Links (Connect to related notes)
-       - Create Tags (Semantic tags for retrieval)
-       - Store as NoteNode in Neo4j Personal Graph
-    
-    2. Dual-KG Synchronization
-       - Course KG (Read-only): Reference point
-       - Personal KG (Read-Write):
-         * LearnerNode -> HAS_MASTERY -> ConceptNode
-         * LearnerNode -> HAS_MISCONCEPTION -> ErrorNode
-         * LearnerNode -> CREATED_NOTE -> NoteNode
-    
-    3. System Learning (Pattern Recognition)
-       - Aggregate error patterns from all learners
-       - Identify Bottleneck Concepts (high failure rate)
-       - Recommend content improvements
-    
-    Process Flow:
-    1. Trigger: After successful Tutor/Evaluator session
-    2. Extract Atomic Note from session
-    3. Find related notes via semantic similarity
-    4. Create NoteNode with links in Personal KG
-    5. Update aggregated statistics
-    6. Generate recommendations for course improvement
+    ...
     """
     
-    # FIX Issue 2+3: Class-level constants for validation and configuration
+    # ... constants ...
     ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
-    # KAG Configuration (Loaded from constants.py)
     MIN_LEARNERS_FOR_ANALYSIS = KAG_MIN_LEARNERS
-    
-    # FIX Issue 8: Mastery threshold based on Bloom's research (80-90%)
     MASTERY_THRESHOLD = KAG_MASTERY_THRESHOLD
-    
-    # FIX Issue 4 (Phase 4): Pattern identification thresholds
     DIFFICULT_THRESHOLD = KAG_DIFFICULT_THRESHOLD
     EASY_THRESHOLD = KAG_EASY_THRESHOLD
-    
-    # FIX Issue 6 (Phase 4): Struggle rate thresholds for recommendations
     PRIORITY_STRUGGLE_THRESHOLD = KAG_PRIORITY_STRUGGLE_THRESHOLD
     MODERATE_STRUGGLE_THRESHOLD = KAG_MODERATE_STRUGGLE_THRESHOLD
-    
-    # FIX Issue 7 (Phase 4): Struggle mastery threshold for statistics
     STRUGGLE_MASTERY_THRESHOLD = KAG_STRUGGLE_MASTERY_THRESHOLD
     
     # ==========================================
@@ -88,13 +53,7 @@ class KAGAgent(BaseAgent):
     # ==========================================
     
     class WorkingMemory:
-        """
-        MemGPT-style Tiered Memory Architecture.
-        Segmented into:
-        1. System Instructions (Immutable)
-        2. Core Memory (Mutable, Pinned)
-        3. FIFO Queue (Mutable, Rolling)
-        """
+        # ... (No change)
         def __init__(self, max_tokens=8192):
             self.max_tokens = max_tokens
             self.system_instructions = ""
@@ -116,7 +75,6 @@ class KAGAgent(BaseAgent):
             self.fifo_queue.append(message)
             
         def get_total_tokens(self) -> int:
-            # Simple heuristic: 4 chars ~ 1 token
             sys_len = len(self.system_instructions)
             core_len = sum(len(v) for v in self.core_memory.values())
             queue_len = sum(len(str(m)) for m in self.fifo_queue)
@@ -126,14 +84,12 @@ class KAGAgent(BaseAgent):
             return self.get_total_tokens() > (self.max_tokens * 0.7)
             
         def flush_queue(self, fraction=0.5) -> List[Dict[str, Any]]:
-            """Evict oldest messages from queue."""
             cut_idx = int(len(self.fifo_queue) * fraction)
             evicted = self.fifo_queue[:cut_idx]
             self.fifo_queue = self.fifo_queue[cut_idx:]
             return evicted
             
         def compile_prompt(self) -> str:
-            """Construct the full context window."""
             core_block = "\n".join([f"### {k}\n{v}" for k,v in self.core_memory.items()])
             return f"""
 {self.system_instructions}
@@ -149,10 +105,7 @@ class KAGAgent(BaseAgent):
         super().__init__(agent_id, AgentType.KAG, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.llm = llm or Gemini(
-            model=self.settings.GEMINI_MODEL,
-            api_key=self.settings.GOOGLE_API_KEY
-        )
+        self.llm = llm or LLMFactory.get_llm()
         self.logger = logging.getLogger(f"KAGAgent.{agent_id}")
         
         # Store references
@@ -221,6 +174,7 @@ If you receive a "System Alert: Memory Pressure", you MUST save important detail
             self.logger.debug(f"Executing action: {action}")
             
             # 0. Load Task into Queue (if not just a continuation)
+            force_real = kwargs.get("force_real", False)
             task_desc = f"Action: {action}. Args: {json.dumps({k:v for k,v in kwargs.items() if k!='action'}, default=str)}"
             self.working_memory.append_queue({"role": "user", "content": task_desc})
             
@@ -233,7 +187,7 @@ If you receive a "System Alert: Memory Pressure", you MUST save important detail
                 
                 # 1. OS Interrupt: Memory Pressure
                 if self.working_memory.is_pressure_high():
-                    await self._auto_archive()
+                    await self._auto_archive(force_real=force_real)
                 
                 # 2. Compile Context
                 prompt_context = self.working_memory.compile_prompt()
@@ -288,9 +242,9 @@ If you receive a "System Alert: Memory Pressure", you MUST save important detail
             if action == "generate_artifact":
                 # For now, we still run the robust legacy code for artifact generation
                 # but we wrapped it in the context log above.
-                return await self._generate_artifact(**kwargs)
+                return await self._generate_artifact(**kwargs) # kwargs contains force_real
             elif action == "analyze":
-                return await self._analyze_system(**kwargs)
+                return await self._analyze_system(**kwargs) # kwargs contains force_real
                 
             return final_response
         
@@ -325,7 +279,7 @@ If you receive a "System Alert: Memory Pressure", you MUST save important detail
             
         return f"Error: Unknown tool '{func_name}'"
             
-    async def _auto_archive(self):
+    async def _auto_archive(self, force_real: bool = False):
         """
         Handle Memory Pressure Interrupt (System 2).
         Evicts 50% of queue --> Summarizes --> Archival Storage.
@@ -338,12 +292,15 @@ If you receive a "System Alert: Memory Pressure", you MUST save important detail
             return
             
         # 2. Summarize (using a cheaper call or the main LLM)
-        summary_prompt = f"""
-        Summarize these evicted conversation logs into concise facts for long-term storage:
-        {json.dumps(evicted_messages, default=str)}
-        """
-        summary_response = await self.llm.acomplete(summary_prompt)
-        summary = summary_response.text
+        if self.settings.MOCK_LLM and not force_real:
+            summary = f"Mock Summary of {len(evicted_messages)} messages."
+        else:
+            summary_prompt = f"""
+            Summarize these evicted conversation logs into concise facts for long-term storage:
+            {json.dumps(evicted_messages, default=str)}
+            """
+            summary_response = await self.llm.acomplete(summary_prompt)
+            summary = summary_response.text
         
         # 3. Store in Archival (Neo4j) as a "SessionLog" or "Note"
         # For simplicity in KAG, we append to a daily log node
@@ -457,6 +414,20 @@ If you receive a "System Alert: Memory Pressure", you MUST save important detail
             }
         
         self.logger.info(f"📝 Generating artifact for {learner_id} on {concept_id}")
+        
+        force_real = kwargs.get("force_real", False)
+        if self.settings.MOCK_LLM and not force_real:
+            self.logger.info("Using MOCK Artifact Generation")
+            return {
+                "success": True,
+                "agent_id": self.agent_id,
+                "note_id": f"mock_note_{uuid.uuid4().hex[:8]}",
+                "artifact_type": "ATOMIC_NOTE",
+                "content_preview": "Mock Zettelkasten Note...",
+                "related_notes": 0,
+                "tags": ["mock", concept_id],
+                "timestamp": datetime.now().isoformat()
+            }
         
         # Step 1: Extract Atomic Note
         atomic_note = await self._extract_atomic_note(

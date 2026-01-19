@@ -13,7 +13,7 @@ from backend.models import (
     SessionEpisode, ConceptEpisode, ErrorEpisode, ArtifactEpisode, EpisodeType
 )
 from backend.prompts import LEARNER_PROFILER_SYSTEM_PROMPT
-from llama_index.llms.gemini import Gemini
+from backend.core.llm_factory import LLMFactory
 from llama_index.core import PropertyGraphIndex, StorageContext, load_index_from_storage
 # Fix Gap 3: Lazy import Neo4jPropertyGraphStore to prevent crash if dependency missing
 try:
@@ -22,7 +22,6 @@ try:
 except ImportError:
     Neo4jPropertyGraphStore = None
     NEO4J_AVAILABLE = False
-from llama_index.embeddings.gemini import GeminiEmbedding
 from backend.config import get_settings
 import os
 
@@ -44,19 +43,7 @@ class DiagnosticState(str, Enum):
 class ProfilerAgent(BaseAgent):
     """
     Learner Profiler Agent - Build and update 10-dimensional Learner Profile.
-    
-    Features (per THESIS Section 3.5.1):
-    1. Goal Parsing & Intent Extraction (Topic, Purpose, Constraint, Level)
-    2. Diagnostic Assessment System (3-5 representative concepts)
-    3. Profile Vectorization (10 dimensions including Bloom's)
-    4. Episodic Memory (4 episode types)
-    5. Real-time Updates (event-driven)
-    6. Personal KG Initialization (Dual-KG Layer 3)
-    
-    Event Subscriptions:
-    - EVALUATION_COMPLETED: Update mastery + Bloom level
-    - PACE_CHECK_TRIGGERED: Update learning velocity
-    - ARTIFACT_CREATED: Track generated notes
+    ...
     """
     
     # Class-level constants
@@ -67,10 +54,7 @@ class ProfilerAgent(BaseAgent):
         super().__init__(agent_id, AgentType.PROFILER, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.llm = llm or Gemini(
-            model=self.settings.GEMINI_MODEL,
-            api_key=self.settings.GOOGLE_API_KEY
-        )
+        self.llm = llm or LLMFactory.get_llm()
         self.logger = logging.getLogger(f"ProfilerAgent.{agent_id}")
         
         # Fix Gap 1: Removed local locks in favor of Redis Distributed Lock
@@ -86,6 +70,34 @@ class ProfilerAgent(BaseAgent):
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Main execution method."""
         try:
+
+            if self.settings.MOCK_LLM:
+                self.logger.warning("⚠️ Mocking Profiler Agent (MOCK_LLM=True)")
+                learner_name = kwargs.get("learner_name", "MockUser")
+                learner_id = "demo_learner_01"
+                
+                profile = LearnerProfile(
+                    learner_id=learner_id,
+                    name=learner_name,
+                    goal="Learn Python",
+                    learning_goal=["Master Python"],
+                    skill_level=SkillLevel.BEGINNER
+                )
+                
+                profile_dict = profile.model_dump(mode='json')  # Ensure JSON serializable
+                
+                # Save to DB
+                success = await self.state_manager.postgres.create_learner(learner_id, profile_dict)
+                
+                return {
+                    "success": success,
+                    "agent_id": self.agent_id,
+                    "result": {
+                        "learner_id": learner_id,
+                        "profile": profile_dict
+                    }
+                }
+
             learner_message = kwargs.get("learner_message")
             learner_name = kwargs.get("learner_name", "Learner")
             skip_diagnostic = kwargs.get("skip_diagnostic", False)
@@ -346,10 +358,7 @@ class ProfilerAgent(BaseAgent):
     async def _get_embedding_model(self):
         """Lazy load Gemini Embedding model"""
         if not hasattr(self, 'embedding_model') or not self.embedding_model:
-            self.embedding_model = GeminiEmbedding(
-                model_name="models/embedding-001",
-                api_key=self.settings.GOOGLE_API_KEY
-            )
+            self.embedding_model = LLMFactory.get_embedding_model()
         return self.embedding_model
 
     async def _find_goal_node_hybrid(self, user_goal: str, top_k: int = 3) -> List[Dict]:
@@ -485,10 +494,7 @@ Return ONLY valid JSON:
                 
                 # Create Index wrapper (no build, just load)
                 # Ensure we use Gemini embeddings
-                embed_model = GeminiEmbedding(
-                    model_name="models/embedding-001",
-                    api_key=self.settings.GOOGLE_API_KEY
-                )
+                embed_model = LLMFactory.get_embedding_model()
                 
                 index = PropertyGraphIndex.from_existing(
                     property_graph_store=graph_store,

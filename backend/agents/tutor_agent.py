@@ -19,8 +19,7 @@ from backend.core.constants import (
     TUTOR_CONSENSUS_THRESHOLD,
     TUTOR_LEAKAGE_KEYWORDS
 )
-from llama_index.llms.gemini import Gemini
-from llama_index.embeddings.gemini import GeminiEmbedding
+from backend.core.llm_factory import LLMFactory
 from llama_index.core import StorageContext, load_index_from_storage, Settings
 import os
 
@@ -37,42 +36,18 @@ logger = logging.getLogger(__name__)
 class TutorAgent(BaseAgent):
     """
     Tutor Agent - Teach using Harvard 7 Principles & Reverse Socratic Method.
-    
-    Features (per Thesis):
-    1. Reverse Socratic State Machine (5 states)
-    2. 3-Layer Grounding (RAG + Course KG + Personal KG)
-    3. Harvard 7 Principles enforcement
-    4. Cognitive Load Management (2-4 sentences max)
-    5. Confidence Scoring for hallucination prevention
-    
-    Process Flow:
-    1. Receive learner question + concept context
-    2. Determine current Socratic state
-    3. 3-Layer Grounding:
-       - Layer 1: Document Grounding (RAG from Chroma)
-       - Layer 2: Course KG Grounding (Neo4j)
-       - Layer 3: Personal KG Grounding
-    4. Calculate confidence score
-    5. Generate Socratic response per current state
-    6. Apply Harvard 7 Principles
-    7. Return guidance with confidence
+    ...
     """
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
         super().__init__(agent_id, AgentType.TUTOR, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.llm = llm or Gemini(
-            model=self.settings.GEMINI_MODEL,
-            api_key=self.settings.GOOGLE_API_KEY
-        )
+        self.llm = llm or LLMFactory.get_llm()
         
         # Configure LlamaIndex Global Settings for Query Embedding
         Settings.llm = self.llm
-        Settings.embed_model = GeminiEmbedding(
-            model_name="models/embedding-001",
-            api_key=self.settings.GOOGLE_API_KEY
-        )
+        Settings.embed_model = LLMFactory.get_embedding_model()
 
         self.logger = logging.getLogger(f"TutorAgent.{agent_id}")
         
@@ -127,6 +102,8 @@ class TutorAgent(BaseAgent):
             learner_id = kwargs.get("learner_id")
             question = kwargs.get("question")
             concept_id = kwargs.get("concept_id")
+            # Force Real Mode override
+            force_real = kwargs.get("force_real", False)
             
             # FIX: Validate hint_level range (0-4)
             hint_level = kwargs.get("hint_level", 0)
@@ -146,7 +123,7 @@ class TutorAgent(BaseAgent):
             state.turn_count += 1
             
             # 2. Check for Handoff (Assessment Phase)
-            if state.current_phase == DialoguePhase.ASSESSMENT:
+            if state.phase == DialoguePhase.ASSESSMENT:
                 await self._handoff_to_evaluator(learner_id, concept_id, state)
                 return {
                     "response": "I've noticed you're doing great! Let's verify your mastery with a quick quiz.",
@@ -156,14 +133,14 @@ class TutorAgent(BaseAgent):
             # 3. Determine Response Strategy based on Phase
             response_text = ""
             
-            if state.current_phase in [DialoguePhase.INTRO, DialoguePhase.PROBING]:
+            if state.phase == DialoguePhase.EXPLANATION:
                 # Use Standard Prompting for lightweight phases
-                response_text = await self._generate_probing_question(question, state)
-                # Heuristic transition: If student answers probe, move to Scaffolding
-                if state.turn_count > 2:
-                    state.current_phase = DialoguePhase.SCAFFOLDING
+                response_text = await self._generate_probing_question(question, state, force_real=force_real)
+                # Heuristic transition: If student answers probe, check advancement
+                if state.should_advance_phase():
+                    state.advance_phase()
                     
-            elif state.current_phase == DialoguePhase.SCAFFOLDING:
+            elif state.phase == DialoguePhase.QUESTIONING:
                 # -------------------------------------------------------------
                 # DYNAMIC CoT SCAFFOLDING (Wei 2022) with Slicing Logic
                 # -------------------------------------------------------------
@@ -171,7 +148,7 @@ class TutorAgent(BaseAgent):
                 # Check if we already have an active trace for this concept/misconception
                 if not state.current_cot_trace:
                      # Generate NEW Hidden CoT Traces
-                     traces = await self._generate_cot_traces(question, conversation_history, concept_id)
+                     traces = await self._generate_cot_traces(question, conversation_history, concept_id, force_real=force_real)
                      best_trace = self._check_consensus(traces)
                      
                      if best_trace:
@@ -201,8 +178,11 @@ class TutorAgent(BaseAgent):
             state.interaction_log.append({"role": "assistant", "content": response_text})
 
             return {
-                "response": response_text,
-                "current_phase": state.current_phase.value
+                "success": True,
+                "guidance": response_text,
+                "current_phase": state.phase.value,
+                "hint_level": 1, # Default/Placeholder
+                "source": "Socratic Tutor"
             }
         except Exception as e:
             self.logger.error(f"Tutor execution failed: {e}")
@@ -212,12 +192,15 @@ class TutorAgent(BaseAgent):
                 "agent_id": self.agent_id
             }
 
-    async def _generate_probing_question(self, question: str, state: DialogueState) -> str:
+    async def _generate_probing_question(self, question: str, state: DialogueState, force_real: bool = False) -> str:
         """Lightweight prompt for Intro/Probing phases"""
+        if self.settings.MOCK_LLM and not force_real:
+             return f"Create a probing question about {state.concept_id} based on '{question}'? (Mock)"
+
         prompt = f"""
         Act as a Socratic Tutor.
         Context: Learner {state.learner_id} is asking about {state.concept_id}.
-        Phase: {state.current_phase.value}
+        Phase: {state.phase.value}
         Student Question: {question}
         
         Goal: Ask a guiding question to check understanding without giving the answer.
@@ -226,11 +209,16 @@ class TutorAgent(BaseAgent):
         response = await self.llm.acomplete(prompt)
         return response.text
 
-    async def _generate_cot_traces(self, question: str, history: List[Dict], concept_id: str, n: int = TUTOR_COT_TRACES) -> List[str]:
+    async def _generate_cot_traces(self, question: str, history: List[Dict], concept_id: str, n: int = TUTOR_COT_TRACES, force_real: bool = False) -> List[str]:
         """
         Generate n internal reasoning traces (Internal Monologue).
         Uses Exemplars from Wei et al. (2022) to elicit reasoning.
         """
+        if self.settings.MOCK_LLM and not force_real:
+            return [
+                f"CoT: Analyze {question}. The student needs help with {concept_id}. Student Hint: Think about the definition of {concept_id}."
+            ]
+
         if not self.llm:
             return []
             

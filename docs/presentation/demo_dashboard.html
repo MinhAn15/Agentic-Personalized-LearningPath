@@ -19,10 +19,95 @@
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Agentic System Flows</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>🚀 Agentic System Flows</h1>
+            <div id="system-status" style="padding: 10px 20px; border-radius: 20px; font-weight: bold; background: #eee; color: #666;">
+                ⚪ Checking System...
+            </div>
+        </div>
         <p style="text-align:center">Scientific Refinement (2025)</p>
+
+        <script>
+            async function checkHealth() {
+                const statusEl = document.getElementById('system-status');
+                try {
+                    const response = await fetch('http://localhost:8000/health');
+                    const data = await response.json();
+                    
+                    if (data.status === 'healthy') {
+                        statusEl.style.background = '#dcfce7'; // Green
+                        statusEl.style.color = '#166534';
+                        statusEl.innerHTML = '🟢 System Online';
+                    } else {
+                        statusEl.style.background = '#fef9c3'; // Yellow
+                        statusEl.style.color = '#854d0e';
+                        statusEl.innerHTML = '⚠️ System Degraded';
+                    }
+                } catch (e) {
+                    statusEl.style.background = '#fee2e2'; // Red
+                    statusEl.style.color = '#991b1b';
+                    statusEl.innerHTML = '🔴 System Offline';
+                }
+            }
+            
+            // Check immediately and every 5s
+            checkHealth();
+            setInterval(checkHealth, 5000);
+        </script>
         
         
+        <div class="card" style="border-left: 5px solid #2563eb;">
+            <h2>🚀 End-to-End Demo: Real PDF Ingestion</h2>
+            <div class="description">Live Execution Flow (Client -> Backend -> Agents)</div>
+            <div class="mermaid">
+sequenceDiagram
+    participant User
+    participant Script as Demo Script (Client)
+    participant A1 as Agent 1 (Knowledge)
+    participant Graph as Neo4j (KB)
+    participant A2 as Agent 2 (Profiler)
+    participant A3 as Agent 3 (Planner)
+    participant A4 as Agent 4 (Tutor)
+    
+    User->>Script: Run demo_pdf_ingestion.py "Course.pdf"
+    activate Script
+    Script->>Script: Extract Text (pypdf)
+    
+    rect rgb(220, 240, 255)
+        Note right of Script: REAL Ingestion Mode
+        Script->>A1: POST /extract (force_real=True)
+        activate A1
+        A1->>A1: Chunking (MultiDocFusion)
+        A1->>Graph: Store Concepts
+        A1-->>Script: Success (Chunks: 25)
+        deactivate A1
+    end
+    
+    rect rgb(255, 245, 230)
+        Note right of Script: MOCK Learning Flow
+        Script->>A2: POST /profiler (Mock)
+        activate A2
+        A2->>Graph: Query Metadata
+        A2-->>Script: Learner Profile (Visual/Beginner)
+        deactivate A2
+        
+        Script->>A3: POST /plan (Mock)
+        activate A3
+        A3->>Graph: Retrieve Concepts
+        A3-->>Script: Learning Path (Step 1: Variables)
+        deactivate A3
+        
+        Script->>A4: POST /tutor (Mock)
+        activate A4
+        A4-->>Script: Probing Question
+        deactivate A4
+    end
+    
+    Script-->>User: Execution Complete
+    deactivate Script
+            </div>
+        </div>
+
         <div class="card">
             <h2>🤖 Agent 1: Knowledge Extraction (The "Hippocampus")</h2>
             <div class="description">Visual Flow</div>

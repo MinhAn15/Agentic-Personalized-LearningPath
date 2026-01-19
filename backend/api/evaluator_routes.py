@@ -8,20 +8,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/evaluation", tags=["evaluation"])
 
+from backend.models.schemas import EvaluationInput
+
 _evaluator_agent = None
 
 def set_evaluator_agent(agent):
     """Set evaluator agent instance"""
     global _evaluator_agent
     _evaluator_agent = agent
-
-class EvaluationRequest(BaseModel):
-    """Request to evaluate learner response"""
-    learner_id: str
-    concept_id: str
-    learner_response: str
-    expected_answer: str
-    correct_answer_explanation: Optional[str] = None
 
 class EvaluationResponse(BaseModel):
     """Evaluation result"""
@@ -37,7 +31,7 @@ class EvaluationResponse(BaseModel):
     execution_time_ms: float
 
 @router.post("/evaluate")
-async def evaluate_response(request: EvaluationRequest) -> EvaluationResponse:
+async def evaluate_response(request: EvaluationInput) -> EvaluationResponse:
     """
     Evaluate learner response.
     
@@ -55,7 +49,8 @@ async def evaluate_response(request: EvaluationRequest) -> EvaluationResponse:
         "concept_id": "SQL_WHERE",
         "learner_response": "WHERE combines two tables",
         "expected_answer": "WHERE filters rows",
-        "correct_answer_explanation": "WHERE filters rows based on conditions"
+        "correct_answer_explanation": "WHERE filters rows based on conditions",
+        "force_real": false
     }
     
     Example response:
@@ -80,7 +75,8 @@ async def evaluate_response(request: EvaluationRequest) -> EvaluationResponse:
             concept_id=request.concept_id,
             learner_response=request.learner_response,
             expected_answer=request.expected_answer,
-            correct_answer_explanation=request.correct_answer_explanation
+            correct_answer_explanation=request.correct_answer_explanation,
+            force_real=request.force_real
         )
         
         execution_time = (time.time() - start_time) * 1000  # ms

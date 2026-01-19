@@ -39,8 +39,7 @@ from backend.utils.neo4j_batch_upsert import Neo4jBatchUpserter
 from backend.utils.provenance_manager import ProvenanceManager
 from backend.utils.concept_id_builder import get_concept_id_builder  # FIX Issue 1: Move import to top
 
-from llama_index.llms.gemini import Gemini
-from llama_index.embeddings.gemini import GeminiEmbedding
+from backend.core.llm_factory import LLMFactory
 from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage, Document, Settings
 from backend.utils.file_lock import file_lock
 
@@ -71,25 +70,7 @@ class BloomLevel(str, Enum):
 class KnowledgeExtractionAgent(BaseAgent):
     """
     Production-grade Knowledge Extraction Agent.
-    
-    Features:
-    1. Idempotent ingestion via Document Registry
-    2. Semantic chunking (by heading/section)
-    3. Staging graph pattern (StagingConcept → validation → CourseConcept)
-    4. Validation enforcement
-    5. Real entity resolution (embedding + structural + contextual)
-    6. Provenance tracking
-    7. COURSEKG_UPDATED event
-    
-    Process Flow:
-    1. Register document (check checksum for idempotency)
-    2. Semantic chunking
-    3. Per-chunk extraction (Layer 1, 2, 3)
-    4. Create StagingConcept nodes
-    5. Validate extracted data
-    6. Entity resolution (merge with existing concepts)
-    7. Promote to CourseConcept (with provenance)
-    8. Emit COURSEKG_UPDATED
+    ...
     """
     
     # FIX Issue 2: Class-level constants for configuration
@@ -114,10 +95,7 @@ class KnowledgeExtractionAgent(BaseAgent):
         super().__init__(agent_id, AgentType.KNOWLEDGE_EXTRACTION, state_manager, event_bus)
         
         self.settings = get_settings()
-        self.llm = llm or Gemini(
-            model=self.settings.GEMINI_MODEL,
-            api_key=self.settings.GOOGLE_API_KEY
-        )
+        self.llm = llm or LLMFactory.get_llm()
         self.logger = logging.getLogger(f"KnowledgeExtractionAgent.{agent_id}")
         
         # Initialize production modules
@@ -125,10 +103,7 @@ class KnowledgeExtractionAgent(BaseAgent):
         # Configure LlamaIndex Global Settings
         # This ensures VectorStoreIndex uses Gemini instead of OpenAI
         Settings.llm = self.llm
-        self.embedding_model = GeminiEmbedding(
-            model_name="models/embedding-001",
-            api_key=self.settings.GOOGLE_API_KEY  # FIX Issue 7: Use self.settings
-        )
+        self.embedding_model = LLMFactory.get_embedding_model()
         Settings.embed_model = self.embedding_model
 
         self.chunker = SemanticChunker(
@@ -187,6 +162,28 @@ class KnowledgeExtractionAgent(BaseAgent):
             force_reprocess: bool - Override idempotency check
         """
         try:
+            settings = get_settings()
+            force_real = kwargs.get("force_real", False)
+            
+            if settings.MOCK_LLM and not force_real:
+                self.logger.warning("⚠️ Mocking Knowledge Extraction (MOCK_LLM=True)")
+                # Mock Graph Data Population for Demo
+                await self.state_manager.neo4j.run_query("""
+                    MERGE (c:CourseConcept {concept_id: 'concept_python_variables'})
+                    SET c.name = 'Python Variables',
+                        c.description = 'A variable is a container for storing data values.',
+                        c.difficulty = 1,
+                        c.bloom_level = 'UNDERSTAND'
+                    RETURN c
+                """)
+                return {
+                     "success": True,
+                     "agent_id": self.agent_id,
+                     "document_id": f"mock_doc_{uuid.uuid4().hex[:8]}",
+                     "concepts_extracted": 1,
+                     "message": "Mock extraction successful (Populated concept_python_variables)"
+                 }
+
             # FIX Issue 3: Strip input strings
             document_content = kwargs.get("document_content")
             document_title = (kwargs.get("document_title") or "Untitled").strip()

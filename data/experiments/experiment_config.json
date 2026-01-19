@@ -1,0 +1,60 @@
+{
+  "experiment_id": "49467189-5ac1-4fad-a1ce-bfee79cc1ef9",
+  "created_at": "2026-01-19T23:04:27.784771",
+  "settings": {
+    "llm_provider": "gemini",
+    "api_calls_budget_per_agent": 50,
+    "mock_fallback": true
+  },
+  "pdfs": [
+    "1_sql_basics.md",
+    "2_sql_joins.md",
+    "3_sql_aggregation.md",
+    "4_sql_subqueries.md",
+    "5_sql_optimization.md",
+    "6_python_basics.md",
+    "7_python_functions.md",
+    "8_python_oop.md",
+    "9_data_analysis.md",
+    "10_machine_learning.md"
+  ],
+  "learner_profiles": [
+    "alice_nguyen.json",
+    "bob_tran.json",
+    "carol_le.json",
+    "david_pham.json",
+    "eva_hoang.json"
+  ],
+  "phases": {
+    "1_knowledge_extraction": {
+      "input": "pdfs/",
+      "output": "kg_nodes.json"
+    },
+    "2_profiling": {
+      "input": "learner_profiles/",
+      "output": "updated_profiles.json"
+    },
+    "3_path_planning": {
+      "paths_per_learner": 3,
+      "output": "learning_paths.json"
+    },
+    "4_tutoring": {
+      "sessions_per_path": 10,
+      "output": "tutor_sessions.json"
+    },
+    "5_evaluation": {
+      "output": "evaluation_results.json"
+    },
+    "6_kag_archival": {
+      "output": "memory_states.json"
+    }
+  },
+  "metrics": [
+    "learning_gain",
+    "path_efficiency",
+    "tutor_accuracy",
+    "evaluator_consistency",
+    "latency_per_agent",
+    "throughput"
+  ]
+}

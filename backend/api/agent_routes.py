@@ -64,7 +64,8 @@ async def extract_knowledge(document: DocumentInput):
         result = await _knowledge_extraction_agent.execute(
             document_content=document.content,
             document_title=document.title,
-            document_type=document.document_type.value if document.document_type else "LECTURE"
+            document_type=document.document_type.value if document.document_type else "LECTURE",
+            force_real=document.force_real
         )
         
         execution_time = (time.time() - start_time) * 1000  # ms

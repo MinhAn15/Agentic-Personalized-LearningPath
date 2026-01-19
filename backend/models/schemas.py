@@ -32,6 +32,7 @@ class DocumentInput(BaseModel):
     document_type: DocumentType = DocumentType.LECTURE
     title: str = ""
     source_url: Optional[str] = None
+    force_real: bool = False
 
 class KnowledgeExtractionOutput(BaseModel):
     """Output from knowledge extraction"""
@@ -49,6 +50,31 @@ class LearnerInput(BaseModel):
     message: str  # Natural language input: "I want to learn SQL JOINs in 2 weeks..."
     learner_name: Optional[str] = None
     age: Optional[int] = None
+
+class TutorInput(BaseModel):
+    """Input for Tutor Agent"""
+    learner_id: str
+    question: str
+    concept_id: str
+    hint_level: Optional[int] = 1  # 0-5
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+    force_real: bool = False
+
+class EvaluationInput(BaseModel):
+    """Input for Evaluator Agent"""
+    learner_id: str
+    concept_id: str
+    learner_response: str
+    expected_answer: str
+    correct_answer_explanation: Optional[str] = None
+    force_real: bool = False
+
+class KAGInput(BaseModel):
+    """Input for KAG Agent"""
+    agent_id: str = "kag_agent"
+    action: str = "analyze"  # analyze, generate_artifact
+    payload: Dict[str, Any]
+    force_real: bool = False
 
 class MasteryMap(BaseModel):
     """Learner's current mastery of concepts"""

@@ -54,17 +54,20 @@ class RedisClient:
         self,
         key: str,
         value: Any,
-        ttl: int = 300  # Default 5 minutes
+        ttl: Optional[int] = 300  # Default 5 minutes
     ) -> bool:
         """Set key-value with TTL"""
         try:
             # JSON serialize
             if isinstance(value, (dict, list)):
-                value_str = json.dumps(value)
+                value_str = json.dumps(value, default=str)
             else:
                 value_str = str(value)
             
-            await self.client.setex(key, ttl, value_str)
+            if ttl:
+                await self.client.setex(key, ttl, value_str)
+            else:
+                await self.client.set(key, value_str)
             self.logger.debug(f"✅ Set {key} (TTL: {ttl}s)")
             return True
         except Exception as e:

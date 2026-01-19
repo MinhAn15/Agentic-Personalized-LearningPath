@@ -15,18 +15,18 @@ def print_result(data):
     print(json.dumps(data, indent=2))
 
 def demo():
-    print("🚀 Starting Agentic Learning Path DEMO 🚀")
+    print("Starting Agentic Learning Path DEMO")
     print(f"Target URL: {BASE_URL}")
     
     # Check Health
     try:
         r = requests.get(f"http://localhost:8000/health")
         if r.status_code != 200:
-            print("❌ System is not healthy. Please check docker containers and backend.")
+            print("[X] System is not healthy. Please check docker containers and backend.")
             return
-        print("✅ System Health Check Passed")
+        print("[OK] System Health Check Passed")
     except Exception as e:
-        print(f"❌ Connection failed: {e}")
+        print(f"[X] Connection failed: {e}")
         return
 
     # 1. Ingest Content
@@ -62,7 +62,10 @@ def demo():
     if r.status_code == 200:
         print_result(r.json())
     else:
-        print(f"❌ Error {r.status_code}: {r.text}")
+        print(f"[X] Error {r.status_code}: {r.text}")
+    
+    print("\n[Waiting 20s for Gemini API Safe-Zone...]")
+    time.sleep(20)
 
     # 2. Profile Learner
     print_step(2, "Profiler Agent (Create Profile)")
@@ -85,13 +88,16 @@ def demo():
             if not learner_id and "profile" in res["result"]:
                  learner_id = res["result"]["profile"].get("learner_id")
     else:
-        print(f"❌ Error {r.status_code}: {r.text}")
+        print(f"[X] Error {r.status_code}: {r.text}")
     
     if not learner_id:
-        print("⚠️ Could not extract learner_id, using fallback 'demo_learner_01'")
+        print("[!] Could not extract learner_id, using fallback 'demo_learner_01'")
         learner_id = "demo_learner_01"
     
     print(f"\nUsing Learner ID: {learner_id}")
+
+    print("\n[Waiting 20s for Gemini API Safe-Zone...]")
+    time.sleep(20)
 
     # 3. Plan Path
     print_step(3, "Path Planner Agent (Generate Path)")
@@ -104,31 +110,30 @@ def demo():
     if r.status_code == 200:
         print_result(r.json())
     else:
-        print(f"❌ Error {r.status_code}: {r.text}")
+        print(f"[X] Error {r.status_code}: {r.text}")
+
+    print("\n[Waiting 20s for Gemini API Safe-Zone...]")
+    time.sleep(20)
 
     # 4. Tutoring Session
     print_step(4, "Tutor Agent (Ask Question)")
-    # Assuming endpoint is /tutoring/session or /tutoring/chat - check tutor_routes.py if fail
-    # Based on naming convention: /api/v1/tutoring/chat or similar. 
-    # Let's try /api/v1/tutoring/session based on previous knowledge or check file strictly.
-    # For now trying specific endpoint from typical pattern.
     payload_tutor = {
         "learner_id": learner_id,
         "question": "What is a variable?",
-        "concept_id": "concept_python_variables" # This ID might vary based on ingestion, passing None is safer if allowed
+        "concept_id": "concept_python_variables",
+        "hint_level": 1
     }
     
-    # Note: Need to verify Tutor endpoint. Assuming /tutoring/session based on prior turns.
-    # If this 404s, user will see it and we can check tutor_routes.py next.
-    r = requests.post(f"{BASE_URL}/tutoring/session", json=payload_tutor) 
-    if r.status_code != 200:
-        # Fallback try
-        r = requests.post(f"{BASE_URL}/tutor/chat", json=payload_tutor)
-
+    # Correct Endpoint: /tutoring/ask (verified in tutor_routes.py)
+    r = requests.post(f"{BASE_URL}/tutoring/ask", json=payload_tutor) 
+    
     if r.status_code == 200:
         print_result(r.json())
     else:
-        print(f"❌ Error {r.status_code}: {r.text}")
+        print(f"[X] Error {r.status_code}: {r.text}")
+
+    print("\n[Waiting 20s for Gemini API Safe-Zone...]")
+    time.sleep(20)
 
     # 5. Evaluate
     print_step(5, "Evaluator Agent (Submit Answer)")
@@ -144,7 +149,7 @@ def demo():
     if r.status_code == 200:
         print_result(r.json())
     else:
-         print(f"❌ Error {r.status_code}: {r.text}")
+         print(f"[X] Error {r.status_code}: {r.text}")
 
 if __name__ == "__main__":
     demo()

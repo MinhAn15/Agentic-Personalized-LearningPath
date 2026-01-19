@@ -182,20 +182,24 @@ class RLEngine:
     Implements multi-armed bandit to select optimal learning sequence.
     """
     
-    def __init__(self, strategy: BanditStrategy = BanditStrategy.UCB, epsilon: float = 0.1):
+    def __init__(self, strategy: BanditStrategy = BanditStrategy.UCB, epsilon: float = 0.1, feature_dim: int = 10, alpha: float = 0.1):
         """
         Initialize RL engine.
         
         Args:
             strategy: Bandit selection strategy
             epsilon: Exploration rate (for epsilon-greedy)
+            feature_dim: Dimension of context vector for LinUCB
+            alpha: Exploration parameter for LinUCB
         """
         self.strategy = strategy
         self.epsilon = epsilon
+        self.feature_dim = feature_dim
+        self.alpha = alpha
         self.arms: Dict[str, Arm] = {}
         self.linucb_arms: Dict[str, LinUCBArm] = {}  # Separate storage for LinUCB
         self.time_step = 0
-        self.context_dim = 10  # 10-dim profile vector from Agent 2
+        self.context_dim = feature_dim  # Alias for compatibility
         self.logger = logging.getLogger(__name__)
     
     def add_arm(self, concept_id: str, difficulty: int) -> None:
