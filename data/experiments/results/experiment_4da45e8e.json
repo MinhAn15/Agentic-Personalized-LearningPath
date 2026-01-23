@@ -1,0 +1,231 @@
+{
+  "experiment_id": "4da45e8e-d22d-4557-9942-f9d417996d9b",
+  "started_at": "2026-01-20T21:51:00.476446",
+  "config": {
+    "use_real_llm": true,
+    "learner_filter": "alice"
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 1,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "doc_e09d0f97",
+            "status": "COMMITTED",
+            "failed_chunks": [],
+            "chunking": {
+              "total_chunks": 1,
+              "total_words": 179,
+              "total_chars": 1142,
+              "avg_words_per_chunk": 179.0,
+              "avg_chars_per_chunk": 1142.0,
+              "min_chars": 1142,
+              "max_chars": 1142,
+              "chunk_types": {
+                "CONCEPT_INTRO": 0,
+                "EXPLANATION": 0,
+                "EXAMPLE": 0,
+                "PRACTICE": 0,
+                "SUMMARY": 0,
+                "TRANSITION": 0,
+                "MIXED": 1
+              }
+            },
+            "validation": {
+              "is_valid": true,
+              "total_nodes": 0,
+              "total_relationships": 0,
+              "valid_nodes": 0,
+              "valid_relationships": 0,
+              "error_count": 0,
+              "warning_count": 0,
+              "errors": [],
+              "warnings": [],
+              "info": []
+            },
+            "resolution": {
+              "resolved_concept_count": 0,
+              "resolved_relationship_count": 0,
+              "merges_performed": 0,
+              "stats": {
+                "raw_new_concepts": 0,
+                "internal_unique_concepts": 0,
+                "existing_concepts": 0,
+                "merged_to_existing": 0,
+                "truly_new_concepts": 0,
+                "total_resolved_concepts": 0,
+                "total_resolved_relationships": 0
+              },
+              "matches": []
+            },
+            "commit": {
+              "concepts_created": 0,
+              "relationships_created": 0,
+              "concept_batches": 0,
+              "relationship_batches": 0
+            },
+            "content_keywords": []
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": false,
+            "error": "Unknown model 'llama-3.1-sonar-large-128k-online'. Please provide a valid OpenAI model name in: o1, o1-2024-12-17, o1-pro, o1-pro-2025-03-19, o1-preview, o1-preview-2024-09-12, o1-mini, o1-mini-2024-09-12, o3-mini, o3-mini-2025-01-31, o3, o3-2025-04-16, o3-pro, o3-pro-2025-06-10, o4-mini, o4-mini-2025-04-16, gpt-5, gpt-5-2025-08-07, gpt-5-mini, gpt-5-mini-2025-08-07, gpt-5-nano, gpt-5-nano-2025-08-07, gpt-5-pro, gpt-5-pro-2025-10-06, gpt-5.1, gpt-5.1-2025-11-13, gpt-5.1-chat-latest, gpt-5.2, gpt-5.2-2025-12-11, gpt-4, gpt-4-32k, gpt-4-1106-preview, gpt-4-0125-preview, gpt-4-turbo-preview, gpt-4-vision-preview, gpt-4-1106-vision-preview, gpt-4-turbo-2024-04-09, gpt-4-turbo, gpt-4o, gpt-4o-audio-preview, gpt-4o-audio-preview-2024-12-17, gpt-4o-audio-preview-2024-10-01, gpt-4o-mini-audio-preview, gpt-4o-mini-audio-preview-2024-12-17, gpt-4o-2024-05-13, gpt-4o-2024-08-06, gpt-4o-2024-11-20, gpt-4.5-preview, gpt-4.5-preview-2025-02-27, chatgpt-4o-latest, gpt-4o-mini, gpt-4o-mini-2024-07-18, gpt-4-0613, gpt-4-32k-0613, gpt-4-0314, gpt-4-32k-0314, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, gpt-4.1-2025-04-14, gpt-4.1-mini-2025-04-14, gpt-4.1-nano-2025-04-14, gpt-5-chat-latest, gpt-3.5-turbo, gpt-3.5-turbo-16k, gpt-3.5-turbo-0125, gpt-3.5-turbo-1106, gpt-3.5-turbo-0613, gpt-3.5-turbo-16k-0613, gpt-3.5-turbo-0301, text-davinci-003, text-davinci-002, gpt-3.5-turbo-instruct, text-ada-001, text-babbage-001, text-curie-001, ada, babbage, curie, davinci, gpt-35-turbo-16k, gpt-35-turbo, gpt-35-turbo-0125, gpt-35-turbo-1106, gpt-35-turbo-0613, gpt-35-turbo-16k-0613"
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_planner",
+            "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+            "chain_mode": "FORWARD",
+            "learning_path": [
+              {
+                "day": 1,
+                "concept": "concept_python_variables",
+                "concept_name": "Python Variables",
+                "difficulty": 1,
+                "estimated_hours": 0.2,
+                "chain_mode": "TOT_GENERATED",
+                "recommended_type": "TUTORIAL"
+              }
+            ],
+            "pacing": "RELAXED",
+            "success_probability": 0.5680000000000001,
+            "total_estimated_hours": 0.2,
+            "resources": [
+              {
+                "concept": "concept_python_variables",
+                "primary_type": "TUTORIAL",
+                "recommended_resources": [
+                  {
+                    "type": "VIDEO",
+                    "priority": 1,
+                    "description": "Video tutorial on Python Variables"
+                  },
+                  {
+                    "type": "EXERCISE",
+                    "priority": 1,
+                    "description": "Practice exercises for Python Variables"
+                  },
+                  {
+                    "type": "ARTICLE",
+                    "priority": 3,
+                    "description": "Detailed article on Python Variables"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is a SQL JOIN?",
+          "result": {
+            "success": false,
+            "error": "Unknown model 'llama-3.1-sonar-large-128k-online'. Please provide a valid OpenAI model name in: o1, o1-2024-12-17, o1-pro, o1-pro-2025-03-19, o1-preview, o1-preview-2024-09-12, o1-mini, o1-mini-2024-09-12, o3-mini, o3-mini-2025-01-31, o3, o3-2025-04-16, o3-pro, o3-pro-2025-06-10, o4-mini, o4-mini-2025-04-16, gpt-5, gpt-5-2025-08-07, gpt-5-mini, gpt-5-mini-2025-08-07, gpt-5-nano, gpt-5-nano-2025-08-07, gpt-5-pro, gpt-5-pro-2025-10-06, gpt-5.1, gpt-5.1-2025-11-13, gpt-5.1-chat-latest, gpt-5.2, gpt-5.2-2025-12-11, gpt-4, gpt-4-32k, gpt-4-1106-preview, gpt-4-0125-preview, gpt-4-turbo-preview, gpt-4-vision-preview, gpt-4-1106-vision-preview, gpt-4-turbo-2024-04-09, gpt-4-turbo, gpt-4o, gpt-4o-audio-preview, gpt-4o-audio-preview-2024-12-17, gpt-4o-audio-preview-2024-10-01, gpt-4o-mini-audio-preview, gpt-4o-mini-audio-preview-2024-12-17, gpt-4o-2024-05-13, gpt-4o-2024-08-06, gpt-4o-2024-11-20, gpt-4.5-preview, gpt-4.5-preview-2025-02-27, chatgpt-4o-latest, gpt-4o-mini, gpt-4o-mini-2024-07-18, gpt-4-0613, gpt-4-32k-0613, gpt-4-0314, gpt-4-32k-0314, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, gpt-4.1-2025-04-14, gpt-4.1-mini-2025-04-14, gpt-4.1-nano-2025-04-14, gpt-5-chat-latest, gpt-3.5-turbo, gpt-3.5-turbo-16k, gpt-3.5-turbo-0125, gpt-3.5-turbo-1106, gpt-3.5-turbo-0613, gpt-3.5-turbo-16k-0613, gpt-3.5-turbo-0301, text-davinci-003, text-davinci-002, gpt-3.5-turbo-instruct, text-ada-001, text-babbage-001, text-curie-001, ada, babbage, curie, davinci, gpt-35-turbo-16k, gpt-35-turbo, gpt-35-turbo-0125, gpt-35-turbo-1106, gpt-35-turbo-0613, gpt-35-turbo-16k-0613",
+            "agent_id": "exp_tutor"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "How do I use GROUP BY?",
+          "result": {
+            "success": false,
+            "error": "Unknown model 'llama-3.1-sonar-large-128k-online'. Please provide a valid OpenAI model name in: o1, o1-2024-12-17, o1-pro, o1-pro-2025-03-19, o1-preview, o1-preview-2024-09-12, o1-mini, o1-mini-2024-09-12, o3-mini, o3-mini-2025-01-31, o3, o3-2025-04-16, o3-pro, o3-pro-2025-06-10, o4-mini, o4-mini-2025-04-16, gpt-5, gpt-5-2025-08-07, gpt-5-mini, gpt-5-mini-2025-08-07, gpt-5-nano, gpt-5-nano-2025-08-07, gpt-5-pro, gpt-5-pro-2025-10-06, gpt-5.1, gpt-5.1-2025-11-13, gpt-5.1-chat-latest, gpt-5.2, gpt-5.2-2025-12-11, gpt-4, gpt-4-32k, gpt-4-1106-preview, gpt-4-0125-preview, gpt-4-turbo-preview, gpt-4-vision-preview, gpt-4-1106-vision-preview, gpt-4-turbo-2024-04-09, gpt-4-turbo, gpt-4o, gpt-4o-audio-preview, gpt-4o-audio-preview-2024-12-17, gpt-4o-audio-preview-2024-10-01, gpt-4o-mini-audio-preview, gpt-4o-mini-audio-preview-2024-12-17, gpt-4o-2024-05-13, gpt-4o-2024-08-06, gpt-4o-2024-11-20, gpt-4.5-preview, gpt-4.5-preview-2025-02-27, chatgpt-4o-latest, gpt-4o-mini, gpt-4o-mini-2024-07-18, gpt-4-0613, gpt-4-32k-0613, gpt-4-0314, gpt-4-32k-0314, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, gpt-4.1-2025-04-14, gpt-4.1-mini-2025-04-14, gpt-4.1-nano-2025-04-14, gpt-5-chat-latest, gpt-3.5-turbo, gpt-3.5-turbo-16k, gpt-3.5-turbo-0125, gpt-3.5-turbo-1106, gpt-3.5-turbo-0613, gpt-3.5-turbo-16k-0613, gpt-3.5-turbo-0301, text-davinci-003, text-davinci-002, gpt-3.5-turbo-instruct, text-ada-001, text-babbage-001, text-curie-001, ada, babbage, curie, davinci, gpt-35-turbo-16k, gpt-35-turbo, gpt-35-turbo-0125, gpt-35-turbo-1106, gpt-35-turbo-0613, gpt-35-turbo-16k-0613",
+            "agent_id": "exp_tutor"
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_0",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_1",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-20T21:51:06.068638",
+  "metrics": {
+    "experiment_duration_seconds": 5.592191934585571,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 666.5737628936768,
+        "min_latency_ms": 666.5737628936768,
+        "max_latency_ms": 666.5737628936768
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.5083084106445312,
+        "min_latency_ms": 0.5083084106445312,
+        "max_latency_ms": 0.5083084106445312
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.3037452697753906,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.6074905395507812
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      }
+    }
+  }
+}

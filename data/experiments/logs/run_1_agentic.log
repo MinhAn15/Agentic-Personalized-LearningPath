@@ -1,0 +1,66 @@
+
+Metrics Summary:
+  Duration: 88.02 seconds
+  knowledge_extraction: 1 calls, 3ms avg, 100% success
+  profiler: 1 calls, 0ms avg, 100% success
+  path_planner: 1 calls, 0ms avg, 100% success
+  tutor: 2 calls, 1ms avg, 100% success
+  evaluator: 2 calls, 0ms avg, 100% success
+
+=== STDERR ===
+2026-01-20 23:16:53,536 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:16:53,536 - ExperimentRunner - INFO - \U0001f52c Starting Full-Scale Experiment
+2026-01-20 23:16:53,537 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:16:53,883 - ExperimentRunner - INFO - Loaded 10 course materials
+2026-01-20 23:16:53,883 - ExperimentRunner - INFO - Loaded 1 learner profiles
+2026-01-20 23:16:53,883 - ExperimentRunner - INFO - Using MOCK LLM
+2026-01-20 23:16:53,883 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:16:53,883 - ExperimentRunner - INFO - Phase 1: Knowledge Extraction
+2026-01-20 23:16:53,883 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:16:53,883 - knowledge_extraction.exp_ke_agent - INFO - Initialized knowledge_extraction agent: exp_ke_agent
+2026-01-20 23:18:11,120 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: BAAI/bge-small-en-v1.5
+2026-01-20 23:18:16,085 - sentence_transformers.SentenceTransformer - INFO - 1 prompt is loaded, with the key: query
+2026-01-20 23:18:16,085 - KnowledgeExtractionAgent.exp_ke_agent - INFO - Subscribed to KAG_ANALYSIS_COMPLETED
+2026-01-20 23:18:16,085 - ExperimentRunner - INFO - Processing: 10_machine_learning.md
+2026-01-20 23:18:16,088 - KnowledgeExtractionAgent.exp_ke_agent - WARNING - \u26a0\ufe0f Mocking Knowledge Extraction (MOCK_LLM=True)
+2026-01-20 23:18:16,088 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:16,088 - ExperimentRunner - INFO - Phase 2: Learner Profiling
+2026-01-20 23:18:16,088 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:16,088 - profiler.exp_profiler - INFO - Initialized profiler agent: exp_profiler
+2026-01-20 23:18:16,088 - ProfilerAgent.exp_profiler - INFO - Subscribed to EVALUATION_COMPLETED, PACE_CHECK_TRIGGERED, ARTIFACT_CREATED, KG_SYNC_COMPLETED, ARTIFACT_GENERATION_FAILED
+2026-01-20 23:18:16,088 - ExperimentRunner - INFO - Profiling: Bob Tran
+2026-01-20 23:18:16,088 - ProfilerAgent.exp_profiler - WARNING - \u26a0\ufe0f Mocking Profiler Agent (MOCK_LLM=True)
+2026-01-20 23:18:16,088 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:16,089 - ExperimentRunner - INFO - Phase 3: Path Planning (ToT)
+2026-01-20 23:18:16,089 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:16,089 - path_planner.exp_planner - INFO - Initialized path_planner agent: exp_planner
+2026-01-20 23:18:16,089 - PathPlannerAgent.exp_planner - INFO - Subscribed to EVALUATION_COMPLETED
+2026-01-20 23:18:16,089 - ExperimentRunner - INFO - Planning path for: Bob Tran
+2026-01-20 23:18:16,089 - PathPlannerAgent.exp_planner - INFO - \U0001f9e0 Planning learning path for: f6d7ec7f-fb0a-46bd-9e0e-d8f596b4c00c
+2026-01-20 23:18:16,089 - PathPlannerAgent.exp_planner - WARNING - Mocking ToT Path Planning (MOCK_LLM=True)
+2026-01-20 23:18:16,089 - PathPlannerAgent.exp_planner - INFO - \U0001f9e0 ToT Planner found path: ['concept_python_variables']
+2026-01-20 23:18:16,089 - PathPlannerAgent.exp_planner - INFO - \u2705 Learning path generated: 1 concepts (FORWARD mode)
+2026-01-20 23:18:16,089 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:16,089 - ExperimentRunner - INFO - Phase 4: Tutoring (CoT)
+2026-01-20 23:18:16,089 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:16,089 - tutor.exp_tutor - INFO - Initialized tutor agent: exp_tutor
+2026-01-20 23:18:16,092 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: BAAI/bge-small-en-v1.5
+2026-01-20 23:18:21,339 - sentence_transformers.SentenceTransformer - INFO - 1 prompt is loaded, with the key: query
+2026-01-20 23:18:21,342 - TutorAgent.exp_tutor - INFO - Subscribed to PATH_PLANNED, EVALUATION_COMPLETED
+2026-01-20 23:18:21,342 - TutorAgent.exp_tutor - INFO - \U0001f4da Loading vector index from C:\Users\an.ly\OneDrive - Orient\2026\LU\u1eacN V\u0102N TH\u1ea0C S\u0128\Agentic-Personalized-LearningPath\backend\storage\vector_store
+2026-01-20 23:18:21,412 - llama_index.core.indices.loading - INFO - Loading all indices.
+2026-01-20 23:18:21,555 - ExperimentRunner - INFO - Tutoring Bob Tran - Session 1 on Python Variables
+2026-01-20 23:18:21,556 - ExperimentRunner - INFO - Tutoring Bob Tran - Session 2 on Python Variables
+2026-01-20 23:18:21,556 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:21,556 - ExperimentRunner - INFO - Phase 5: Evaluation (JudgeLM)
+2026-01-20 23:18:21,556 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:21,556 - evaluator.exp_evaluator - INFO - Initialized evaluator agent: exp_evaluator
+2026-01-20 23:18:21,556 - EvaluatorAgent.exp_evaluator - INFO - Subscribed to TUTOR_ASSESSMENT_READY
+2026-01-20 23:18:21,556 - ExperimentRunner - INFO - Evaluating Bob Tran - Response 1 on Python Variables
+2026-01-20 23:18:21,556 - EvaluatorAgent.exp_evaluator - INFO - \U0001f4ca Evaluating f6d7ec7f-fb0a-46bd-9e0e-d8f596b4c00c on concept_python_variables
+2026-01-20 23:18:21,556 - ExperimentRunner - INFO - Evaluating Bob Tran - Response 2 on Python Variables
+2026-01-20 23:18:21,556 - EvaluatorAgent.exp_evaluator - INFO - \U0001f4ca Evaluating f6d7ec7f-fb0a-46bd-9e0e-d8f596b4c00c on concept_python_variables
+2026-01-20 23:18:21,557 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:21,557 - ExperimentRunner - INFO - \u2705 Experiment Complete!
+2026-01-20 23:18:21,557 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:21,557 - ExperimentRunner - INFO - Results saved to: C:\Users\an.ly\OneDrive - Orient\2026\LU\u1eacN V\u0102N TH\u1ea0C S\u0128\Agentic-Personalized-LearningPath\data\experiments\results\experiment_6509d212.json

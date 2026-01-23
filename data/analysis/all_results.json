@@ -1,0 +1,338 @@
+[
+  {
+    "experiment_id": "03c32e9a-0781-4b6c-8a18-e8608e764e30",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 102.22531008720398,
+    "latencies": {
+      "ke": 51263.90218734741,
+      "profiler": 31249.65238571167,
+      "tutor": 2661.360740661621
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "078972e8-3301-432a-8a1c-c314a358a82a",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 14.351488828659058,
+    "latencies": {
+      "ke": 2.2613207499186196,
+      "profiler": 0.9412765502929688,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "20c94b95-73c7-499d-ad4b-c0de8c5b4dae",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "BASELINE",
+    "learner": "unknown",
+    "duration": 140.54284858703613,
+    "latencies": {
+      "ke": 44862.088203430176,
+      "profiler": 32595.53837776184,
+      "tutor": 3573.4418630599976
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "28558965-166a-4ed6-896c-1fa90a19f4d9",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 47.03919005393982,
+    "latencies": {
+      "ke": 0.19081433614095053,
+      "profiler": 0.7083415985107422,
+      "tutor": 0.32269954681396484
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "2d4ce8e1-a623-4b3a-8a32-870ff32e0913",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 3.7358367443084717,
+    "latencies": {
+      "ke": 0.0,
+      "profiler": 0.0,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "443ba5b8-734a-4afd-9db1-3750e292477f",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 9.469869375228882,
+    "latencies": {
+      "ke": 1606.83274269104,
+      "profiler": 368.0577278137207,
+      "tutor": 339.44225311279297
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "456e39e8-4091-4d64-9b85-e08d064aa40d",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 14.462885856628418,
+    "latencies": {
+      "ke": 1.3310909271240234,
+      "profiler": 0.0,
+      "tutor": 0.2739429473876953
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "4da45e8e-d22d-4557-9942-f9d417996d9b",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 5.592191934585571,
+    "latencies": {
+      "ke": 666.5737628936768,
+      "profiler": 0.5083084106445312,
+      "tutor": 0.3037452697753906
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "5c6af7c7-f096-42e2-a3ae-1772b2006cb4",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "BASELINE",
+    "learner": "unknown",
+    "duration": 94.35086369514465,
+    "latencies": {
+      "ke": 0.0,
+      "profiler": 0.0,
+      "tutor": 60.669898986816406
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "5db0a32c-cc14-4428-bd57-dfca7a9bc3a1",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 6.901700735092163,
+    "latencies": {
+      "ke": 1.1068979899088542,
+      "profiler": 0.0,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "6509d212-ca9f-4233-9d52-c45dfa180918",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 88.02078938484192,
+    "latencies": {
+      "ke": 2.552509307861328,
+      "profiler": 0.0,
+      "tutor": 0.5055665969848633
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "78f23889-6d2b-4f60-a1b7-4ce32df154bd",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 79.87760615348816,
+    "latencies": {
+      "ke": 32847.994804382324,
+      "profiler": 25215.219259262085,
+      "tutor": 3613.808035850525
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "7fd9ae4f-c048-45fe-a22a-fd807f8274c0",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 14.36496615409851,
+    "latencies": {
+      "ke": 0.9107589721679688,
+      "profiler": 0.0,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "7fda6c9e-707d-4049-bdee-82e732f51f2a",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "BASELINE",
+    "learner": "unknown",
+    "duration": 26.921000957489014,
+    "latencies": {
+      "ke": 1.0237693786621094,
+      "profiler": 0.0,
+      "tutor": 36.37886047363281
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "92401a98-e49b-4462-b482-5753004e72ef",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 9.365304946899414,
+    "latencies": {
+      "ke": 1470.2448844909668,
+      "profiler": 347.6288318634033,
+      "tutor": 211.0205888748169
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "a4d7753d-b143-41e6-a080-9b35cfbaf4a7",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 32.58226490020752,
+    "latencies": {
+      "ke": 1320.724089940389,
+      "profiler": 0.0,
+      "tutor": 262.17079162597656
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "b5d9ad93-24f3-43fe-9962-eeda512d83cf",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 14.575252294540405,
+    "latencies": {
+      "ke": 1.2303988138834636,
+      "profiler": 0.0,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "bbf35ed8-ffea-47d5-b044-aaf94f48e36a",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 14.780179738998413,
+    "latencies": {
+      "ke": 4138.1590366363525,
+      "profiler": 688.1880760192871,
+      "tutor": 583.1195116043091
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "bebaee05-fd1f-4ebc-982f-fd5619523dfd",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 9.939105033874512,
+    "latencies": {
+      "ke": 1.52587890625,
+      "profiler": 1.5208721160888672,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "d054493a-5463-42cb-9130-1e3b35a19cff",
+    "timestamp": null,
+    "mode": "REAL",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 305.36787700653076,
+    "latencies": {
+      "ke": 48939.86368179321,
+      "profiler": 32667.783498764038,
+      "tutor": 3730.7288646698
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "dab70c53-d615-4417-8b70-eb4be3faba19",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 14.950894355773926,
+    "latencies": {
+      "ke": 0.4311402638753255,
+      "profiler": 1.6210079193115234,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "e01d91eb-e7ce-4bc8-b43c-7f05c36b9be4",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 4.045349359512329,
+    "latencies": {
+      "ke": 0.0,
+      "profiler": 1.0688304901123047,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "e0c93c15-8626-464d-a21f-cc72aaed323b",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 7.467491865158081,
+    "latencies": {
+      "ke": 0.0,
+      "profiler": 0.0,
+      "tutor": 0.0
+    },
+    "status": "SUCCESS"
+  },
+  {
+    "experiment_id": "fccf226c-3845-4147-9be5-c685f4988732",
+    "timestamp": null,
+    "mode": "MOCK",
+    "type": "AGENTIC",
+    "learner": "unknown",
+    "duration": 14.365901708602905,
+    "latencies": {
+      "ke": 0.0,
+      "profiler": 0.0,
+      "tutor": 0.5031824111938477
+    },
+    "status": "SUCCESS"
+  }
+]

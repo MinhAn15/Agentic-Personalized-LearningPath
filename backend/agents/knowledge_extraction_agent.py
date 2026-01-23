@@ -163,7 +163,13 @@ class KnowledgeExtractionAgent(BaseAgent):
         """
         try:
             settings = get_settings()
-            force_real = kwargs.get("force_real", False)
+            
+            # FIX: Handle nested force_real in DocumentInput
+            doc_input = kwargs.get("document")
+            if doc_input:
+                force_real = getattr(doc_input, "force_real", False)
+            else:
+                force_real = kwargs.get("force_real", False)
             
             if settings.MOCK_LLM and not force_real:
                 self.logger.warning("⚠️ Mocking Knowledge Extraction (MOCK_LLM=True)")
@@ -185,9 +191,16 @@ class KnowledgeExtractionAgent(BaseAgent):
                  }
 
             # FIX Issue 3: Strip input strings
-            document_content = kwargs.get("document_content")
-            document_title = (kwargs.get("document_title") or "Untitled").strip()
-            document_type = (kwargs.get("document_type") or "LECTURE").strip()
+            if doc_input:
+                document_content = doc_input.content
+                document_title = (doc_input.title or "Untitled").strip()
+                document_type = doc_input.document_type
+                # force_real handled above
+            else:
+                document_content = kwargs.get("document_content")
+                document_title = (kwargs.get("document_title") or "Untitled").strip()
+                document_type = (kwargs.get("document_type") or "LECTURE").strip()
+            
             force_reprocess = kwargs.get("force_reprocess", False)
             
             # GLOBAL THEME: Domain is REQUIRED for accurate LLM extraction

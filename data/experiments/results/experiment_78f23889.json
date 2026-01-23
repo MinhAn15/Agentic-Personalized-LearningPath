@@ -1,0 +1,214 @@
+{
+  "experiment_id": "78f23889-6d2b-4f60-a1b7-4ce32df154bd",
+  "started_at": "2026-01-20T21:56:58.343147",
+  "config": {
+    "use_real_llm": true,
+    "learner_filter": "alice"
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 1,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": false,
+            "agent_id": "exp_ke_agent",
+            "error": "429 You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\nPlease retry in 13.897064115s. [links {\n  description: \"Learn more about Gemini API quotas\"\n  url: \"https://ai.google.dev/gemini-api/docs/rate-limits\"\n}\n, violations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerMinutePerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\nviolations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\nviolations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerDayPerUserPerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\nviolations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerDayPerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\n, retry_delay {\n  seconds: 13\n}\n]"
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_profiler",
+            "learner_id": "user_f45ea8fadc68",
+            "profile": {
+              "learner_id": "user_f45ea8fadc68",
+              "name": "Learner",
+              "goal": "I want to learn sql_basics, sql_joins",
+              "topic": "SQL",
+              "purpose": "General learning",
+              "time_available": 30,
+              "learning_style": "READING",
+              "skill_level": "BEGINNER",
+              "prerequisites_met": []
+            },
+            "diagnostic": {
+              "completed": true,
+              "questions_asked": 5,
+              "initial_mastery": {
+                "SELECT, FROM, WHERE Clauses": 0.2,
+                "INSERT, UPDATE, DELETE": 0.15,
+                "Aggregate Functions and GROUP BY": 0.1,
+                "JOIN Operations": 0.05,
+                "Subqueries and Window Functions": 0.0,
+                "SQL_SELECT_STATEMENT": 0.2,
+                "CRUD_OPERATIONS": 0.18000000000000002,
+                "AGGREGATION_GROUPING": 0.16000000000000003,
+                "TABLE_JOINS": 0.13999999999999999,
+                "SUBQUERIES_ADVANCED": 0.12
+              }
+            },
+            "recommendations": [
+              "Start with SQL basics using interactive tutorials like SQLTutorial.org or W3Schools[1][7]",
+              "Practice SQL JOINs with hands-on challenges on Khan Academy or Codecademy[4][5]"
+            ],
+            "estimated_hours": 15
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_planner",
+            "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+            "chain_mode": "FORWARD",
+            "learning_path": [
+              {
+                "day": 1,
+                "concept": "concept_python_variables",
+                "concept_name": "Python Variables",
+                "difficulty": 1,
+                "estimated_hours": 0.2,
+                "chain_mode": "TOT_GENERATED",
+                "recommended_type": "TUTORIAL"
+              }
+            ],
+            "pacing": "RELAXED",
+            "success_probability": 0.5680000000000001,
+            "total_estimated_hours": 0.2,
+            "resources": [
+              {
+                "concept": "concept_python_variables",
+                "primary_type": "TUTORIAL",
+                "recommended_resources": [
+                  {
+                    "type": "VIDEO",
+                    "priority": 1,
+                    "description": "Video tutorial on Python Variables"
+                  },
+                  {
+                    "type": "EXERCISE",
+                    "priority": 1,
+                    "description": "Practice exercises for Python Variables"
+                  },
+                  {
+                    "type": "ARTICLE",
+                    "priority": 3,
+                    "description": "Detailed article on Python Variables"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is a SQL JOIN?",
+          "result": {
+            "success": true,
+            "guidance": "I appreciate the context, but I should clarify my role: I'm Perplexity, a search assistant designed to provide comprehensive answers based on search results, not a Socratic tutor.\n\nHowever, I can answer your underlying question about SQL JOINs:\n\nA **SQL JOIN** is a clause that combines rows from two or more tables based on logical relationships between them, typically matching values in common columns.[1][6] It allows you to retrieve connected data from multiple tables in a single query result set.[2]\n\nThe most common type is the **INNER JOIN**, which returns only rows where matching values exist in both tables.[2][8] Other types include LEFT JOIN, RIGHT JOIN, and FULL JOIN, which handle non-matching rows differently by including them with NULL values where data doesn't match.[2]\n\nThe JOIN works by specifying a join condition using the **ON clause**, which defines which columns from each table should be compared to establish the relationship.[4][5] For example:\n\n```sql\nSELECT employees.employee_name, departments.department_name\nFROM employees\nJOIN departments\nON employees.department_id = departments.department_id;\n```\n\nThis query combines employee and department data by matching the `department_id` column in both tables.[4]\n\nIf you'd like to explore SQL JOINs through guided questions instead, you might want to consult an educational platform or tutor specifically designed for that pedagogical approach.",
+            "current_phase": "EXPLANATION",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "How do I use GROUP BY?",
+          "result": {
+            "success": true,
+            "guidance": "Can you think of a scenario where you'd want to summarize data, like calculating total sales per customer, and what part of a SELECT query might need to specify the grouping column?[1][2]",
+            "current_phase": "EXPLANATION",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_0",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_1",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-20T21:58:18.220753",
+  "metrics": {
+    "experiment_duration_seconds": 79.87760615348816,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 32847.994804382324,
+        "min_latency_ms": 32847.994804382324,
+        "max_latency_ms": 32847.994804382324
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 25215.219259262085,
+        "min_latency_ms": 25215.219259262085,
+        "max_latency_ms": 25215.219259262085
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.7059574127197266,
+        "min_latency_ms": 0.7059574127197266,
+        "max_latency_ms": 0.7059574127197266
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 3613.808035850525,
+        "min_latency_ms": 2192.237138748169,
+        "max_latency_ms": 5035.378932952881
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      }
+    }
+  }
+}

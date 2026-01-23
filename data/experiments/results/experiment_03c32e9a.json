@@ -1,0 +1,214 @@
+{
+  "experiment_id": "03c32e9a-0781-4b6c-8a18-e8608e764e30",
+  "started_at": "2026-01-20T22:04:42.549042",
+  "config": {
+    "use_real_llm": true,
+    "learner_filter": "alice"
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 1,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": false,
+            "agent_id": "exp_ke_agent",
+            "error": "429 You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 0, model: embedding-001\nPlease retry in 11.449295233s. [links {\n  description: \"Learn more about Gemini API quotas\"\n  url: \"https://ai.google.dev/gemini-api/docs/rate-limits\"\n}\n, violations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerDayPerUserPerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\nviolations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\nviolations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerMinutePerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\nviolations {\n  quota_metric: \"generativelanguage.googleapis.com/embed_content_free_tier_requests\"\n  quota_id: \"EmbedContentRequestsPerDayPerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"embedding-001\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n}\n, retry_delay {\n  seconds: 11\n}\n]"
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_profiler",
+            "learner_id": "user_e9b39e11e526",
+            "profile": {
+              "learner_id": "user_e9b39e11e526",
+              "name": "Learner",
+              "goal": "I want to learn sql_basics, sql_joins",
+              "topic": "SQL",
+              "purpose": "General learning",
+              "time_available": 30,
+              "learning_style": "READING",
+              "skill_level": "BEGINNER",
+              "prerequisites_met": []
+            },
+            "diagnostic": {
+              "completed": true,
+              "questions_asked": 5,
+              "initial_mastery": {
+                "SQL_SELECT_STATEMENT": 0.2,
+                "SQL_DDL_DML": 0.18000000000000002,
+                "SQL_JOINS_GROUPS": 0.16000000000000003,
+                "SQL_SUBQUERIES_VIEWS": 0.13999999999999999,
+                "SQL_ADVANCED_CONSTRAINTS": 0.12
+              }
+            },
+            "recommendations": [
+              "Start with SQL basics using interactive tutorials like SQLTutorial.org or W3Schools[1][8]",
+              "Practice SQL joins with hands-on exercises on Khan Academy or Codecademy[5][6]",
+              "Follow a structured study plan covering SELECT, basics, then joins[4]"
+            ],
+            "estimated_hours": 15
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_planner",
+            "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+            "chain_mode": "FORWARD",
+            "learning_path": [
+              {
+                "day": 1,
+                "concept": "concept_python_variables",
+                "concept_name": "Python Variables",
+                "difficulty": 1,
+                "estimated_hours": 0.2,
+                "chain_mode": "TOT_GENERATED",
+                "recommended_type": "TUTORIAL"
+              }
+            ],
+            "pacing": "RELAXED",
+            "success_probability": 0.5680000000000001,
+            "total_estimated_hours": 0.2,
+            "resources": [
+              {
+                "concept": "concept_python_variables",
+                "primary_type": "TUTORIAL",
+                "recommended_resources": [
+                  {
+                    "type": "VIDEO",
+                    "priority": 1,
+                    "description": "Video tutorial on Python Variables"
+                  },
+                  {
+                    "type": "EXERCISE",
+                    "priority": 1,
+                    "description": "Practice exercises for Python Variables"
+                  },
+                  {
+                    "type": "ARTICLE",
+                    "priority": 3,
+                    "description": "Detailed article on Python Variables"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is the main purpose of Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": true,
+            "guidance": "Can you think of a time when you've needed to remember and reuse a piece of information, like a number or a name, while working on a task? How might naming that information help in a program?",
+            "current_phase": "EXPLANATION",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "Can you give me an example of using Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": true,
+            "guidance": "What do you think is the basic syntax for creating a variable in Python, and can you describe a simple scenario where you'd use one to store and reuse a value?[1][2]",
+            "current_phase": "QUESTIONING",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-20T22:06:24.774352",
+  "metrics": {
+    "experiment_duration_seconds": 102.22531008720398,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 51263.90218734741,
+        "min_latency_ms": 51263.90218734741,
+        "max_latency_ms": 51263.90218734741
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 31249.65238571167,
+        "min_latency_ms": 31249.65238571167,
+        "max_latency_ms": 31249.65238571167
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 2661.360740661621,
+        "min_latency_ms": 2602.3879051208496,
+        "max_latency_ms": 2720.3335762023926
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      }
+    }
+  }
+}

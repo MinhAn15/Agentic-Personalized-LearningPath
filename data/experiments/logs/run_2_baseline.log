@@ -1,0 +1,70 @@
+
+Metrics Summary:
+  Duration: 26.92 seconds
+  knowledge_extraction: 1 calls, 1ms avg, 100% success
+  profiler: 1 calls, 0ms avg, 100% success
+  path_planner: 1 calls, 2ms avg, 100% success
+  tutor: 2 calls, 36ms avg, 100% success
+  evaluator: 2 calls, 0ms avg, 100% success
+
+=== STDERR ===
+2026-01-20 23:18:26,940 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:26,940 - ExperimentRunner - INFO - \U0001f52c Starting Full-Scale Experiment
+2026-01-20 23:18:26,940 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:26,974 - ExperimentRunner - INFO - Loaded 10 course materials
+2026-01-20 23:18:26,974 - ExperimentRunner - INFO - Loaded 1 learner profiles
+2026-01-20 23:18:26,974 - ExperimentRunner - INFO - Using MOCK LLM
+2026-01-20 23:18:26,974 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:26,974 - ExperimentRunner - INFO - Phase 1: Knowledge Extraction
+2026-01-20 23:18:26,974 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:26,974 - knowledge_extraction.exp_ke_agent - INFO - Initialized knowledge_extraction agent: exp_ke_agent
+2026-01-20 23:18:42,303 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: BAAI/bge-small-en-v1.5
+2026-01-20 23:18:48,507 - sentence_transformers.SentenceTransformer - INFO - 1 prompt is loaded, with the key: query
+2026-01-20 23:18:48,510 - KnowledgeExtractionAgent.exp_ke_agent - INFO - Subscribed to KAG_ANALYSIS_COMPLETED
+2026-01-20 23:18:48,510 - ExperimentRunner - INFO - Processing: 10_machine_learning.md
+2026-01-20 23:18:48,511 - KnowledgeExtractionAgent.exp_ke_agent - WARNING - \u26a0\ufe0f Mocking Knowledge Extraction (MOCK_LLM=True)
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - Phase 2: Learner Profiling
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:48,511 - profiler.exp_profiler - INFO - Initialized profiler agent: exp_profiler
+2026-01-20 23:18:48,511 - ProfilerAgent.exp_profiler - INFO - Subscribed to EVALUATION_COMPLETED, PACE_CHECK_TRIGGERED, ARTIFACT_CREATED, KG_SYNC_COMPLETED, ARTIFACT_GENERATION_FAILED
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - Profiling: David Pham
+2026-01-20 23:18:48,511 - ProfilerAgent.exp_profiler - WARNING - \u26a0\ufe0f Mocking Profiler Agent (MOCK_LLM=True)
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - Phase 3: Path Planning (ToT)
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:48,511 - path_planner.exp_planner - INFO - Initialized path_planner agent: exp_planner
+2026-01-20 23:18:48,511 - PathPlannerAgent.exp_planner - INFO - Subscribed to EVALUATION_COMPLETED
+2026-01-20 23:18:48,511 - ExperimentRunner - INFO - Planning path for: David Pham
+2026-01-20 23:18:48,511 - PathPlannerAgent.exp_planner - INFO - \U0001f9e0 Planning learning path for: 5bd05da8-c1c1-4b96-b630-342a463461f4
+2026-01-20 23:18:48,511 - PathPlannerAgent.exp_planner - WARNING - Mocking ToT Path Planning (MOCK_LLM=True)
+2026-01-20 23:18:48,512 - PathPlannerAgent.exp_planner - INFO - \U0001f9e0 ToT Planner found path: ['concept_python_variables']
+2026-01-20 23:18:48,512 - PathPlannerAgent.exp_planner - INFO - \u2705 Learning path generated: 1 concepts (FORWARD mode)
+2026-01-20 23:18:48,512 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:48,512 - ExperimentRunner - INFO - Phase 4: Tutoring (CoT)
+2026-01-20 23:18:48,512 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:48,512 - ExperimentRunner - INFO - Using Baseline Agent (Vanilla RAG)
+2026-01-20 23:18:48,515 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: BAAI/bge-small-en-v1.5
+2026-01-20 23:18:53,560 - sentence_transformers.SentenceTransformer - INFO - 1 prompt is loaded, with the key: query
+2026-01-20 23:18:53,567 - BaselineAgent.exp_baseline_tutor - INFO - Loading vector index from C:\Users\an.ly\OneDrive - Orient\2026\LU\u1eacN V\u0102N TH\u1ea0C S\u0128\Agentic-Personalized-LearningPath\backend\storage\vector_store...
+2026-01-20 23:18:53,606 - llama_index.core.indices.loading - INFO - Loading all indices.
+2026-01-20 23:18:53,786 - BaselineAgent.exp_baseline_tutor - INFO - \u2705 Vector index loaded successfully.
+2026-01-20 23:18:53,786 - ExperimentRunner - INFO - Tutoring David Pham - Session 1 on Python Variables
+2026-01-20 23:18:53,786 - BaselineAgent.exp_baseline_tutor - INFO - Answering question: What is the main purpose of Python Variables?
+2026-01-20 23:18:53,843 - BaselineAgent.exp_baseline_tutor - INFO - \U0001f4da Retrieved 3 chunks for context.
+2026-01-20 23:18:53,843 - ExperimentRunner - INFO - Tutoring David Pham - Session 2 on Python Variables
+2026-01-20 23:18:53,843 - BaselineAgent.exp_baseline_tutor - INFO - Answering question: Can you give me an example of using Python Variables?
+2026-01-20 23:18:53,858 - BaselineAgent.exp_baseline_tutor - INFO - \U0001f4da Retrieved 3 chunks for context.
+2026-01-20 23:18:53,858 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:53,858 - ExperimentRunner - INFO - Phase 5: Evaluation (JudgeLM)
+2026-01-20 23:18:53,858 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:53,858 - evaluator.exp_evaluator - INFO - Initialized evaluator agent: exp_evaluator
+2026-01-20 23:18:53,858 - EvaluatorAgent.exp_evaluator - INFO - Subscribed to TUTOR_ASSESSMENT_READY
+2026-01-20 23:18:53,858 - ExperimentRunner - INFO - Evaluating David Pham - Response 1 on Python Variables
+2026-01-20 23:18:53,858 - EvaluatorAgent.exp_evaluator - INFO - \U0001f4ca Evaluating 5bd05da8-c1c1-4b96-b630-342a463461f4 on concept_python_variables
+2026-01-20 23:18:53,858 - ExperimentRunner - INFO - Evaluating David Pham - Response 2 on Python Variables
+2026-01-20 23:18:53,860 - EvaluatorAgent.exp_evaluator - INFO - \U0001f4ca Evaluating 5bd05da8-c1c1-4b96-b630-342a463461f4 on concept_python_variables
+2026-01-20 23:18:53,861 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:53,861 - ExperimentRunner - INFO - \u2705 Experiment Complete!
+2026-01-20 23:18:53,861 - ExperimentRunner - INFO - ============================================================
+2026-01-20 23:18:53,861 - ExperimentRunner - INFO - Results saved to: C:\Users\an.ly\OneDrive - Orient\2026\LU\u1eacN V\u0102N TH\u1ea0C S\u0128\Agentic-Personalized-LearningPath\data\experiments\results\experiment_7fda6c9e.json

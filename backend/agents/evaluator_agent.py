@@ -75,6 +75,7 @@ class EvaluatorAgent(BaseAgent):
         super().__init__(agent_id, AgentType.EVALUATOR, state_manager, event_bus)
         
         self.settings = get_settings()
+        self.settings = get_settings()
         self.llm = llm or LLMFactory.get_llm()
         self.logger = logging.getLogger(f"EvaluatorAgent.{agent_id}")
         
@@ -127,13 +128,23 @@ class EvaluatorAgent(BaseAgent):
             Dict with evaluation results
         """
         try:
-            # FIX Issue 4: Strip all IDs for consistency
-            learner_id = (kwargs.get("learner_id") or "").strip()
-            concept_id = (kwargs.get("concept_id") or "").strip()
-            learner_response = (kwargs.get("learner_response") or "").strip()
-            expected_answer = (kwargs.get("expected_answer") or "").strip()
-            correct_answer_explanation = kwargs.get("correct_answer_explanation", "")
-            force_real = kwargs.get("force_real", False)
+            # FIX: Support object-based input (from ExperimentRunner)
+            eval_input = kwargs.get("evaluation_input")
+            if eval_input:
+                learner_id = eval_input.learner_id
+                concept_id = eval_input.concept_id
+                learner_response = eval_input.learner_response
+                expected_answer = eval_input.expected_answer
+                force_real = eval_input.force_real
+                correct_answer_explanation = "" # Optional in input object
+            else:
+                # FIX Issue 4: Strip all IDs for consistency
+                learner_id = (kwargs.get("learner_id") or "").strip()
+                concept_id = (kwargs.get("concept_id") or "").strip()
+                learner_response = (kwargs.get("learner_response") or "").strip()
+                expected_answer = (kwargs.get("expected_answer") or "").strip()
+                correct_answer_explanation = kwargs.get("correct_answer_explanation", "")
+                force_real = kwargs.get("force_real", False)
             
             # Validate required inputs
             if not all([learner_id, concept_id, learner_response]):

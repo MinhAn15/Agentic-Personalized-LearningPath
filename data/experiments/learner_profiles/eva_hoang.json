@@ -1,5 +1,5 @@
 {
-  "learner_id": "7977a84a-e46a-4e84-9576-5221d6e81187",
+  "learner_id": "cecc8f4f-537a-4f18-a81c-7aea7988ddb3",
   "demographic": {
     "age": 25,
     "language": "vi",
@@ -25,21 +25,21 @@
   },
   "interest_tags": {},
   "concept_mastery_map": {
-    "sql_basics": 0.7604443702153716,
-    "python_basics": 0.5866897800628815
+    "sql_basics": 0.6811620895401072,
+    "python_basics": 0.5635058397274512
   },
   "completed_concepts": [],
   "error_patterns": [],
   "session_history": [],
   "interaction_log": [],
   "artifact_ids": [],
-  "avg_mastery_level": 0.6735670751391265,
+  "avg_mastery_level": 0.6223339646337791,
   "learning_velocity": 0.0,
   "engagement_score": 0.0,
   "mastery_progression": {},
   "version": 0,
-  "created_at": "2026-01-19T23:04:27.783147",
-  "last_updated": "2026-01-19T23:04:27.783147",
+  "created_at": "2026-01-20T23:33:03.554264",
+  "last_updated": "2026-01-20T23:33:03.554264",
   "last_updated_by": "system",
   "name": "Eva Hoang",
   "goal": "sql_subqueries, sql_aggregation, python_basics",

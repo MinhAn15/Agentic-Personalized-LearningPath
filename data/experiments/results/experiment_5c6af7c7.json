@@ -1,0 +1,307 @@
+{
+  "experiment_id": "5c6af7c7-f096-42e2-a3ae-1772b2006cb4",
+  "started_at": "2026-01-20T22:26:50.748826",
+  "config": {
+    "use_real_llm": false,
+    "learner_filter": "alice",
+    "use_baseline": true
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 1,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "mock_doc_c5a62f53",
+            "concepts_extracted": 1,
+            "message": "Mock extraction successful (Populated concept_python_variables)"
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": {
+              "learner_id": "demo_learner_01",
+              "name": {
+                "learner_id": "demo_learner_01",
+                "demographic": {},
+                "learning_goal": [
+                  "Master Python"
+                ],
+                "learning_style": "VISUAL",
+                "skill_level": "BEGINNER",
+                "available_time": 30,
+                "preferences": {
+                  "pace": "medium",
+                  "verbosity": "normal",
+                  "hint_level": 2,
+                  "difficulty_next": "MEDIUM"
+                },
+                "constraints": {
+                  "blackout_hours": [],
+                  "priority_skills": []
+                },
+                "interest_tags": {},
+                "concept_mastery_map": {},
+                "completed_concepts": [],
+                "error_patterns": [],
+                "session_history": [],
+                "interaction_log": [],
+                "artifact_ids": [],
+                "avg_mastery_level": 0.0,
+                "learning_velocity": 0.0,
+                "engagement_score": 0.0,
+                "mastery_progression": {},
+                "version": 0,
+                "created_at": "2026-01-20T22:28:20.098316",
+                "last_updated": "2026-01-20T22:28:20.098316",
+                "last_updated_by": "system",
+                "name": "MockUser",
+                "goal": "Learn Python",
+                "time_available": 30,
+                "preferred_learning_style": "VISUAL",
+                "current_skill_level": "BEGINNER",
+                "current_mastery": [],
+                "prerequisites_met": []
+              }
+            },
+            "agent_id": "exp_profiler",
+            "result": {
+              "learner_id": "demo_learner_01",
+              "profile": {
+                "learner_id": "demo_learner_01",
+                "demographic": {},
+                "learning_goal": [
+                  "Master Python"
+                ],
+                "learning_style": "VISUAL",
+                "skill_level": "BEGINNER",
+                "available_time": 30,
+                "preferences": {
+                  "pace": "medium",
+                  "verbosity": "normal",
+                  "hint_level": 2,
+                  "difficulty_next": "MEDIUM"
+                },
+                "constraints": {
+                  "blackout_hours": [],
+                  "priority_skills": []
+                },
+                "interest_tags": {},
+                "concept_mastery_map": {},
+                "completed_concepts": [],
+                "error_patterns": [],
+                "session_history": [],
+                "interaction_log": [],
+                "artifact_ids": [],
+                "avg_mastery_level": 0.0,
+                "learning_velocity": 0.0,
+                "engagement_score": 0.0,
+                "mastery_progression": {},
+                "version": 0,
+                "created_at": "2026-01-20T22:28:20.098316",
+                "last_updated": "2026-01-20T22:28:20.098316",
+                "last_updated_by": "system",
+                "name": "MockUser",
+                "goal": "Learn Python",
+                "time_available": 30,
+                "preferred_learning_style": "VISUAL",
+                "current_skill_level": "BEGINNER",
+                "current_mastery": [],
+                "prerequisites_met": []
+              }
+            }
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_planner",
+            "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+            "chain_mode": "FORWARD",
+            "learning_path": [
+              {
+                "day": 1,
+                "concept": "concept_python_variables",
+                "concept_name": "Python Variables",
+                "difficulty": 1,
+                "estimated_hours": 0.2,
+                "chain_mode": "TOT_GENERATED",
+                "recommended_type": "TUTORIAL"
+              }
+            ],
+            "pacing": "RELAXED",
+            "success_probability": 0.5680000000000001,
+            "total_estimated_hours": 0.2,
+            "resources": [
+              {
+                "concept": "concept_python_variables",
+                "primary_type": "TUTORIAL",
+                "recommended_resources": [
+                  {
+                    "type": "VIDEO",
+                    "priority": 1,
+                    "description": "Video tutorial on Python Variables"
+                  },
+                  {
+                    "type": "EXERCISE",
+                    "priority": 1,
+                    "description": "Practice exercises for Python Variables"
+                  },
+                  {
+                    "type": "ARTICLE",
+                    "priority": 3,
+                    "description": "Detailed article on Python Variables"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is the main purpose of Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "agent": "baseline",
+            "question": "What is the main purpose of Python Variables?",
+            "answer": "[BASELINE MOCK] Answer to: What is the main purpose of Python Variables?...",
+            "retrieved_context_snippets": [
+              "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n### 2.1 Subtopic A\nDetailed explanation of the first subtopic with examples.\n\n```\n# Example code or syntax\nexample_variable = \"Hello, World!\"\n```\n\n### 2.2 Subtopic B\nDetailed explanation of the second subtopic.",
+              "By the end of this module, you will be able to:\n- Understand the core concepts of Introduction to Machine Learning with Scikit-Learn\n- Apply these concepts in practical scenarios\n- Identify common pitfalls and best practices"
+            ],
+            "reasoning_traces": null,
+            "scaffold_type": "direct_answer",
+            "metadata": {
+              "architecture": "vanilla_rag",
+              "features_disabled": [
+                "cot",
+                "scaffolding",
+                "socratic",
+                "leakage_guard"
+              ],
+              "embedding_model": "BAAI/bge-small-en-v1.5"
+            },
+            "guidance": "[BASELINE MOCK] Answer to: What is the main purpose of Python Variables?..."
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "Can you give me an example of using Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "agent": "baseline",
+            "question": "Can you give me an example of using Python Variables?",
+            "answer": "[BASELINE MOCK] Answer to: Can you give me an example of using Python Variabl...",
+            "retrieved_context_snippets": [
+              "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n### 2.1 Subtopic A\nDetailed explanation of the first subtopic with examples.\n\n```\n# Example code or syntax\nexample_variable = \"Hello, World!\"\n```\n\n### 2.2 Subtopic B\nDetailed explanation of the second subtopic.",
+              "By the end of this module, you will be able to:\n- Understand the core concepts of Introduction to Machine Learning with Scikit-Learn\n- Apply these concepts in practical scenarios\n- Identify common pitfalls and best practices"
+            ],
+            "reasoning_traces": null,
+            "scaffold_type": "direct_answer",
+            "metadata": {
+              "architecture": "vanilla_rag",
+              "features_disabled": [
+                "cot",
+                "scaffolding",
+                "socratic",
+                "leakage_guard"
+              ],
+              "embedding_model": "BAAI/bge-small-en-v1.5"
+            },
+            "guidance": "[BASELINE MOCK] Answer to: Can you give me an example of using Python Variabl..."
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-20T22:28:25.099690",
+  "metrics": {
+    "experiment_duration_seconds": 94.35086369514465,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 60.669898986816406,
+        "min_latency_ms": 39.45302963256836,
+        "max_latency_ms": 81.88676834106445
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      }
+    }
+  }
+}

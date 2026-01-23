@@ -1,0 +1,614 @@
+{
+  "experiment_id": "d054493a-5463-42cb-9130-1e3b35a19cff",
+  "started_at": "2026-01-20T22:10:13.324077",
+  "config": {
+    "use_real_llm": true,
+    "learner_filter": "alice"
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 1,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "doc_a1f09974",
+            "status": "COMMITTED",
+            "failed_chunks": [],
+            "chunking": {
+              "total_chunks": 6,
+              "total_words": 153,
+              "total_chars": 964,
+              "avg_words_per_chunk": 25.5,
+              "avg_chars_per_chunk": 160.66666666666666,
+              "min_chars": 27,
+              "max_chars": 335,
+              "chunk_types": {
+                "CONCEPT_INTRO": 2,
+                "EXPLANATION": 1,
+                "EXAMPLE": 0,
+                "PRACTICE": 1,
+                "SUMMARY": 1,
+                "TRANSITION": 1,
+                "MIXED": 0
+              }
+            },
+            "validation": {
+              "is_valid": true,
+              "total_nodes": 24,
+              "total_relationships": 12,
+              "valid_nodes": 24,
+              "valid_relationships": 12,
+              "error_count": 0,
+              "warning_count": 36,
+              "errors": [],
+              "warnings": [
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.core_concepts_of_introduction_to_machine_learning_with_scikit_learn' should be uppercase with underscores",
+                  "node_id": "machine_learning.core_concepts_of_introduction_to_machine_learning_with_scikit_learn",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.CORE_CONCEPTS_OF_INTRODUCTION_TO_MACHINE_LEARNING_WITH_SCIKIT_LEARN"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.applying_machine_learning_concepts' should be uppercase with underscores",
+                  "node_id": "machine_learning.applying_machine_learning_concepts",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.APPLYING_MACHINE_LEARNING_CONCEPTS"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.common_pitfalls_and_best_practices_in_machine_learning' should be uppercase with underscores",
+                  "node_id": "machine_learning.common_pitfalls_and_best_practices_in_machine_learning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.COMMON_PITFALLS_AND_BEST_PRACTICES_IN_MACHINE_LEARNING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.foundational_understanding' should be uppercase with underscores",
+                  "node_id": "machine_learning.foundational_understanding",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.FOUNDATIONAL_UNDERSTANDING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.practical_application' should be uppercase with underscores",
+                  "node_id": "machine_learning.practical_application",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.PRACTICAL_APPLICATION"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.advanced_techniques' should be uppercase with underscores",
+                  "node_id": "machine_learning.advanced_techniques",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.ADVANCED_TECHNIQUES"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.basic_machine_learning_application' should be uppercase with underscores",
+                  "node_id": "machine_learning.basic_machine_learning_application",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.BASIC_MACHINE_LEARNING_APPLICATION"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.intermediate_machine_learning_challenge' should be uppercase with underscores",
+                  "node_id": "machine_learning.intermediate_machine_learning_challenge",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.INTERMEDIATE_MACHINE_LEARNING_CHALLENGE"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.advanced_machine_learning_problem' should be uppercase with underscores",
+                  "node_id": "machine_learning.advanced_machine_learning_problem",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.ADVANCED_MACHINE_LEARNING_PROBLEM"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.machine_learning_as_a_subset_of_ai' should be uppercase with underscores",
+                  "node_id": "machine_learning.machine_learning_as_a_subset_of_ai",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.MACHINE_LEARNING_AS_A_SUBSET_OF_AI"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.types_of_machine_learning' should be uppercase with underscores",
+                  "node_id": "machine_learning.types_of_machine_learning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.TYPES_OF_MACHINE_LEARNING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.machine_learning_workflow' should be uppercase with underscores",
+                  "node_id": "machine_learning.machine_learning_workflow",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.MACHINE_LEARNING_WORKFLOW"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.supervised_learning' should be uppercase with underscores",
+                  "node_id": "machine_learning.supervised_learning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.SUPERVISED_LEARNING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.unsupervised_learning' should be uppercase with underscores",
+                  "node_id": "machine_learning.unsupervised_learning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.UNSUPERVISED_LEARNING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.reinforcement_learning' should be uppercase with underscores",
+                  "node_id": "machine_learning.reinforcement_learning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.REINFORCEMENT_LEARNING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.feature_engineering' should be uppercase with underscores",
+                  "node_id": "machine_learning.feature_engineering",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.FEATURE_ENGINEERING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.decision_trees' should be uppercase with underscores",
+                  "node_id": "machine_learning.decision_trees",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.DECISION_TREES"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.linear_regression' should be uppercase with underscores",
+                  "node_id": "machine_learning.linear_regression",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.LINEAR_REGRESSION"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.k_nearest_neighbors_knn' should be uppercase with underscores",
+                  "node_id": "machine_learning.k_nearest_neighbors_knn",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.K_NEAREST_NEIGHBORS_KNN"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.random_forest' should be uppercase with underscores",
+                  "node_id": "machine_learning.random_forest",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.RANDOM_FOREST"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.overfitting' should be uppercase with underscores",
+                  "node_id": "machine_learning.overfitting",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.OVERFITTING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.gradient_descent' should be uppercase with underscores",
+                  "node_id": "machine_learning.gradient_descent",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.GRADIENT_DESCENT"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.model_selection_and_validation' should be uppercase with underscores",
+                  "node_id": "machine_learning.model_selection_and_validation",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.MODEL_SELECTION_AND_VALIDATION"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.dimensionality_reduction' should be uppercase with underscores",
+                  "node_id": "machine_learning.dimensionality_reduction",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.DIMENSIONALITY_REDUCTION"
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.reinforcement_learning",
+                  "node_id": "machine_learning.reinforcement_learning",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.k_nearest_neighbors_knn",
+                  "node_id": "machine_learning.k_nearest_neighbors_knn",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.decision_trees",
+                  "node_id": "machine_learning.decision_trees",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.linear_regression",
+                  "node_id": "machine_learning.linear_regression",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.random_forest",
+                  "node_id": "machine_learning.random_forest",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.model_selection_and_validation",
+                  "node_id": "machine_learning.model_selection_and_validation",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.feature_engineering",
+                  "node_id": "machine_learning.feature_engineering",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.gradient_descent",
+                  "node_id": "machine_learning.gradient_descent",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.supervised_learning",
+                  "node_id": "machine_learning.supervised_learning",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.overfitting",
+                  "node_id": "machine_learning.overfitting",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.dimensionality_reduction",
+                  "node_id": "machine_learning.dimensionality_reduction",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                },
+                {
+                  "rule": "NO_ORPHAN",
+                  "severity": "WARNING",
+                  "message": "Orphan node (no relationships): machine_learning.unsupervised_learning",
+                  "node_id": "machine_learning.unsupervised_learning",
+                  "relationship_id": null,
+                  "field": null,
+                  "suggested_fix": null
+                }
+              ],
+              "info": []
+            },
+            "resolution": {
+              "resolved_concept_count": 24,
+              "resolved_relationship_count": 12,
+              "merges_performed": 0,
+              "stats": {
+                "raw_new_concepts": 24,
+                "internal_unique_concepts": 24,
+                "existing_concepts": 0,
+                "merged_to_existing": 0,
+                "truly_new_concepts": 24,
+                "total_resolved_concepts": 24,
+                "total_resolved_relationships": 12
+              },
+              "matches": []
+            },
+            "commit": {
+              "concepts_created": 24,
+              "relationships_created": 12,
+              "concept_batches": 1,
+              "relationship_batches": 2
+            },
+            "content_keywords": [
+              "Core Concepts",
+              "Subtopic B",
+              "Best Practices",
+              "Advanced Techniques",
+              "Practical Application",
+              "Example Code",
+              "Dual-Level Retrieval",
+              "Foundational Concepts",
+              "Scikit-Learn",
+              "Introduction to Machine Learning",
+              "Subtopic A",
+              "Skill Levels",
+              "Programming Exercises",
+              "Main Insights",
+              "Key Takeaways",
+              "Retrieval-Augmented Generation",
+              "Basic to Advanced",
+              "Core Summaries",
+              "Graph-Based Indexing",
+              "Machine Learning Introduction"
+            ]
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_profiler",
+            "learner_id": "user_99d3be4448ef",
+            "profile": {
+              "learner_id": "user_99d3be4448ef",
+              "name": "Learner",
+              "goal": "I want to learn sql_basics, sql_joins",
+              "topic": "SQL",
+              "purpose": "General learning",
+              "time_available": 30,
+              "learning_style": "READING",
+              "skill_level": "BEGINNER",
+              "prerequisites_met": []
+            },
+            "diagnostic": {
+              "completed": true,
+              "questions_asked": 5,
+              "initial_mastery": {
+                "SELECT_FROM_WHERE": 0.2,
+                "CRUD_OPERATIONS": 0.18000000000000002,
+                "JOINS": 0.16000000000000003,
+                "AGGREGATIONS_GROUPS": 0.13999999999999999,
+                "SUBQUERIES_CTE": 0.12
+              }
+            },
+            "recommendations": [
+              "Start with SQL basics using interactive tutorials like sqltutorial.org or W3Schools[1][4]",
+              "Practice SQL joins with hands-on examples and exercises from GeeksforGeeks or Codecademy[2][6]",
+              "Follow a structured study plan covering SELECT, WHERE, and JOINs with real datasets[4]"
+            ],
+            "estimated_hours": 15
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_planner",
+            "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+            "chain_mode": "FORWARD",
+            "learning_path": [
+              {
+                "day": 1,
+                "concept": "concept_python_variables",
+                "concept_name": "Python Variables",
+                "difficulty": 1,
+                "estimated_hours": 0.2,
+                "chain_mode": "TOT_GENERATED",
+                "recommended_type": "TUTORIAL"
+              }
+            ],
+            "pacing": "RELAXED",
+            "success_probability": 0.5680000000000001,
+            "total_estimated_hours": 0.2,
+            "resources": [
+              {
+                "concept": "concept_python_variables",
+                "primary_type": "TUTORIAL",
+                "recommended_resources": [
+                  {
+                    "type": "VIDEO",
+                    "priority": 1,
+                    "description": "Video tutorial on Python Variables"
+                  },
+                  {
+                    "type": "EXERCISE",
+                    "priority": 1,
+                    "description": "Practice exercises for Python Variables"
+                  },
+                  {
+                    "type": "ARTICLE",
+                    "priority": 3,
+                    "description": "Detailed article on Python Variables"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is the main purpose of Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": true,
+            "guidance": "Can you think of a time when you've needed to remember and reuse a piece of information, like a number or a name, while working on a task? How might naming that information help in a program?",
+            "current_phase": "EXPLANATION",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "Can you give me an example of using Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": true,
+            "guidance": "Before I show you an example, let me check your understanding: **What do you think happens when you assign a value to a variable in Python\u2014does the variable store the actual value, or does it store something else?**\n\nOnce you answer that, we can explore a concrete example together that will make more sense.",
+            "current_phase": "QUESTIONING",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-20T22:15:18.691954",
+  "metrics": {
+    "experiment_duration_seconds": 305.36787700653076,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 48939.86368179321,
+        "min_latency_ms": 48939.86368179321,
+        "max_latency_ms": 48939.86368179321
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 32667.783498764038,
+        "min_latency_ms": 32667.783498764038,
+        "max_latency_ms": 32667.783498764038
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 3730.7288646698,
+        "min_latency_ms": 2117.490530014038,
+        "max_latency_ms": 5343.9671993255615
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      }
+    }
+  }
+}

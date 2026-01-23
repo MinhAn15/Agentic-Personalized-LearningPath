@@ -71,7 +71,9 @@ class ProfilerAgent(BaseAgent):
         """Main execution method."""
         try:
 
-            if self.settings.MOCK_LLM:
+            force_real = kwargs.get("force_real", False)
+            
+            if self.settings.MOCK_LLM and not force_real:
                 self.logger.warning("⚠️ Mocking Profiler Agent (MOCK_LLM=True)")
                 learner_name = kwargs.get("learner_name", "MockUser")
                 learner_id = "demo_learner_01"

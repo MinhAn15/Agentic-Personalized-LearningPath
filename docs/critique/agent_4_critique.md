@@ -1,84 +1,71 @@
-# Agent 4 Socratic Critique Log
+# Agent 4 (Tutor) Critique Log
 
-**Date:** 2026-01-14  
-**Target File:** `docs/technical_specs/AGENT_4_FULL_SPEC.md`  
-**Reviewer:** Socratic Critique Workflow
+## Session 1 (2026-01-21)
 
----
-
-## Phase 2: PROBE (9 Socratic Questions)
-
-### A. Scientific Validity
-
-| # | Question | Finding | Severity | Status |
-|---|----------|---------|----------|--------|
-| A1 | **Paper Alignment**: Does the implementation actually match CoT (Wei 2022), or is it a simplified interpretation? | ✅ **DOCUMENTED**. Section 1.4 explicitly states "n=3 traces with Self-Consistency" vs "Single CoT trace", with transparency note. | Low | ✅ PASS |
-| A2 | **Key Mechanism**: What is the ONE core mechanism that makes this SOTA? | ✅ **Multiple mechanisms documented**: (1) CoT→Scaffold slicing, (2) Leakage Guard, (3) 3-Layer Grounding, (4) Self-Consistency voting. Section 7.1 lists all four. | Low | ✅ PASS |
-| A3 | **Ablation**: If we remove CoT, would performance degrade? | ✅ **Documented** in Section 6.5 - "Without CoT: Higher leakage rate", "Without Leakage Guard: ~80% direct answers". Marked as Future Work. | Low | ✅ PASS |
-
-### B. Practical Applicability
-
-| # | Question | Finding | Severity | Status |
-|---|----------|---------|----------|--------|
-| B4 | **Edge Cases**: What happens when input is malformed, empty, or adversarial? | ✅ **Documented** in Section 3.4 (Leakage Guard regex, confidence threshold, RAG missing) and Section 3.5 (error matrix with recovery). | Low | ✅ PASS |
-| B5 | **Scalability**: Would this work with 500 sessions? 5,000? | ✅ **Documented** in Section 4.4. Medium (500) ✅, Large (5K) ⚠️ LLM rate limits, Enterprise ❌ needs caching layer. | Low | ✅ PASS |
-| B6 | **Latency**: Is the LLM call count acceptable? | ✅ **Acceptable**. First scaffold = 3 calls (~1.5s), cached scaffold = 0 calls (~100ms). Section 4.2 shows CoT caching helps subsequent turns. | Low | ✅ PASS |
-
-### C. Thesis Criteria
-
-| # | Question | Finding | Severity | Status |
-|---|----------|---------|----------|--------|
-| C7 | **Contribution Claim**: What specific contribution does Agent 4 make? | ✅ **Clear** in Section 7.1. Four novel elements: Dynamic CoT for Tutoring, Leakage Guard, 3-Layer Grounding, Harvard 7 Enforcement. | Low | ✅ PASS |
-| C8 | **Differentiation**: How is this different from a simple LLM wrapper? | ✅ **Well-differentiated**. 5 Socratic states, CoT slicing, Leakage Guard, 3-layer grounding with weighted confidence, Harvard 7 enforcement. Not just "call GPT". | Low | ✅ PASS |
-| C9 | **Evaluation**: How would you MEASURE if Agent 4 is working correctly? | ✅ **Documented** in Section 6.1-6.3. Engagement ≥70%, Leakage ≤5%, Consensus ≥66%, Harvard 7 compliance. Multi-baseline comparison. | Low | ✅ PASS |
+### Context
+- **Discrepancy Found**: Doc `AGENT_4_WHITEBOX.md` references `_determine_socratic_state()` method, but it does not exist in `tutor_agent.py`.
+- **Options Considered**:
+  - **Option A**: Update doc to reflect actual implementation (inline in `execute()`).
+  - **Option B**: Refactor code to extract `_determine_socratic_state()` method.
 
 ---
 
-## Summary
+### Socratic Questions & Findings
 
-| Category | Pass | Needs Fix | Total |
-|----------|------|-----------|-------|
-| A. Scientific Validity | 3 | 0 | 3 |
-| B. Practical Applicability | 3 | 0 | 3 |
-| C. Thesis Criteria | 3 | 0 | 3 |
-| **Total** | **9** | **0** | **9** |
-
----
-
-## Phase 3: FIX
-
-**No fixes required.** All 9 Socratic questions have satisfactory answers.
+| # | Question | Finding | Severity | Resolution |
+|---|----------|---------|----------|------------|
+| A1 | Paper Alignment (Wei 2022 CoT) | Implementation is correct: 3 CoT traces, Self-Consistency, Leakage Guard | Low | N/A |
+| A2 | Key Mechanism | State machine logic exists but embedded in `execute()`, not named method | Medium | Requires decision |
+| A3 | Ablation Impact | Removing CoT would significantly degrade pedagogy quality | Low | N/A |
+| C7 | Thesis Contribution | Claims "Method Ontology" + "Dynamic CoT" | High | **Named method supports claim** |
+| C8 | Differentiation | Not a simple LLM wrapper due to State Machine + Harvard 7 + 3-Layer Grounding | High | **Clear structure aids defense** |
+| C9 | Evaluation Metrics | Defined in Whitebox Section 5 (Engagement, Leakage, Consensus) | Low | N/A |
 
 ---
 
-## Phase 4: Resolution Status
+### Critical Analysis: Option A vs Option B
 
-| Aspect | Status |
-|--------|--------|
-| CoT Deviation | ✅ Section 1.4 - Transparency Note |
-| Key Mechanism | ✅ 4 mechanisms in Section 7.1 |
-| Ablation Study | ✅ Section 6.5 - Future Work |
-| Edge Cases | ✅ Section 3.4-3.5 - Guardrails |
-| Scalability | ✅ Section 4.4 - Limits documented |
-| Contribution | ✅ Section 7.1 - 4 Novel Elements |
-| Evaluation | ✅ Section 6.1-6.3 - Multi-metric |
+| Criterion | Option A (Update Doc) | Option B (Refactor Code) |
+|:----------|:----------------------|:-------------------------|
+| **Effort** | Low (10 min) | Low (30 min) |
+| **Code Quality** | No improvement | Improved separation of concerns |
+| **Thesis Defensibility** | Weaker (doc says X, code does X differently) | Stronger (doc says X, code has X) |
+| **Test Impact** | None | None (tests use `DialogueState`, not `execute()` internals) |
+| **Maintainability** | Status quo | Better (smaller `execute()`, testable helper) |
 
 ---
 
-## Verdict: ✅ PASS (First Attempt)
+### Final Verdict: **OPTION B (Refactor Code)**
 
-All 9 questions passed without requiring any fixes.
+**Rationale (MIS Strategic Alignment):**
+
+1. **Scientific Rigor**: The thesis claims a "Method Ontology" (Chandrasekaran 1999). A named method `_determine_socratic_state()` directly maps to this claim, making it traceable and defensible.
+
+2. **Code-Documentation Alignment**: For academic work, the codebase IS the artifact. If a reviewer searches for `_determine_socratic_state`, they should find it. This is critical for reproducibility.
+
+3. **Low Risk, High Reward**: The refactoring is trivial (extracting ~20 lines), tests won't break, and the payoff is cleaner architecture + thesis alignment.
+
+4. **Comment in Code Already Hints at This**: Line 30 says *"UPGRADE: SocraticState removed in favor of Dynamic CoT"*. This suggests the original design HAD a separate state handler. We should restore it under the documented name.
 
 ---
 
-## Summary of Documentation Quality
+### Recommended Action
 
-| Aspect | Assessment |
-|--------|------------|
-| **Scientific Transparency** | ✅ CoT adaptation explicitly disclosed |
-| **Thesis Contribution** | ✅ 4 novel elements with prior work comparison |
-| **Evaluation Rigor** | ✅ Multi-baseline + CoT-specific + Harvard 7 metrics |
-| **Engineering Depth** | ✅ Leakage Guard, 3-layer grounding, state machine |
-| **Readability** | ✅ Tables, Mermaid diagrams, clear structure |
+1. Extract state determination logic from `execute()` (lines 144-181) into:
+   ```python
+   def _determine_socratic_state(self, state: DialogueState, question: str) -> DialoguePhase:
+       """
+       Determine the current Socratic state based on Method Ontology.
+       Source: Chandrasekaran et al. (1999)
+       Returns the appropriate DialoguePhase for response generation.
+       """
+       # ... extracted logic
+   ```
 
-**Final Status: ✅ READY FOR THESIS DEFENSE**
+2. Update `AGENT_4_WHITEBOX.md` Section 2.1 if method logic changes.
+
+3. Run: `pytest backend/tests/test_tutor_agent.py -v` to verify no regression.
+
+---
+
+### Status: **DECISION MADE - Proceed with Option B**

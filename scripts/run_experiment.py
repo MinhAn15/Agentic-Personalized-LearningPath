@@ -28,6 +28,7 @@ from backend.models.schemas import (
     DocumentInput, LearnerProfile, TutorInput, EvaluationInput
 )
 from backend.models.enums import DocumentType
+from backend.agents.baseline_agent import BaselineAgent
 
 # =============================================
 # CONFIGURATION
@@ -144,6 +145,14 @@ class MockStateManager:
         if profile:
             return profile.model_dump()
         return None
+    
+    async def set(self, key: str, value: Any):
+        """Set state value (delegate to redis)."""
+        await self.redis.set(key, value)
+        
+    async def get(self, key: str):
+        """Get state value (delegate to redis)."""
+        return await self.redis.get(key)
 
 
 class MockEventBus:
@@ -155,8 +164,15 @@ class MockEventBus:
     def subscribe(self, topic: str, handler):
         pass
     
-    async def publish(self, topic: str, payload: Dict, **kwargs):
-        self.events.append({"topic": topic, "payload": payload, "timestamp": datetime.now().isoformat()})
+    async def publish(self, topic: str = None, payload: Dict = None, **kwargs):
+        """Mock publish accepting flexible arguments."""
+        event = {
+            "topic": topic,
+            "payload": payload,
+            "timestamp": datetime.now().isoformat(),
+            **kwargs
+        }
+        self.events.append(event)
 
 
 # =============================================
@@ -215,8 +231,9 @@ class MetricsCollector:
 class ExperimentRunner:
     """Orchestrates the full experiment pipeline."""
     
-    def __init__(self, use_real_llm: bool = False, learner_filter: str = None):
+    def __init__(self, use_real_llm: bool = False, learner_filter: str = None, use_baseline: bool = False):
         self.use_real_llm = use_real_llm
+        self.use_baseline = use_baseline
         self.learner_filter = learner_filter
         self.state_manager = MockStateManager()
         self.event_bus = MockEventBus()
@@ -227,6 +244,7 @@ class ExperimentRunner:
             "config": {
                 "use_real_llm": use_real_llm,
                 "learner_filter": learner_filter,
+                "use_baseline": use_baseline,
             },
             "phases": {},
         }
@@ -342,6 +360,7 @@ class ExperimentRunner:
                 # Simulate profiling by updating mastery
                 result = await agent.execute(
                     learner_id=profile.learner_id,
+                    learner_message=f"I want to learn {profile.goal or 'Python'}",
                     force_real=self.use_real_llm
                 )
                 
@@ -417,45 +436,78 @@ class ExperimentRunner:
         
         from backend.agents.tutor_agent import TutorAgent
         
-        agent = TutorAgent(
-            agent_id="exp_tutor",
-            state_manager=self.state_manager,
-            event_bus=self.event_bus
-        )
+        if self.use_baseline:
+            logger.info("Using Baseline Agent (Vanilla RAG)")
+            agent = BaselineAgent(agent_id="exp_baseline_tutor")
+        else:
+            agent = TutorAgent(
+                agent_id="exp_tutor",
+                state_manager=self.state_manager,
+                event_bus=self.event_bus
+            )
         
         sessions = []
-        sample_questions = [
-            "What is a SQL JOIN?",
-            "How do I use GROUP BY?",
-            "Explain the difference between LEFT and INNER JOIN",
-        ]
         
         for profile in profiles:
+            # 1. Get generated path for this learner
+            path_results = self.results.get("phases", {}).get("3_path_planning", {}).get("items", [])
+            learner_path_result = next((item for item in path_results if item["learner_id"] == profile.learner_id), None)
+            
+            if not learner_path_result or not learner_path_result["result"].get("learning_path"):
+                logger.warning(f"No learning path found for {profile.name}, skipping tutoring.")
+                continue
+
+            learning_path = learner_path_result["result"]["learning_path"]
+            # Use the first concept in the path for testing
+            target_concept = learning_path[0]
+            concept_id = target_concept.get("concept", "unknown_concept")
+            concept_name = target_concept.get("concept_name", "Unknown Concept")
+            
+            # Dynamic questions based on the concept
+            sample_questions = [
+                f"What is the main purpose of {concept_name}?",
+                f"Can you give me an example of using {concept_name}?"
+            ]
+
             for i, question in enumerate(sample_questions[:sessions_per_learner]):
-                logger.info(f"Tutoring {profile.name} - Session {i+1}")
+                logger.info(f"Tutoring {profile.name} - Session {i+1} on {concept_name}")
                 
                 start_time = time.time()
                 try:
-                    tutor_input = TutorInput(
-                        learner_id=profile.learner_id,
-                        question=question,
-                        concept_id=f"concept_{i}",
-                        hint_level=1,
-                        force_real=self.use_real_llm
-                    )
-                    
-                    result = await agent.execute(tutor_input=tutor_input)
+                    if self.use_baseline:
+                        # Baseline Execution
+                        result = await agent.answer_question(
+                            question=question,
+                            context_override=None,
+                            learner_profile={"name": profile.name},
+                            force_real=self.use_real_llm
+                        )
+                        # Normalize output for metrics/logging
+                        if "answer" in result:
+                            result["guidance"] = result["answer"]
+                    else:
+                        # Socratic Execution
+                        tutor_input = TutorInput(
+                            learner_id=profile.learner_id,
+                            question=question,
+                            concept_id=concept_id,
+                            hint_level=1,
+                            force_real=self.use_real_llm
+                        )
+                        result = await agent.execute(tutor_input=tutor_input)
                     
                     latency_ms = (time.time() - start_time) * 1000
                     self.metrics.record_call("tutor", latency_ms, True, {
                         "learner_name": profile.name,
                         "session": i + 1,
+                        "concept": concept_name
                     })
                     
                     sessions.append({
                         "learner_id": profile.learner_id,
                         "session": i + 1,
                         "question": question,
+                        "concept_id": concept_id,
                         "result": result if isinstance(result, dict) else {"raw": str(result)},
                     })
                     
@@ -482,20 +534,35 @@ class ExperimentRunner:
         )
         
         evaluations = []
-        sample_responses = [
-            ("A JOIN combines rows from two tables", "A JOIN is a SQL operation that combines rows from two or more tables based on a related column"),
-            ("GROUP BY groups rows by a column", "GROUP BY groups rows that have the same values into summary rows"),
-        ]
         
         for profile in profiles:
+            # 1. Get generated path for this learner
+            path_results = self.results.get("phases", {}).get("3_path_planning", {}).get("items", [])
+            learner_path_result = next((item for item in path_results if item["learner_id"] == profile.learner_id), None)
+            
+            if not learner_path_result or not learner_path_result["result"].get("learning_path"):
+                logger.warning(f"No learning path found for {profile.name}, skipping evaluation.")
+                continue
+
+            learning_path = learner_path_result["result"]["learning_path"]
+            target_concept = learning_path[0]
+            concept_id = target_concept.get("concept", "unknown_concept")
+            concept_name = target_concept.get("concept_name", "Unknown Concept")
+
+            # Dynamic responses based on the concept
+            sample_responses = [
+                (f"{concept_name} is used to store data.", f"{concept_name} allows storing and manipulating values."),
+                (f"I don't know what {concept_name} is.", f"{concept_name} is a fundamental concept in this topic."),
+            ]
+            
             for i, (learner_resp, expected) in enumerate(sample_responses):
-                logger.info(f"Evaluating {profile.name} - Response {i+1}")
+                logger.info(f"Evaluating {profile.name} - Response {i+1} on {concept_name}")
                 
                 start_time = time.time()
                 try:
                     eval_input = EvaluationInput(
                         learner_id=profile.learner_id,
-                        concept_id=f"concept_{i}",
+                        concept_id=concept_id,
                         learner_response=learner_resp,
                         expected_answer=expected,
                         force_real=self.use_real_llm
@@ -506,11 +573,13 @@ class ExperimentRunner:
                     latency_ms = (time.time() - start_time) * 1000
                     self.metrics.record_call("evaluator", latency_ms, True, {
                         "learner_name": profile.name,
+                        "concept": concept_name
                     })
                     
                     evaluations.append({
                         "learner_id": profile.learner_id,
                         "response_num": i + 1,
+                        "concept_id": concept_id,
                         "result": result if isinstance(result, dict) else {"raw": str(result)},
                     })
                     
@@ -538,7 +607,7 @@ class ExperimentRunner:
         logger.info(f"Using {'REAL' if self.use_real_llm else 'MOCK'} LLM")
         
         # Run phases
-        self.results["phases"]["1_knowledge_extraction"] = await self.run_phase_1_knowledge_extraction(materials[:3])  # Limit for testing
+        self.results["phases"]["1_knowledge_extraction"] = await self.run_phase_1_knowledge_extraction(materials[:1])  # Limit to 1 for rate limits
         self.results["phases"]["2_profiling"] = await self.run_phase_2_profiling(profiles)
         self.results["phases"]["3_path_planning"] = await self.run_phase_3_path_planning(profiles)
         self.results["phases"]["4_tutoring"] = await self.run_phase_4_tutoring(profiles, sessions_per_learner=2)
@@ -562,7 +631,10 @@ class ExperimentRunner:
         
         # Print summary
         summary = self.metrics.get_summary()
-        print("\n📊 Metrics Summary:")
+        try:
+            print("\nMetrics Summary:")
+        except UnicodeEncodeError:
+            print("\nMetrics Summary:")
         print(f"  Duration: {summary['experiment_duration_seconds']:.2f} seconds")
         for agent, stats in summary["agents"].items():
             print(f"  {agent}: {stats['total_calls']} calls, {stats['avg_latency_ms']:.0f}ms avg, {stats['success_rate']*100:.0f}% success")
@@ -577,12 +649,14 @@ class ExperimentRunner:
 def main():
     parser = argparse.ArgumentParser(description="Run Full-Scale Experiment")
     parser.add_argument("--real", action="store_true", help="Use real LLM instead of mock")
+    parser.add_argument("--baseline", action="store_true", help="Use Baseline Agent (Control Group)")
     parser.add_argument("--learner", type=str, help="Filter to specific learner (e.g., 'alice')")
     args = parser.parse_args()
     
     runner = ExperimentRunner(
         use_real_llm=args.real,
-        learner_filter=args.learner
+        learner_filter=args.learner,
+        use_baseline=args.baseline
     )
     
     asyncio.run(runner.run())

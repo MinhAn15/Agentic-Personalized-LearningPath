@@ -1,6 +1,6 @@
 {
-  "experiment_id": "49467189-5ac1-4fad-a1ce-bfee79cc1ef9",
-  "created_at": "2026-01-19T23:04:27.784771",
+  "experiment_id": "666f86ce-e7ab-4c2e-a5be-7268a250d586",
+  "created_at": "2026-01-20T23:33:03.555447",
   "settings": {
     "llm_provider": "gemini",
     "api_calls_budget_per_agent": 50,
@@ -16,7 +16,9 @@
     "7_python_functions.md",
     "8_python_oop.md",
     "9_data_analysis.md",
-    "10_machine_learning.md"
+    "10_machine_learning.md",
+    "11_quantum_physics.md",
+    "12_european_history.md"
   ],
   "learner_profiles": [
     "alice_nguyen.json",

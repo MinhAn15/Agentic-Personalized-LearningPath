@@ -143,12 +143,12 @@ class PathPlannerAgent(BaseAgent):
                 
         await pipeline.execute()
     
-    async def _explore_learning_paths(self, learner_id: str, concept_ids: List[str], current_concept: str = None) -> List[str]:
+    async def _explore_learning_paths(self, learner_id: str, concept_ids: List[str], current_concept: str = None, force_real: bool = False) -> List[str]:
         """
         Explore learning paths using Tree of Thoughts (Beam Search).
         Source: Yao et al. (2023)
         """
-        if self.settings.MOCK_LLM:
+        if self.settings.MOCK_LLM and not force_real:
              self.logger.warning("Mocking ToT Path Planning (MOCK_LLM=True)")
              # Force 'concept_python_variables' if in candidates.
              # In a real scenario, this would choose the best next step.
@@ -455,6 +455,7 @@ class PathPlannerAgent(BaseAgent):
             learner_id = kwargs.get("learner_id")
             goal = kwargs.get("goal")
             last_result = kwargs.get("last_result")  # From evaluator
+            force_real = kwargs.get("force_real", False)
             
             if not learner_id:
                 return {
@@ -476,7 +477,7 @@ class PathPlannerAgent(BaseAgent):
             
             # Step 2: Get Course KG (SMART FILTERING - use Personal Subgraph)
             neo4j = self.state_manager.neo4j
-            topic = kwargs.get("topic") or learner_profile.get("topic", "")
+            topic = kwargs.get("topic") or getattr(learner_profile, "topic", "") or getattr(learner_profile, "goal", "")
             
             # Strategy 1: Start from learner's MasteryNodes, expand to connected concepts
             course_concepts = await neo4j.run_query(
@@ -563,7 +564,8 @@ class PathPlannerAgent(BaseAgent):
             tot_path_ids = await self._explore_learning_paths(
                 learner_id=learner_id,
                 concept_ids=concept_ids,
-                current_concept=learner_profile.get("current_concept") # Need to ensure we have this or infer from history
+                current_concept=getattr(learner_profile, "current_concept", None),
+                force_real=force_real
             )
             
             learning_path = {"success": False}
@@ -663,7 +665,7 @@ class PathPlannerAgent(BaseAgent):
 
     async def _construct_detailed_path(
         self,
-        learner_profile: Dict[str, Any],
+        learner_profile,  # Can be Dict or LearnerProfile
         path_ids: List[str],
         course_concepts: List[Dict],
         chain_mode: ChainingMode
@@ -671,12 +673,33 @@ class PathPlannerAgent(BaseAgent):
         """Convert ToT ID sequence into full learning path object"""
         path = []
         hours_used = 0
-        current_mastery = {
-            m["concept_id"]: m["mastery_level"]
-            for m in learner_profile.get("current_mastery", [])
-        }
-        hours_per_day = learner_profile.get("hours_per_day", 2)
-        total_available = learner_profile.get("time_available", 30) * hours_per_day
+        
+        # Handle both Dict and Pydantic model formats
+        if hasattr(learner_profile, 'model_dump'):
+            current_mastery_raw = getattr(learner_profile, 'current_mastery', []) or []
+            concept_mastery_map = getattr(learner_profile, 'concept_mastery_map', {}) or {}
+            hours_per_day = getattr(learner_profile, 'hours_per_day', 2) or 2
+            time_available = getattr(learner_profile, 'time_available', None) or getattr(learner_profile, 'available_time', 30) or 30
+            preferred_style = getattr(learner_profile, 'preferred_learning_style', 'VISUAL')
+            if hasattr(preferred_style, 'value'):
+                preferred_style = preferred_style.value
+        else:
+            current_mastery_raw = learner_profile.get("current_mastery", [])
+            concept_mastery_map = learner_profile.get("concept_mastery_map", {})
+            hours_per_day = learner_profile.get("hours_per_day", 2)
+            time_available = learner_profile.get("time_available", 30)
+            preferred_style = learner_profile.get("preferred_learning_style", "VISUAL")
+        
+        # Build mastery dict
+        current_mastery = {}
+        for m in current_mastery_raw:
+            if isinstance(m, dict):
+                current_mastery[m.get("concept_id", "")] = m.get("mastery_level", 0.0)
+            elif hasattr(m, 'concept_id'):
+                current_mastery[m.concept_id] = getattr(m, 'mastery_level', 0.0)
+        current_mastery.update(concept_mastery_map)
+        
+        total_available = time_available * hours_per_day
         
         for cid in path_ids:
             # Find concept data
@@ -693,10 +716,10 @@ class PathPlannerAgent(BaseAgent):
                 "concept_name": concept.get('name', cid),
                 "difficulty": difficulty,
                 "estimated_hours": round(time_est, 1),
-                "chain_mode": "TOT_GENERATED", # Mark as AI generated
+                "chain_mode": "TOT_GENERATED",
                 "recommended_type": self._recommend_content_type(
                     difficulty,
-                    learner_profile.get("preferred_learning_style", "VISUAL")
+                    preferred_style
                 )
             })
             
@@ -749,13 +772,27 @@ class PathPlannerAgent(BaseAgent):
         """Generate path using adaptive chaining strategy"""
         try:
             path = []
-            current_mastery = {
-                m["concept_id"]: m["mastery_level"]
-                for m in learner_profile.get("current_mastery", [])
-            }
+            # Handle both Dict and Pydantic model formats
+            if hasattr(learner_profile, 'model_dump'):
+                # Pydantic model - convert to dict or use getattr
+                current_mastery_raw = getattr(learner_profile, 'current_mastery', []) or []
+                concept_mastery_map = getattr(learner_profile, 'concept_mastery_map', {}) or {}
+            else:
+                # Dict format
+                current_mastery_raw = learner_profile.get("current_mastery", [])
+                concept_mastery_map = learner_profile.get("concept_mastery_map", {})
             
-            time_available = learner_profile.get("time_available", 30)
-            hours_per_day = learner_profile.get("hours_per_day", 2)
+            # Build mastery dict from both sources
+            current_mastery = {}
+            for m in current_mastery_raw:
+                if isinstance(m, dict):
+                    current_mastery[m.get("concept_id", "")] = m.get("mastery_level", 0.0)
+                elif hasattr(m, 'concept_id'):
+                    current_mastery[m.concept_id] = getattr(m, 'mastery_level', 0.0)
+            current_mastery.update(concept_mastery_map)
+            
+            time_available = getattr(learner_profile, 'time_available', None) or getattr(learner_profile, 'available_time', 30) or 30
+            hours_per_day = getattr(learner_profile, 'hours_per_day', 2) or 2
             total_hours = time_available * hours_per_day
             hours_used = 0
             day = 1
@@ -1041,7 +1078,7 @@ class PathPlannerAgent(BaseAgent):
     async def _recommend_resources(
         self,
         learning_path: List[Dict[str, Any]],
-        learner_profile: Dict[str, Any]
+        learner_profile  # Can be Dict or LearnerProfile
     ) -> List[Dict[str, Any]]:
         """
         Recommend learning resources for each concept.
@@ -1050,7 +1087,13 @@ class PathPlannerAgent(BaseAgent):
         or Knowledge Graph. Currently returns placeholder resource types.
         """
         resources = []
-        learning_style = learner_profile.get("preferred_learning_style", "VISUAL")
+        # Handle both Dict and Pydantic model
+        if hasattr(learner_profile, 'model_dump'):
+            learning_style = getattr(learner_profile, 'preferred_learning_style', 'VISUAL')
+            if hasattr(learning_style, 'value'):
+                learning_style = learning_style.value
+        else:
+            learning_style = learner_profile.get("preferred_learning_style", "VISUAL")
         
         for step in learning_path:
             concept = step["concept"]
@@ -1086,9 +1129,9 @@ class PathPlannerAgent(BaseAgent):
     
     async def _calculate_success_probability(
         self,
-        learner_profile: Dict[str, Any],
+        learner_profile,  # Can be Dict or LearnerProfile
         learning_path: List[Dict[str, Any]],
-        current_mastery: Optional[Dict[str, float]] = None  # FIX: Accept live mastery
+        current_mastery: Optional[Dict[str, float]] = None
     ) -> float:
         """
         Calculate probability of completing learning path.
@@ -1099,9 +1142,18 @@ class PathPlannerAgent(BaseAgent):
         if not learning_path:
             return 0.0
         
+        # Handle both Dict and Pydantic model
+        if hasattr(learner_profile, 'model_dump'):
+            profile_mastery = getattr(learner_profile, 'concept_mastery_map', {}) or {}
+            time_days = getattr(learner_profile, 'time_available', None) or getattr(learner_profile, 'available_time', 30) or 30
+            hours_per_day = getattr(learner_profile, 'hours_per_day', 2) or 2
+        else:
+            profile_mastery = learner_profile.get("concept_mastery_map", {})
+            time_days = learner_profile.get("time_available", 30)
+            hours_per_day = learner_profile.get("hours_per_day", 2)
+        
         # Component 1: Average mastery (40%)
-        # FIX: Use current_mastery (live) first, fallback to profile's concept_mastery_map
-        mastery_source = current_mastery if current_mastery else learner_profile.get("concept_mastery_map", {})
+        mastery_source = current_mastery if current_mastery else profile_mastery
         mastery_scores = [
             mastery_source.get(step['concept'], 0.0)
             for step in learning_path
@@ -1112,8 +1164,7 @@ class PathPlannerAgent(BaseAgent):
         total_hours = sum(s.get("estimated_hours", 0) for s in learning_path)
         
         # FIX: Align with Agent 2's Profile Schema (Days * Hours/Day)
-        time_days = learner_profile.get("time_available", 30)
-        hours_per_day = learner_profile.get("hours_per_day", 2)
+        # time_days and hours_per_day already extracted above
         available_hours = time_days * hours_per_day
         
         time_fit = min(1.0, available_hours / total_hours) if total_hours > 0 else 1.0

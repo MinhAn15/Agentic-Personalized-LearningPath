@@ -39,6 +39,8 @@ COURSE_TOPICS = [
     ("8_python_oop", "Python Object-Oriented Programming"),
     ("9_data_analysis", "Data Analysis with Pandas"),
     ("10_machine_learning", "Introduction to Machine Learning with Scikit-Learn"),
+    ("11_quantum_physics", "Quantum Physics: Wave-Particle Duality"),
+    ("12_european_history", "European History: The Renaissance"),
 ]
 
 # Learner personas for synthetic profiles
@@ -198,6 +200,52 @@ Returns all rows when there is a match in either table.
 """,
     }
     
+    # 11. Quantum Physics Template
+    templates["11_quantum_physics"] = """
+# Quantum Physics: Wave-Particle Duality
+
+## Learning Objectives
+- Understand the concept of Wave-Particle Duality
+- Explain the Double-Slit Experiment
+- Define the Heisenberg Uncertainty Principle
+
+## 1. Introduction
+Classical physics treats particles and waves as distinct entities. Quantum mechanics reveals that matter and light exhibit properties of both.
+
+## 2. The Double-Slit Experiment
+When light shines through two slits, it creates an interference pattern (wave behavior), even if photons are sent one at a time. However, if observed, they behave like particles.
+
+## 3. Key Principles
+- **Superposition**: A system exists in all possible states until measured.
+- **Entanglement**: Particles can be correlated instantly across distances.
+
+## Summary
+Matter behaves as both a wave and a particle depending on observation.
+"""
+
+    # 12. European History Template
+    templates["12_european_history"] = """
+# European History: The Renaissance
+
+## Learning Objectives
+- Identify key figures of the Renaissance (Da Vinci, Michelangelo)
+- Understand the shift from Medieval to Modern thought
+- Explain Humanism
+
+## 1. Context (14th - 17th Century)
+The Renaissance was a fervent period of European cultural, artistic, political and economic "rebirth" following the Middle Ages.
+
+## 2. Humanism
+An intellectual movement focusing on human potential and achievements, moving away from divine-centric views.
+
+## 3. Key Figures
+- **Leonardo da Vinci**: The "Renaissance Man" (Mona Lisa, Last Supper).
+- **Michelangelo**: The Sistine Chapel, David.
+
+## Summary
+The Renaissance bridged the gap between the Middle Ages and modern-day civilization.
+"""
+    
     # Return specific template if available, otherwise generate generic content
     if topic_id in templates:
         return templates[topic_id]
@@ -316,7 +364,7 @@ def generate_pdfs():
             f.write(content)
         
         generated_files.append(str(filename))
-        print(f"✅ Generated: {filename.name}")
+        print(f"Generated: {filename.name}")
     
     return generated_files
 
@@ -351,7 +399,7 @@ def generate_profiles():
             json.dump(profile_dict, f, indent=2, default=str)
         
         generated_files.append(str(filename))
-        print(f"✅ Generated: {filename.name}")
+        print(f"Generated: {filename.name}")
     
     return generated_files
 
@@ -406,7 +454,7 @@ def generate_experiment_config():
     with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
     
-    print(f"✅ Generated: {config_file.name}")
+    print(f"Generated: {config_file.name}")
     return str(config_file)
 
 
@@ -417,32 +465,35 @@ def generate_experiment_config():
 def main():
     """Generate all test data for full-scale experiments."""
     print("=" * 60)
-    print("🔬 Full-Scale Experiment Data Generator")
+    print("Full-Scale Experiment Data Generator")
     print("=" * 60)
     
     # Ensure base directories exist
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     
     # Generate PDFs
-    print("\n📄 Generating Course Materials (PDFs)...")
+    print("\nGenerating Course Materials (PDFs)...")
     pdf_files = generate_pdfs()
     
     # Generate Learner Profiles
-    print("\n👤 Generating Learner Profiles...")
+    print("\nGenerating Learner Profiles...")
     profile_files = generate_profiles()
     
     # Generate Experiment Config
-    print("\n⚙️ Generating Experiment Configuration...")
+    print("\nGenerating Experiment Configuration...")
     config_file = generate_experiment_config()
     
     # Summary
     print("\n" + "=" * 60)
-    print("✅ Data Generation Complete!")
+    print("Data Generation Complete!")
     print("=" * 60)
-    print(f"📁 Output Directory: {DATA_DIR}")
-    print(f"📄 PDFs Generated: {len(pdf_files)}")
-    print(f"👤 Profiles Generated: {len(profile_files)}")
-    print(f"⚙️ Config File: {config_file}")
+    try:
+        print(f"Output Directory: {DATA_DIR}")
+    except UnicodeEncodeError:
+        print(f"Output Directory: {DATA_DIR.name}")
+    print(f"PDFs Generated: {len(pdf_files)}")
+    print(f"Profiles Generated: {len(profile_files)}")
+    print(f"Config File: {config_file}")
     print("\nNext Steps:")
     print("1. Run `python scripts/run_experiment.py` to execute the experiment")
     print("2. Check `data/experiments/` for generated outputs")

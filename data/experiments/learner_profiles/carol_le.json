@@ -1,5 +1,5 @@
 {
-  "learner_id": "70f4f5e6-0b96-4d45-b773-b6ab40f02717",
+  "learner_id": "8611f673-c069-44ab-82c8-ce8bfe6ce7be",
   "demographic": {
     "age": 19,
     "language": "vi",
@@ -34,8 +34,8 @@
   "engagement_score": 0.0,
   "mastery_progression": {},
   "version": 0,
-  "created_at": "2026-01-19T23:04:27.781482",
-  "last_updated": "2026-01-19T23:04:27.781482",
+  "created_at": "2026-01-20T23:33:03.553265",
+  "last_updated": "2026-01-20T23:33:03.553265",
   "last_updated_by": "system",
   "name": "Carol Le",
   "goal": "python_basics, python_functions",

@@ -1,5 +1,5 @@
 {
-  "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+  "learner_id": "e8809509-5b9e-499f-bd02-6316fa0c850a",
   "demographic": {
     "age": 22,
     "language": "vi",
@@ -34,8 +34,8 @@
   "engagement_score": 0.0,
   "mastery_progression": {},
   "version": 0,
-  "created_at": "2026-01-19T23:04:27.779433",
-  "last_updated": "2026-01-19T23:04:27.779433",
+  "created_at": "2026-01-20T23:33:03.551265",
+  "last_updated": "2026-01-20T23:33:03.551265",
   "last_updated_by": "system",
   "name": "Alice Nguyen",
   "goal": "sql_basics, sql_joins",

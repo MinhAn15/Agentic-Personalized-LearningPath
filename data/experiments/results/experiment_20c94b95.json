@@ -1,0 +1,417 @@
+{
+  "experiment_id": "20c94b95-73c7-499d-ad4b-c0de8c5b4dae",
+  "started_at": "2026-01-20T22:32:34.187277",
+  "config": {
+    "use_real_llm": true,
+    "learner_filter": "alice",
+    "use_baseline": true
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 1,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "doc_dca7a843",
+            "status": "COMMITTED",
+            "failed_chunks": [],
+            "chunking": {
+              "total_chunks": 5,
+              "total_words": 155,
+              "total_chars": 980,
+              "avg_words_per_chunk": 31.0,
+              "avg_chars_per_chunk": 196.0,
+              "min_chars": 93,
+              "max_chars": 335,
+              "chunk_types": {
+                "CONCEPT_INTRO": 2,
+                "EXPLANATION": 1,
+                "EXAMPLE": 0,
+                "PRACTICE": 1,
+                "SUMMARY": 1,
+                "TRANSITION": 0,
+                "MIXED": 0
+              }
+            },
+            "validation": {
+              "is_valid": true,
+              "total_nodes": 11,
+              "total_relationships": 11,
+              "valid_nodes": 11,
+              "valid_relationships": 11,
+              "error_count": 0,
+              "warning_count": 11,
+              "errors": [],
+              "warnings": [
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.core_concepts_of_introduction_to_machine_learning_with_scikit_learn' should be uppercase with underscores",
+                  "node_id": "machine_learning.core_concepts_of_introduction_to_machine_learning_with_scikit_learn",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.CORE_CONCEPTS_OF_INTRODUCTION_TO_MACHINE_LEARNING_WITH_SCIKIT_LEARN"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.applying_machine_learning_concepts' should be uppercase with underscores",
+                  "node_id": "machine_learning.applying_machine_learning_concepts",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.APPLYING_MACHINE_LEARNING_CONCEPTS"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.common_pitfalls_and_best_practices' should be uppercase with underscores",
+                  "node_id": "machine_learning.common_pitfalls_and_best_practices",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.COMMON_PITFALLS_AND_BEST_PRACTICES"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.data_preprocessing_and_cleaning' should be uppercase with underscores",
+                  "node_id": "machine_learning.data_preprocessing_and_cleaning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.DATA_PREPROCESSING_AND_CLEANING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.model_training_and_fitting' should be uppercase with underscores",
+                  "node_id": "machine_learning.model_training_and_fitting",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.MODEL_TRAINING_AND_FITTING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.model_evaluation_and_validation' should be uppercase with underscores",
+                  "node_id": "machine_learning.model_evaluation_and_validation",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.MODEL_EVALUATION_AND_VALIDATION"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.supervised_learning_algorithms' should be uppercase with underscores",
+                  "node_id": "machine_learning.supervised_learning_algorithms",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.SUPERVISED_LEARNING_ALGORITHMS"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.hyperparameter_tuning' should be uppercase with underscores",
+                  "node_id": "machine_learning.hyperparameter_tuning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.HYPERPARAMETER_TUNING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.feature_engineering_and_encoding' should be uppercase with underscores",
+                  "node_id": "machine_learning.feature_engineering_and_encoding",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.FEATURE_ENGINEERING_AND_ENCODING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.unsupervised_learning' should be uppercase with underscores",
+                  "node_id": "machine_learning.unsupervised_learning",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.UNSUPERVISED_LEARNING"
+                },
+                {
+                  "rule": "ID_FORMAT",
+                  "severity": "WARNING",
+                  "message": "ID 'machine_learning.model_deployment' should be uppercase with underscores",
+                  "node_id": "machine_learning.model_deployment",
+                  "relationship_id": null,
+                  "field": "concept_id",
+                  "suggested_fix": "MACHINE_LEARNING.MODEL_DEPLOYMENT"
+                }
+              ],
+              "info": []
+            },
+            "resolution": {
+              "resolved_concept_count": 11,
+              "resolved_relationship_count": 11,
+              "merges_performed": 0,
+              "stats": {
+                "raw_new_concepts": 11,
+                "internal_unique_concepts": 11,
+                "existing_concepts": 0,
+                "merged_to_existing": 0,
+                "truly_new_concepts": 11,
+                "total_resolved_concepts": 11,
+                "total_resolved_relationships": 11
+              },
+              "matches": []
+            },
+            "commit": {
+              "concepts_created": 11,
+              "relationships_created": 11,
+              "concept_batches": 1,
+              "relationship_batches": 4
+            },
+            "content_keywords": [
+              "Best Practices",
+              "Practical Application",
+              "Exercise Progression",
+              "Key Takeaways",
+              "Introduction to Machine Learning",
+              "Research Summary",
+              "References",
+              "Skill Development",
+              "Subtopic B",
+              "Machine Learning Introduction",
+              "Example Code",
+              "Problem-Solving Difficulty Levels",
+              "Scikit-Learn",
+              "Core Concepts",
+              "Subtopic A",
+              "Advanced Techniques",
+              "Foundational Understanding"
+            ]
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_profiler",
+            "learner_id": "user_e9f244461d08",
+            "profile": {
+              "learner_id": "user_e9f244461d08",
+              "name": "Learner",
+              "goal": "I want to learn sql_basics, sql_joins",
+              "topic": "SQL",
+              "purpose": "General learning",
+              "time_available": 30,
+              "learning_style": "READING",
+              "skill_level": "BEGINNER",
+              "prerequisites_met": []
+            },
+            "diagnostic": {
+              "completed": true,
+              "questions_asked": 5,
+              "initial_mastery": {
+                "SQL_SELECT_STATEMENTS": 0.2,
+                "SQL_DDL_DML": 0.18000000000000002,
+                "SQL_JOINS_GROUPS": 0.16000000000000003,
+                "SQL_SUBQUERIES_VIEWS": 0.13999999999999999,
+                "SQL_ADVANCED_CONSTRAINTS": 0.12
+              }
+            },
+            "recommendations": [
+              "Start with SQL Tutorial basics like SELECT and syntax[1]",
+              "Practice SQL joins using interactive examples[1][3]",
+              "Complete hands-on exercises on querying and table manipulation[2][5]"
+            ],
+            "estimated_hours": 20
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_planner",
+            "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+            "chain_mode": "FORWARD",
+            "learning_path": [
+              {
+                "day": 1,
+                "concept": "concept_python_variables",
+                "concept_name": "Python Variables",
+                "difficulty": 1,
+                "estimated_hours": 0.2,
+                "chain_mode": "TOT_GENERATED",
+                "recommended_type": "TUTORIAL"
+              }
+            ],
+            "pacing": "RELAXED",
+            "success_probability": 0.5680000000000001,
+            "total_estimated_hours": 0.2,
+            "resources": [
+              {
+                "concept": "concept_python_variables",
+                "primary_type": "TUTORIAL",
+                "recommended_resources": [
+                  {
+                    "type": "VIDEO",
+                    "priority": 1,
+                    "description": "Video tutorial on Python Variables"
+                  },
+                  {
+                    "type": "EXERCISE",
+                    "priority": 1,
+                    "description": "Practice exercises for Python Variables"
+                  },
+                  {
+                    "type": "ARTICLE",
+                    "priority": 3,
+                    "description": "Detailed article on Python Variables"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is the main purpose of Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "agent": "baseline",
+            "question": "What is the main purpose of Python Variables?",
+            "answer": "**The main purpose of Python variables is to store and manage data values in a program, allowing you to reference and manipulate them by name throughout your code.**\n\nIn Python, variables act as labeled containers for data like numbers, strings, or objects\u2014e.g., `example_variable = \"Hello, World!\"` assigns a string to `example_variable` for later use.[REFERENCE INFORMATION] This enables dynamic data handling in scripts, functions, and machine learning workflows like those in Scikit-Learn, where variables hold datasets, features (X), targets (y), models, and results.[1][3][5]",
+            "retrieved_context_snippets": [
+              "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n### 2.1 Subtopic A\nDetailed explanation of the first subtopic with examples.\n\n```\n# Example code or syntax\nexample_variable = \"Hello, World!\"\n```\n\n### 2.2 Subtopic B\nDetailed explanation of the second subtopic.",
+              "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n### 2.1 Subtopic A\nDetailed explanation of the first subtopic with examples.\n\n```\n# Example code or syntax\nexample_variable = \"Hello, World!\"\n```\n\n### 2.2 Subtopic B\nDetailed explanation of the second subtopic."
+            ],
+            "reasoning_traces": null,
+            "scaffold_type": "direct_answer",
+            "metadata": {
+              "architecture": "vanilla_rag",
+              "features_disabled": [
+                "cot",
+                "scaffolding",
+                "socratic",
+                "leakage_guard"
+              ],
+              "embedding_model": "BAAI/bge-small-en-v1.5"
+            },
+            "guidance": "**The main purpose of Python variables is to store and manage data values in a program, allowing you to reference and manipulate them by name throughout your code.**\n\nIn Python, variables act as labeled containers for data like numbers, strings, or objects\u2014e.g., `example_variable = \"Hello, World!\"` assigns a string to `example_variable` for later use.[REFERENCE INFORMATION] This enables dynamic data handling in scripts, functions, and machine learning workflows like those in Scikit-Learn, where variables hold datasets, features (X), targets (y), models, and results.[1][3][5]"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "Can you give me an example of using Python Variables?",
+          "concept_id": "concept_python_variables",
+          "result": {
+            "agent": "baseline",
+            "question": "Can you give me an example of using Python Variables?",
+            "answer": "Here's a simple example of using Python variables:\n\n```python\n# Assign a string to a variable\nexample_variable = \"Hello, World!\"\n\n# Print the variable\nprint(example_variable)\n```\n\nThis assigns the string `\"Hello, World!\"` to `example_variable` and prints it.[1]",
+            "retrieved_context_snippets": [
+              "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n### 2.1 Subtopic A\nDetailed explanation of the first subtopic with examples.\n\n```\n# Example code or syntax\nexample_variable = \"Hello, World!\"\n```\n\n### 2.2 Subtopic B\nDetailed explanation of the second subtopic.",
+              "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\n### 2.1 Subtopic A\nDetailed explanation of the first subtopic with examples.\n\n```\n# Example code or syntax\nexample_variable = \"Hello, World!\"\n```\n\n### 2.2 Subtopic B\nDetailed explanation of the second subtopic."
+            ],
+            "reasoning_traces": null,
+            "scaffold_type": "direct_answer",
+            "metadata": {
+              "architecture": "vanilla_rag",
+              "features_disabled": [
+                "cot",
+                "scaffolding",
+                "socratic",
+                "leakage_guard"
+              ],
+              "embedding_model": "BAAI/bge-small-en-v1.5"
+            },
+            "guidance": "Here's a simple example of using Python variables:\n\n```python\n# Assign a string to a variable\nexample_variable = \"Hello, World!\"\n\n# Print the variable\nprint(example_variable)\n```\n\nThis assigns the string `\"Hello, World!\"` to `example_variable` and prints it.[1]"
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "concept_id": "concept_python_variables",
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_python_variables",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-20T22:34:54.729615",
+  "metrics": {
+    "experiment_duration_seconds": 140.54284858703613,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 44862.088203430176,
+        "min_latency_ms": 44862.088203430176,
+        "max_latency_ms": 44862.088203430176
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 32595.53837776184,
+        "min_latency_ms": 32595.53837776184,
+        "max_latency_ms": 32595.53837776184
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.5350112915039062,
+        "min_latency_ms": 0.5350112915039062,
+        "max_latency_ms": 0.5350112915039062
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 3573.4418630599976,
+        "min_latency_ms": 2367.494583129883,
+        "max_latency_ms": 4779.389142990112
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.3148317337036133,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.6296634674072266
+      }
+    }
+  }
+}

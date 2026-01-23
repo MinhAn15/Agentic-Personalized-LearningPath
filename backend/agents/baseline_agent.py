@@ -3,7 +3,7 @@ Baseline Agent: Vanilla RAG without SOTA cognitive architectures.
 
 Purpose:
 - Serves as the control group for A/B testing against the 6-Agent system
-- Implements simple retrieval + generation without:
+- Implements simple retrieval (Vector Search) + generation without:
   - ToT (Tree of Thoughts)
   - CoT (Chain of Thought)
   - JudgeLM evaluation
@@ -14,8 +14,10 @@ This allows us to measure the value-add of each SOTA architecture.
 
 import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
+from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage, Settings
 from backend.core.llm_factory import LLMFactory
 from backend.config import get_settings
 
@@ -25,7 +27,7 @@ class BaselineAgent:
     Vanilla RAG Agent for baseline comparison.
     
     Architecture:
-    - Simple retrieval from vector store
+    - Standard Vector Search (Top-K)
     - Direct LLM generation without CoT
     - No memory management (stateless)
     - No multi-step planning (greedy single-step)
@@ -34,31 +36,77 @@ class BaselineAgent:
     def __init__(self, agent_id: str = "baseline"):
         self.agent_id = agent_id
         self.settings = get_settings()
-        self.llm = LLMFactory.get_llm()
         self.logger = logging.getLogger(f"BaselineAgent.{agent_id}")
+        
+        # Initialize LLM and Embeddings using Factory
+        self.llm = LLMFactory.get_llm()
+        self.embedding_model = LLMFactory.get_embedding_model()
+        
+        # Configure LlamaIndex Global Settings
+        Settings.llm = self.llm
+        Settings.embed_model = self.embedding_model
+        
+        # Load Vector Store Index
+        self.vector_index = self._load_vector_index()
+    
+    def _load_vector_index(self) -> Optional[VectorStoreIndex]:
+        """Load the persisted vector index from Knowledge Extraction phase."""
+        try:
+            storage_dir = os.path.join(os.getcwd(), "backend", "storage", "vector_store")
+            
+            if not os.path.exists(storage_dir) or not os.path.exists(os.path.join(storage_dir, "docstore.json")):
+                self.logger.warning(f"⚠️ Vector store not found at {storage_dir}. Knowledge Extraction must run first.")
+                return None
+                
+            self.logger.info(f"Loading vector index from {storage_dir}...")
+            storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
+            index = load_index_from_storage(storage_context)
+            self.logger.info("✅ Vector index loaded successfully.")
+            return index
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to load vector index: {e}")
+            return None
     
     async def answer_question(
         self,
         question: str,
-        context: Optional[str] = None,
-        learner_profile: Optional[Dict] = None
+        context_override: Optional[str] = None,
+        learner_profile: Optional[Dict] = None,
+        force_real: bool = False
     ) -> Dict[str, Any]:
         """
         Answer a question using simple RAG (no CoT, no scaffolding).
-        
-        Unlike TutorAgent:
-        - No hidden reasoning traces
-        - No Socratic questioning
-        - No leakage guard
-        - Direct answer generation
         """
-        self.logger.info(f"Answering question: {question[:50]}...")
+        self.logger.info(f"Answering question: {question}")
         
-        # Build simple prompt (no CoT)
-        prompt = self._build_simple_prompt(question, context, learner_profile)
+        # 1. Retrieval
+        retrieved_context = ""
+        retrieved_nodes = []
         
+        if self.vector_index:
+            try:
+                # Top-K = 3 for baseline
+                retriever = self.vector_index.as_retriever(similarity_top_k=3)
+                nodes = await retriever.aretrieve(question)
+                retrieved_nodes = [n.get_content() for n in nodes]
+                retrieved_context = "\n\n".join(retrieved_nodes)
+                self.logger.info(f"📚 Retrieved {len(nodes)} chunks for context.")
+            except Exception as e:
+                self.logger.error(f"Retrieval failed: {e}")
+        
+        # Allow override for testing
+        final_context = context_override or retrieved_context
+        
+        # 2. Build Prompt
+        prompt = self._build_simple_prompt(question, final_context, learner_profile)
+        
+        # 3. Generation
         try:
-            if self.settings.MOCK_LLM:
+            # Use mock if configured AND formatted not forced to real
+            use_mock = self.settings.MOCK_LLM and not force_real
+            
+            if use_mock:
                 response = self._mock_response(question)
             else:
                 response = await self.llm.acomplete(prompt)
@@ -68,11 +116,13 @@ class BaselineAgent:
                 "agent": "baseline",
                 "question": question,
                 "answer": response,
+                "retrieved_context_snippets": retrieved_nodes[:2], # Return top 2 snippets for debug
                 "reasoning_traces": None,  # No CoT
-                "scaffold_type": "direct_answer",  # No scaffolding
+                "scaffold_type": "direct_answer",
                 "metadata": {
                     "architecture": "vanilla_rag",
                     "features_disabled": ["cot", "scaffolding", "socratic", "leakage_guard"],
+                    "embedding_model": self.embedding_model.model_name
                 }
             }
             
@@ -84,41 +134,41 @@ class BaselineAgent:
         self,
         learner_response: str,
         expected_answer: str,
-        concept_id: str = None
+        concept_id: str = None,
+        force_real: bool = False
     ) -> Dict[str, Any]:
         """
         Evaluate response using simple scoring (no JudgeLM).
-        
-        Unlike EvaluatorAgent:
-        - No reference-as-prior
-        - No CoT grading trace
-        - Simple similarity-based scoring
         """
         self.logger.info("Evaluating response with simple scoring...")
         
-        # Simple prompt for evaluation
         prompt = f"""
-Rate the following learner response on a scale of 0-100.
+Rate the following learner response on a scale of 0-100 based on the expected answer.
 
 Expected Answer: {expected_answer}
 Learner Response: {learner_response}
 
-Respond with only a number (0-100).
+Respond with strictly following format:
+SCORE: <number 0-100>
+JUSTIFICATION: <1 sentence>
 """
         
         try:
-            if self.settings.MOCK_LLM:
-                score = 65  # Mock score
+            use_mock = self.settings.MOCK_LLM and not force_real
+            
+            if use_mock:
+                score = 65
+                justification = "Mock justification"
             else:
                 response = await self.llm.acomplete(prompt)
-                response_text = response.text if hasattr(response, 'text') else str(response)
-                score = self._extract_score(response_text)
+                text = response.text if hasattr(response, 'text') else str(response)
+                score, justification = self._parse_evaluation(text)
             
             return {
                 "agent": "baseline",
                 "score": score,
-                "justification": None,  # No JudgeLM trace
-                "rubric_breakdown": None,  # No multi-dimensional scoring
+                "justification": justification,
+                "rubric_breakdown": None,
                 "metadata": {
                     "architecture": "simple_similarity",
                     "features_disabled": ["judgelm", "cot_grading", "rubric_scoring"],
@@ -129,40 +179,9 @@ Respond with only a number (0-100).
             self.logger.error(f"Error evaluating: {e}")
             return {"error": str(e)}
     
-    async def plan_next_lesson(
-        self,
-        learner_id: str,
-        available_concepts: List[str],
-        mastery_map: Dict[str, float]
-    ) -> Dict[str, Any]:
-        """
-        Plan next lesson using greedy selection (no ToT).
-        
-        Unlike PathPlannerAgent:
-        - No beam search
-        - No multi-step lookahead
-        - Greedy: pick lowest mastery concept
-        """
-        self.logger.info(f"Planning next lesson for {learner_id} (greedy)...")
-        
-        # Greedy: select concept with lowest mastery
-        if not available_concepts:
-            return {"next_concept": None, "reason": "No concepts available"}
-        
-        concept_scores = {c: mastery_map.get(c, 0.0) for c in available_concepts}
-        next_concept = min(concept_scores, key=concept_scores.get)
-        
-        return {
-            "agent": "baseline",
-            "next_concept": next_concept,
-            "selection_method": "greedy_lowest_mastery",
-            "lookahead_depth": 0,  # No ToT
-            "beam_width": 1,  # Single path
-            "metadata": {
-                "architecture": "greedy",
-                "features_disabled": ["tot", "beam_search", "state_evaluator"],
-            }
-        }
+    # ------------------------------------------------------------------------
+    # Internal Helpers
+    # ------------------------------------------------------------------------
     
     def _build_simple_prompt(
         self,
@@ -171,64 +190,36 @@ Respond with only a number (0-100).
         profile: Optional[Dict]
     ) -> str:
         """Build a simple prompt without CoT instructions."""
-        parts = ["Answer the following question directly and concisely."]
+        parts = []
+        parts.append("You are a helpful teaching assistant. Answer the question directly and concisely.")
         
         if context:
-            parts.append(f"\nContext:\n{context}")
+            parts.append(f"\nREFERENCE INFORMATION:\n{context}")
         
-        parts.append(f"\nQuestion: {question}")
-        parts.append("\nAnswer:")
+        if profile:
+            name = profile.get("name", "Learner")
+            parts.append(f"\nStudent Name: {name}")
+        
+        parts.append(f"\nQUESTION: {question}")
+        parts.append("\nANSWER:")
         
         return "\n".join(parts)
     
     def _mock_response(self, question: str) -> str:
-        """Generate mock response for testing."""
         return f"[BASELINE MOCK] Answer to: {question[:50]}..."
     
-    def _extract_score(self, text: str) -> int:
-        """Extract numeric score from LLM response."""
+    def _parse_evaluation(self, text: str):
+        """Simple parse of SCORE: X and JUSTIFICATION: Y"""
         import re
-        numbers = re.findall(r'\d+', text)
-        if numbers:
-            score = int(numbers[0])
-            return min(100, max(0, score))
-        return 50  # Default
-
-
-# =============================================
-# COMPARISON UTILITIES
-# =============================================
-
-async def compare_responses(
-    question: str,
-    context: str,
-    baseline_agent: BaselineAgent,
-    tutor_agent  # TutorAgent instance
-) -> Dict[str, Any]:
-    """
-    Run the same question through both agents for comparison.
-    Returns structured comparison data.
-    """
-    from backend.models.schemas import TutorInput
-    
-    # Baseline response
-    baseline_result = await baseline_agent.answer_question(question, context)
-    
-    # SOTA response (TutorAgent with CoT)
-    tutor_input = TutorInput(
-        learner_id="comparison_learner",
-        question=question,
-        concept_id="comparison_concept",
-        force_real=True
-    )
-    sota_result = await tutor_agent.execute(tutor_input=tutor_input)
-    
-    return {
-        "question": question,
-        "baseline": baseline_result,
-        "sota": sota_result,
-        "comparison": {
-            "baseline_has_cot": baseline_result.get("reasoning_traces") is not None,
-            "sota_has_cot": sota_result.get("cot_traces") is not None,
-        }
-    }
+        score = 50
+        justification = "Could not parse"
+        
+        s_match = re.search(r"SCORE:\s*(\d+)", text, re.IGNORECASE)
+        if s_match:
+            score = int(s_match.group(1))
+            
+        j_match = re.search(r"JUSTIFICATION:\s*(.+)", text, re.IGNORECASE)
+        if j_match:
+            justification = j_match.group(1).strip()
+            
+        return score, justification

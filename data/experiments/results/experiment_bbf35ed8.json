@@ -1,0 +1,231 @@
+{
+  "experiment_id": "bbf35ed8-ffea-47d5-b044-aaf94f48e36a",
+  "started_at": "2026-01-20T21:55:49.595019",
+  "config": {
+    "use_real_llm": true,
+    "learner_filter": "alice"
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 1,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "doc_e2ec96a2",
+            "status": "COMMITTED",
+            "failed_chunks": [],
+            "chunking": {
+              "total_chunks": 1,
+              "total_words": 179,
+              "total_chars": 1142,
+              "avg_words_per_chunk": 179.0,
+              "avg_chars_per_chunk": 1142.0,
+              "min_chars": 1142,
+              "max_chars": 1142,
+              "chunk_types": {
+                "CONCEPT_INTRO": 0,
+                "EXPLANATION": 0,
+                "EXAMPLE": 0,
+                "PRACTICE": 0,
+                "SUMMARY": 0,
+                "TRANSITION": 0,
+                "MIXED": 1
+              }
+            },
+            "validation": {
+              "is_valid": true,
+              "total_nodes": 0,
+              "total_relationships": 0,
+              "valid_nodes": 0,
+              "valid_relationships": 0,
+              "error_count": 0,
+              "warning_count": 0,
+              "errors": [],
+              "warnings": [],
+              "info": []
+            },
+            "resolution": {
+              "resolved_concept_count": 0,
+              "resolved_relationship_count": 0,
+              "merges_performed": 0,
+              "stats": {
+                "raw_new_concepts": 0,
+                "internal_unique_concepts": 0,
+                "existing_concepts": 0,
+                "merged_to_existing": 0,
+                "truly_new_concepts": 0,
+                "total_resolved_concepts": 0,
+                "total_resolved_relationships": 0
+              },
+              "matches": []
+            },
+            "commit": {
+              "concepts_created": 0,
+              "relationships_created": 0,
+              "concept_batches": 0,
+              "relationship_batches": 0
+            },
+            "content_keywords": []
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": false,
+            "error": "Error code: 400 - {'error': {'message': \"Invalid model 'llama-3.1-sonar-large-128k-online'. Permitted models can be found in the documentation at https://docs.perplexity.ai/getting-started/models.\", 'type': 'invalid_model', 'code': 400}}"
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": true,
+            "agent_id": "exp_planner",
+            "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+            "chain_mode": "FORWARD",
+            "learning_path": [
+              {
+                "day": 1,
+                "concept": "concept_python_variables",
+                "concept_name": "Python Variables",
+                "difficulty": 1,
+                "estimated_hours": 0.2,
+                "chain_mode": "TOT_GENERATED",
+                "recommended_type": "TUTORIAL"
+              }
+            ],
+            "pacing": "RELAXED",
+            "success_probability": 0.5680000000000001,
+            "total_estimated_hours": 0.2,
+            "resources": [
+              {
+                "concept": "concept_python_variables",
+                "primary_type": "TUTORIAL",
+                "recommended_resources": [
+                  {
+                    "type": "VIDEO",
+                    "priority": 1,
+                    "description": "Video tutorial on Python Variables"
+                  },
+                  {
+                    "type": "EXERCISE",
+                    "priority": 1,
+                    "description": "Practice exercises for Python Variables"
+                  },
+                  {
+                    "type": "ARTICLE",
+                    "priority": 3,
+                    "description": "Detailed article on Python Variables"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is a SQL JOIN?",
+          "result": {
+            "success": false,
+            "error": "Error code: 400 - {'error': {'message': \"Invalid model 'llama-3.1-sonar-large-128k-online'. Permitted models can be found in the documentation at https://docs.perplexity.ai/getting-started/models.\", 'type': 'invalid_model', 'code': 400}}",
+            "agent_id": "exp_tutor"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "How do I use GROUP BY?",
+          "result": {
+            "success": false,
+            "error": "Error code: 400 - {'error': {'message': \"Invalid model 'llama-3.1-sonar-large-128k-online'. Permitted models can be found in the documentation at https://docs.perplexity.ai/getting-started/models.\", 'type': 'invalid_model', 'code': 400}}",
+            "agent_id": "exp_tutor"
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_0",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "result": {
+            "success": false,
+            "error": "Concept not found: concept_1",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-20T21:56:04.375199",
+  "metrics": {
+    "experiment_duration_seconds": 14.780179738998413,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 4138.1590366363525,
+        "min_latency_ms": 4138.1590366363525,
+        "max_latency_ms": 4138.1590366363525
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 688.1880760192871,
+        "min_latency_ms": 688.1880760192871,
+        "max_latency_ms": 688.1880760192871
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 583.1195116043091,
+        "min_latency_ms": 345.72434425354004,
+        "max_latency_ms": 820.5146789550781
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.9889602661132812,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 1.9779205322265625
+      }
+    }
+  }
+}

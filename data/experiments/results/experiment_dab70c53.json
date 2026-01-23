@@ -1,0 +1,254 @@
+{
+  "experiment_id": "dab70c53-d615-4417-8b70-eb4be3faba19",
+  "started_at": "2026-01-19T23:27:45.004019",
+  "config": {
+    "use_real_llm": false,
+    "learner_filter": "alice"
+  },
+  "phases": {
+    "1_knowledge_extraction": {
+      "extracted_count": 3,
+      "items": [
+        {
+          "filename": "10_machine_learning.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "mock_doc_1e240ecf",
+            "concepts_extracted": 1,
+            "message": "Mock extraction successful (Populated concept_python_variables)"
+          }
+        },
+        {
+          "filename": "1_sql_basics.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "mock_doc_a0990042",
+            "concepts_extracted": 1,
+            "message": "Mock extraction successful (Populated concept_python_variables)"
+          }
+        },
+        {
+          "filename": "2_sql_joins.md",
+          "result": {
+            "success": true,
+            "agent_id": "exp_ke_agent",
+            "document_id": "mock_doc_05ce9156",
+            "concepts_extracted": 1,
+            "message": "Mock extraction successful (Populated concept_python_variables)"
+          }
+        }
+      ]
+    },
+    "2_profiling": {
+      "profiled_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": {
+              "learner_id": "demo_learner_01",
+              "name": {
+                "learner_id": "demo_learner_01",
+                "demographic": {},
+                "learning_goal": [
+                  "Master Python"
+                ],
+                "learning_style": "VISUAL",
+                "skill_level": "BEGINNER",
+                "available_time": 30,
+                "preferences": {
+                  "pace": "medium",
+                  "verbosity": "normal",
+                  "hint_level": 2,
+                  "difficulty_next": "MEDIUM"
+                },
+                "constraints": {
+                  "blackout_hours": [],
+                  "priority_skills": []
+                },
+                "interest_tags": {},
+                "concept_mastery_map": {},
+                "completed_concepts": [],
+                "error_patterns": [],
+                "session_history": [],
+                "interaction_log": [],
+                "artifact_ids": [],
+                "avg_mastery_level": 0.0,
+                "learning_velocity": 0.0,
+                "engagement_score": 0.0,
+                "mastery_progression": {},
+                "version": 0,
+                "created_at": "2026-01-19T23:27:59.305129",
+                "last_updated": "2026-01-19T23:27:59.305129",
+                "last_updated_by": "system",
+                "name": "MockUser",
+                "goal": "Learn Python",
+                "time_available": 30,
+                "preferred_learning_style": "VISUAL",
+                "current_skill_level": "BEGINNER",
+                "current_mastery": [],
+                "prerequisites_met": []
+              }
+            },
+            "agent_id": "exp_profiler",
+            "result": {
+              "learner_id": "demo_learner_01",
+              "profile": {
+                "learner_id": "demo_learner_01",
+                "demographic": {},
+                "learning_goal": [
+                  "Master Python"
+                ],
+                "learning_style": "VISUAL",
+                "skill_level": "BEGINNER",
+                "available_time": 30,
+                "preferences": {
+                  "pace": "medium",
+                  "verbosity": "normal",
+                  "hint_level": 2,
+                  "difficulty_next": "MEDIUM"
+                },
+                "constraints": {
+                  "blackout_hours": [],
+                  "priority_skills": []
+                },
+                "interest_tags": {},
+                "concept_mastery_map": {},
+                "completed_concepts": [],
+                "error_patterns": [],
+                "session_history": [],
+                "interaction_log": [],
+                "artifact_ids": [],
+                "avg_mastery_level": 0.0,
+                "learning_velocity": 0.0,
+                "engagement_score": 0.0,
+                "mastery_progression": {},
+                "version": 0,
+                "created_at": "2026-01-19T23:27:59.305129",
+                "last_updated": "2026-01-19T23:27:59.305129",
+                "last_updated_by": "system",
+                "name": "MockUser",
+                "goal": "Learn Python",
+                "time_available": 30,
+                "preferred_learning_style": "VISUAL",
+                "current_skill_level": "BEGINNER",
+                "current_mastery": [],
+                "prerequisites_met": []
+              }
+            }
+          }
+        }
+      ]
+    },
+    "3_path_planning": {
+      "paths_count": 1,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "name": "Alice Nguyen",
+          "result": {
+            "success": false,
+            "error": "'LearnerProfile' object has no attribute 'get'",
+            "agent_id": "exp_planner"
+          }
+        }
+      ]
+    },
+    "4_tutoring": {
+      "sessions_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 1,
+          "question": "What is a SQL JOIN?",
+          "result": {
+            "success": true,
+            "guidance": "Create a probing question about None based on 'None'? (Mock)",
+            "current_phase": "EXPLANATION",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "session": 2,
+          "question": "How do I use GROUP BY?",
+          "result": {
+            "success": true,
+            "guidance": "Create a probing question about None based on 'None'? (Mock)",
+            "current_phase": "QUESTIONING",
+            "hint_level": 1,
+            "source": "Socratic Tutor"
+          }
+        }
+      ]
+    },
+    "5_evaluation": {
+      "evaluations_count": 2,
+      "items": [
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 1,
+          "result": {
+            "success": false,
+            "error": "learner_id, concept_id, learner_response required",
+            "agent_id": "exp_evaluator"
+          }
+        },
+        {
+          "learner_id": "ea18d179-9510-4858-89b7-50307bb9d996",
+          "response_num": 2,
+          "result": {
+            "success": false,
+            "error": "learner_id, concept_id, learner_response required",
+            "agent_id": "exp_evaluator"
+          }
+        }
+      ]
+    }
+  },
+  "completed_at": "2026-01-19T23:27:59.954913",
+  "metrics": {
+    "experiment_duration_seconds": 14.950894355773926,
+    "agents": {
+      "knowledge_extraction": {
+        "total_calls": 3,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.4311402638753255,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 1.2934207916259766
+      },
+      "profiler": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 1.6210079193115234,
+        "min_latency_ms": 1.6210079193115234,
+        "max_latency_ms": 1.6210079193115234
+      },
+      "path_planner": {
+        "total_calls": 1,
+        "success_rate": 1.0,
+        "avg_latency_ms": 2.585887908935547,
+        "min_latency_ms": 2.585887908935547,
+        "max_latency_ms": 2.585887908935547
+      },
+      "tutor": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      },
+      "evaluator": {
+        "total_calls": 2,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.0,
+        "min_latency_ms": 0.0,
+        "max_latency_ms": 0.0
+      }
+    }
+  }
+}

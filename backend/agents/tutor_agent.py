@@ -99,14 +99,22 @@ class TutorAgent(BaseAgent):
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Main execution method."""
         try:
-            learner_id = kwargs.get("learner_id")
-            question = kwargs.get("question")
-            concept_id = kwargs.get("concept_id")
-            # Force Real Mode override
-            force_real = kwargs.get("force_real", False)
-            
+            # FIX: Support object-based input
+            tutor_input = kwargs.get("tutor_input")
+            if tutor_input:
+                learner_id = tutor_input.learner_id
+                question = tutor_input.question
+                concept_id = tutor_input.concept_id
+                force_real = tutor_input.force_real
+                hint_level = tutor_input.hint_level
+            else:
+                learner_id = kwargs.get("learner_id")
+                question = kwargs.get("question")
+                concept_id = kwargs.get("concept_id")
+                force_real = kwargs.get("force_real", False)
+                hint_level = kwargs.get("hint_level", 0)
+
             # FIX: Validate hint_level range (0-4)
-            hint_level = kwargs.get("hint_level", 0)
             hint_level = min(4, max(0, int(hint_level)))  # Clamp to valid range
             
             # Conversation history check
@@ -130,47 +138,18 @@ class TutorAgent(BaseAgent):
                     "action": "HANDOFF_TO_EVALUATOR"
                 }
 
-            # 3. Determine Response Strategy based on Phase
-            response_text = ""
+            # 3. Determine Response Strategy based on Phase (Method Ontology)
+            # Source: Chandrasekaran et al. (1999) "Ontologies for Task Method Structures"
+            response_text = await self._determine_socratic_state(
+                state=state,
+                question=question,
+                conversation_history=conversation_history,
+                force_real=force_real
+            )
             
-            if state.phase == DialoguePhase.EXPLANATION:
-                # Use Standard Prompting for lightweight phases
-                response_text = await self._generate_probing_question(question, state, force_real=force_real)
-                # Heuristic transition: If student answers probe, check advancement
-                if state.should_advance_phase():
-                    state.advance_phase()
-                    
-            elif state.phase == DialoguePhase.QUESTIONING:
-                # -------------------------------------------------------------
-                # DYNAMIC CoT SCAFFOLDING (Wei 2022) with Slicing Logic
-                # -------------------------------------------------------------
-                
-                # Check if we already have an active trace for this concept/misconception
-                if not state.current_cot_trace:
-                     # Generate NEW Hidden CoT Traces
-                     traces = await self._generate_cot_traces(question, conversation_history, concept_id, force_real=force_real)
-                     best_trace = self._check_consensus(traces)
-                     
-                     if best_trace:
-                         # SLICING LOGIC: Split trace into scaffolding steps
-                         # We expect the trace to be formatted as "1. ... 2. ... 3. ..." or similar.
-                         # We'll split by newlines or numbered lists.
-                         steps = self._slice_cot_trace(best_trace)
-                         state.current_cot_trace = steps
-                         state.cot_step_index = 0
-                     else:
-                         # Fallback if CoT fails
-                         response_text = "Could you break that down into smaller steps?"
-                
-                # Serve the next step in the trace
-                if state.current_cot_trace and state.cot_step_index < len(state.current_cot_trace):
-                    raw_step = state.current_cot_trace[state.cot_step_index]
-                    response_text = self._format_scaffold_step(raw_step, state.cot_step_index)
-                    state.cot_step_index += 1
-                else:
-                    # Trace finished, check if understanding is clear? 
-                    # For now, generic prompt.
-                    response_text = "How does that explanation feel? Do you see how the pieces fit?"
+            # Check for phase advancement after response
+            if state.phase == DialoguePhase.EXPLANATION and state.should_advance_phase():
+                state.advance_phase()
 
 
             # 4. Update Interaction Log
@@ -191,6 +170,83 @@ class TutorAgent(BaseAgent):
                 "error": str(e),
                 "agent_id": self.agent_id
             }
+
+    async def _determine_socratic_state(
+        self,
+        state: DialogueState,
+        question: str,
+        conversation_history: List[Dict] = None,
+        force_real: bool = False
+    ) -> str:
+        """
+        Determine the current Socratic state and generate appropriate response.
+        
+        This method implements the Method Ontology (Chandrasekaran et al., 1999)
+        combined with Dynamic Chain-of-Thought (Wei et al., 2022).
+        
+        State Machine:
+        - EXPLANATION: Lightweight probing questions
+        - QUESTIONING: Dynamic CoT with scaffolding
+        - PRACTICE: Guided exercises (future)
+        - ASSESSMENT: Handoff to Evaluator
+        
+        Args:
+            state: Current DialogueState
+            question: Student's question
+            conversation_history: Previous turns
+            force_real: Bypass mock mode
+            
+        Returns:
+            Response text appropriate for the current phase
+        """
+        response_text = ""
+        
+        if state.phase == DialoguePhase.EXPLANATION:
+            # PHASE 1: Lightweight prompting for initial understanding
+            response_text = await self._generate_probing_question(
+                question, state, force_real=force_real
+            )
+            
+        elif state.phase == DialoguePhase.QUESTIONING:
+            # PHASE 2: Dynamic CoT Scaffolding (Wei 2022)
+            # Check if we already have an active trace for this concept
+            if not state.current_cot_trace:
+                # Generate NEW Hidden CoT Traces
+                traces = await self._generate_cot_traces(
+                    question, 
+                    conversation_history or [],
+                    state.concept_id,
+                    force_real=force_real
+                )
+                best_trace = self._check_consensus(traces)
+                
+                if best_trace:
+                    # SLICING LOGIC: Split trace into scaffolding steps
+                    steps = self._slice_cot_trace(best_trace)
+                    state.current_cot_trace = steps
+                    state.cot_step_index = 0
+                else:
+                    # Fallback if CoT fails
+                    response_text = "Could you break that down into smaller steps?"
+            
+            # Serve the next step in the trace
+            if state.current_cot_trace and state.cot_step_index < len(state.current_cot_trace):
+                raw_step = state.current_cot_trace[state.cot_step_index]
+                response_text = self._format_scaffold_step(raw_step, state.cot_step_index)
+                state.cot_step_index += 1
+            elif not response_text:
+                # Trace finished
+                response_text = "How does that explanation feel? Do you see how the pieces fit?"
+                
+        elif state.phase == DialoguePhase.PRACTICE:
+            # PHASE 3: Guided Practice (future implementation)
+            response_text = "Let's try a practice problem to solidify your understanding."
+            
+        # Default fallback
+        if not response_text:
+            response_text = "I'm here to help. Can you tell me more about what's confusing?"
+            
+        return response_text
 
     async def _generate_probing_question(self, question: str, state: DialogueState, force_real: bool = False) -> str:
         """Lightweight prompt for Intro/Probing phases"""
