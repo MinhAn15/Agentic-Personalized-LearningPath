@@ -1,0 +1,43 @@
+{
+  "rubric_id": "binary_search_rubric",
+  "rubric_name": "Binary Search Assessment Rubric",
+  "grading_criteria": [
+    {
+      "criterion": "Hiểu khái niệm",
+      "weight": 0.3,
+      "descriptors": {
+        "4": "Giải thích được tại sao binary search hoạt động và khi nào dùng",
+        "3": "Hiểu khái niệm cơ bản nhưng thiếu chi tiết",
+        "2": "Hiểu một phần, còn nhiều lỗ hổng",
+        "1": "Hiểu sai cơ bản"
+      }
+    },
+    {
+      "criterion": "Implementation đúng",
+      "weight": 0.5,
+      "descriptors": {
+        "4": "Code pass tất cả test cases, xử lý edge cases",
+        "3": "Code pass hầu hết tests, có vài lỗi nhỏ với edge cases",
+        "2": "Code pass một số tests, có lỗi lớn",
+        "1": "Code không chạy hoặc sai hoàn toàn"
+      }
+    },
+    {
+      "criterion": "Khả năng giải quyết vấn đề",
+      "weight": 0.2,
+      "descriptors": {
+        "4": "Áp dụng được vào bài toán mới, debug hiệu quả",
+        "3": "Có thể áp dụng với gợi ý, debug cơ bản",
+        "2": "Gặp khó khăn khi áp dụng",
+        "1": "Không áp dụng được vào context mới"
+      }
+    }
+  ],
+  "overall_scale": {
+    "90-100": "Thành thạo - Sẵn sàng học advanced topics",
+    "80-89": "Giỏi - Hiểu vững",
+    "70-79": "Khá - Chấp nhận được nhưng cần luyện thêm",
+    "60-69": "Đang phát triển - Còn nhiều lỗ hổng",
+    "0-59": "Bắt đầu - Cần học lại"
+  }
+}

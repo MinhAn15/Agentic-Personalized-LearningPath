@@ -1,0 +1,39 @@
+{
+  "test_id": "binary_search_retention",
+  "test_name": "Binary Search Retention Test",
+  "difficulty": "medium",
+  "time_limit_minutes": 20,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "coding",
+      "question": "Implement binary_search() cho sorted array. Xử lý edge cases.",
+      "template": "def binary_search(arr, target):\n    pass",
+      "test_cases": [
+        {
+          "input": { "arr": [1, 3, 5, 7, 9, 11, 13], "target": 7 },
+          "expected": 3
+        },
+        { "input": { "arr": [2, 4, 6, 8], "target": 5 }, "expected": -1 }
+      ],
+      "points": 50
+    },
+    {
+      "id": "q2",
+      "type": "application",
+      "question": "Bạn có 1 triệu số điện thoại đã sắp xếp. Dùng binary search, cần khoảng bao nhiêu lần tra cứu?",
+      "options": ["~20", "~500,000", "~1,000,000", "~10"],
+      "correct_answer": "~20",
+      "explanation": "log2(1,000,000) ≈ 20",
+      "points": 30
+    },
+    {
+      "id": "q3",
+      "type": "debugging",
+      "question": "Tìm bug trong code binary search này.",
+      "correct_answer": "left = mid + 1 chứ không phải left = mid để tránh infinite loop",
+      "points": 20
+    }
+  ],
+  "total_points": 100
+}

@@ -140,6 +140,11 @@ app.include_router(tutor_router)
 app.include_router(evaluator_router)
 app.include_router(kag_router)
 
+from backend.api.admin_routes import router as admin_router
+app.include_router(admin_router)
+from backend.api.learner_routes import router as learner_router
+app.include_router(learner_router)
+
 # ============= HEALTH ENDPOINTS =============
 
 @app.get("/health")

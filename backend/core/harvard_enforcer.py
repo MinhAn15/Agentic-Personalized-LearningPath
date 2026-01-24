@@ -1,258 +1,298 @@
-"""
-Harvard 7 Principles Enforcer for Tutor Agent.
-
-Per THESIS Section 3.5.x, implements:
-1. Active Learning - NO direct answers, YES probing questions
-2. Cognitive Load - MAX 2-4 sentences (5-6 for ASSESSMENT)
-3. One Step at a Time - Wait before next reveal
-4. Personalization - Reference learning style
-5. Self-Thinking - Probing: "Why?", "What if?", "Can you?"
-6. Growth Mindset - "Good attempt!" NOT "That's wrong"
-7. Personalized Feedback - Address specific misconceptions
-"""
-
-import logging
+from enum import Enum
+from typing import Dict, Any, Optional
 import re
-from typing import Dict, Optional, List
+import logging
 
 logger = logging.getLogger(__name__)
 
+class HarvardPrinciple(Enum):
+    ACTIVE_LEARNING = "active_learning"
+    COGNITIVE_LOAD = "cognitive_load"
+    SCAFFOLDING = "scaffolding"
+    REFLECTION = "reflection"
+    GROWTH_MINDSET = "growth_mindset"
+    PERSONALIZED_FEEDBACK = "personalized_feedback"
+    MISCONCEPTION_HANDLING = "misconception_handling"
 
 class Harvard7Enforcer:
     """
-    Enforce Harvard 7 Principles on tutor responses.
+    Enforces all 7 Harvard pedagogical principles in LLM-generated responses.
     
-    Purpose: Ensure pedagogically sound responses that promote
-    active learning and minimize cognitive overload.
+    Based on: Kestin et al. (2025), "AI tutoring outperforms in-class active learning"
+    
+    PRINCIPLES:
+    1. Encourage active learning (student does cognitive work)
+    2. Manage cognitive load (avoid overwhelming)
+    3. Go step-by-step (scaffolding)
+    4. Encourage reflection (thinking, not answers)
+    5. Cultivate growth mindset (effort → improvement)
+    6. Give personalized feedback (specific to student state)
+    7. Manage misconceptions (address specific errors)
     """
     
-    # Cognitive load limits (sentences)
-    MAX_SENTENCES_NORMAL = 4
-    MAX_SENTENCES_ASSESSMENT = 6
+    def __init__(self, config=None):
+        self.config = config or {}
+        self.enforcement_scores = {}
     
-    # Direct answer patterns to remove
-    DIRECT_ANSWER_PATTERNS = [
-        r"the answer is",
-        r"the correct answer",
-        r"you should know that",
-        r"the solution is",
-        r"here's the answer",
-        r"simply put,? it is"
-    ]
-    
-    # Growth mindset replacements
-    GROWTH_MINDSET_REPLACEMENTS = {
-        "wrong": "interesting attempt - let's think differently",
-        "incorrect": "great effort! Let's refine",
-        "mistake": "learning opportunity",
-        "failed": "made progress toward",
-        "don't understand": "are still exploring",
-        "can't": "are learning to"
-    }
-    
-    # Probing question templates
-    PROBING_QUESTIONS = [
-        "Why do you think that?",
-        "What would happen if...?",
-        "Can you think of an example?",
-        "How does this connect to what we learned before?",
-        "What's your reasoning here?"
-    ]
-    
-    def __init__(self):
-        self.logger = logging.getLogger(f"{__name__}.Harvard7Enforcer")
-    
-    def enforce(
-        self, 
-        response: str, 
-        learner_context: Dict, 
-        phase: str, 
-        misconception: Optional[Dict] = None
-    ) -> str:
+    def enforce_all_principles(
+        self,
+        response: str,
+        learner_profile: Dict[str, Any],
+        recent_error: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Apply all 7 Harvard principles to response.
-        
-        Args:
-            response: Raw LLM response
-            learner_context: {learning_style, mastery_level, etc}
-            phase: Current dialogue phase
-            misconception: Detected misconception if any
-        
-        Returns:
-            Enforced response
-        """
-        enforced = response
-        
-        # 1. Remove direct answers (Active Learning)
-        enforced = self._remove_direct_answers(enforced)
-        
-        # 2. Limit cognitive load
-        enforced = self._limit_cognitive_load(enforced, phase)
-        
-        # 3. Add probing questions (Self-Thinking)
-        enforced = self._add_probing_questions(enforced)
-        
-        # 4. Apply growth mindset language
-        enforced = self._add_growth_mindset_language(enforced)
-        
-        # 5. Personalize to learning style
-        learning_style = learner_context.get('learning_style', 'VISUAL')
-        enforced = self._personalize_to_style(enforced, learning_style)
-        
-        # 6. Address misconception if detected
-        if misconception:
-            enforced = self._address_misconception(enforced, misconception)
-        
-        return enforced.strip()
-    
-    def _remove_direct_answers(self, response: str) -> str:
-        """
-        Principle 1: Active Learning
-        Replace direct answers with guiding prompts.
-        """
-        result = response
-        
-        for pattern in self.DIRECT_ANSWER_PATTERNS:
-            # Case-insensitive replacement
-            result = re.sub(
-                pattern, 
-                "Let's think about this -", 
-                result, 
-                flags=re.IGNORECASE
-            )
-        
-        return result
-    
-    def _limit_cognitive_load(self, response: str, phase: str) -> str:
-        """
-        Principle 2: Cognitive Load
-        Limit to 2-4 sentences (5-6 for ASSESSMENT).
-        """
-        max_sentences = (
-            self.MAX_SENTENCES_ASSESSMENT 
-            if phase == 'ASSESSMENT' 
-            else self.MAX_SENTENCES_NORMAL
-        )
-        
-        # Split by sentence endings
-        sentences = re.split(r'(?<=[.!?])\s+', response)
-        
-        if len(sentences) > max_sentences:
-            sentences = sentences[:max_sentences]
-            # Ensure proper ending
-            result = ' '.join(sentences)
-            if not result.endswith(('.', '!', '?')):
-                result += '.'
-            return result
-        
-        return response
-    
-    def _add_probing_questions(self, response: str) -> str:
-        """
-        Principle 5: Self-Thinking
-        Ensure response includes a probing question.
-        """
-        if '?' not in response:
-            # Add a contextual probing question
-            import random
-            question = random.choice(self.PROBING_QUESTIONS[:3])
-            response = f"{response}\n\n{question}"
-        
-        return response
-    
-    def _add_growth_mindset_language(self, response: str) -> str:
-        """
-        Principle 6: Growth Mindset
-        Replace negative language with growth-oriented alternatives.
-        """
-        result = response
-        
-        for negative, positive in self.GROWTH_MINDSET_REPLACEMENTS.items():
-            # Case-insensitive replacement
-            pattern = re.compile(re.escape(negative), re.IGNORECASE)
-            result = pattern.sub(positive, result)
-        
-        return result
-    
-    def _personalize_to_style(self, response: str, learning_style: str) -> str:
-        """
-        Principle 4: Personalization
-        Adapt language to learner's preferred style.
-        """
-        if learning_style == 'VISUAL':
-            response = response.replace('think about', 'picture in your mind')
-            response = response.replace('consider', 'visualize')
-        elif learning_style == 'AUDITORY':
-            response = response.replace('look at', 'listen to how')
-            response = response.replace('see', 'hear')
-        elif learning_style == 'KINESTHETIC':
-            response = response.replace('understand', 'try working through')
-            response = response.replace('think about', 'hands-on with')
-        elif learning_style == 'READING':
-            response = response.replace('picture', 'read about')
-        
-        return response
-    
-    def _address_misconception(self, response: str, misconception: Dict) -> str:
-        """
-        Principle 7: Personalized Feedback
-        Address specific misconception without being negative.
-        """
-        misconception_type = misconception.get('type', 'unknown')
-        
-        # Add gentle clarification
-        clarification = (
-            f"\n\nI noticed something interesting in your thinking about "
-            f"{misconception_type}. Let's explore that together."
-        )
-        
-        return response + clarification
-    
-    def validate_response(self, response: str, phase: str) -> Dict:
-        """
-        Validate that response follows Harvard 7 principles.
+        Apply all 7 enforcements to a response.
         
         Returns:
             {
-                'is_valid': bool,
-                'violations': List[str],
-                'suggestions': List[str]
+                "response": str (improved response),
+                "violations": [str] (which principles were violated),
+                "score": float (0-1, how well enforced)
             }
         """
+        enforced = response
         violations = []
-        suggestions = []
         
-        # Check for direct answers
-        for pattern in self.DIRECT_ANSWER_PATTERNS:
-            if re.search(pattern, response, re.IGNORECASE):
-                violations.append("Contains direct answer")
-                suggestions.append("Replace with guiding prompt")
-                break
+        # Apply each principle in order
+        enforced, v1 = self._enforce_active_learning(enforced, learner_profile)
+        violations.extend(v1)
         
-        # Check cognitive load
-        sentences = re.split(r'(?<=[.!?])\s+', response)
-        max_allowed = (
-            self.MAX_SENTENCES_ASSESSMENT 
-            if phase == 'ASSESSMENT' 
-            else self.MAX_SENTENCES_NORMAL
-        )
-        if len(sentences) > max_allowed:
-            violations.append(f"Too many sentences ({len(sentences)} > {max_allowed})")
-            suggestions.append("Reduce to fewer sentences")
+        enforced, v2 = self._enforce_cognitive_load(enforced, learner_profile)
+        violations.extend(v2)
         
-        # Check for probing question
-        if '?' not in response:
-            violations.append("Missing probing question")
-            suggestions.append("Add a question like 'Why do you think that?'")
+        enforced, v3 = self._enforce_scaffolding(enforced, learner_profile)
+        violations.extend(v3)
         
-        # Check for negative language
-        for negative in self.GROWTH_MINDSET_REPLACEMENTS:
-            if negative.lower() in response.lower():
-                violations.append(f"Contains negative language: '{negative}'")
-                suggestions.append(f"Replace with: '{self.GROWTH_MINDSET_REPLACEMENTS[negative]}'")
+        enforced, v4 = self._enforce_reflection(enforced)
+        violations.extend(v4)
+        
+        enforced, v5 = self._enforce_growth_mindset(enforced)
+        violations.extend(v5)
+        
+        enforced, v6 = self._enforce_personalized_feedback(enforced, learner_profile)
+        violations.extend(v6)
+        
+        if recent_error:
+            enforced, v7 = self._enforce_misconception_handling(enforced, recent_error, learner_profile)
+            violations.extend(v7)
+        
+        # Compute compliance score
+        max_violations = 7
+        compliance_score = 1.0 - (len(violations) / max_violations)
+        
+        logger.debug(f"Harvard 7 Score: {compliance_score:.2f} ({7-len(violations)}/7 principles satisfied)")
         
         return {
-            'is_valid': len(violations) == 0,
-            'violations': violations,
-            'suggestions': suggestions
+            "response": enforced,
+            "violations": violations,
+            "score": compliance_score,
+            "enforced_principles": 7 - len(violations)
         }
+    
+    def _enforce_active_learning(self, response: str, profile: Dict) -> tuple:
+        """
+        Principle 1: Encourage active learning
+        
+        CHECK: Response contains at least one question OR asks learner to do work
+        ACTION: If not, insert a question
+        """
+        violations = []
+        
+        # Heuristic 1: Does response have a question mark?
+        has_question = "?" in response
+        
+        # Heuristic 2: Does it ask learner to do something? (verb: calculate, identify, think, try, etc.)
+        action_verbs = ["calculate", "identify", "think", "try", "determine", "solve", "predict", "analyze"]
+        has_action = any(verb in response.lower() for verb in action_verbs)
+        
+        if not (has_question or has_action):
+            violations.append("ACTIVE_LEARNING")
+            # Insert a question
+            response += "\n\nNow, try to [action] on your own. What do you think?"
+        
+        return response, violations
+    
+    def _enforce_cognitive_load(self, response: str, profile: Dict) -> tuple:
+        """
+        Principle 2: Manage cognitive load
+        
+        CHECK: Response length, complexity level
+        - If high mastery learner: OK to be longer/complex
+        - If low mastery learner: should be concise
+        ACTION: Adjust verbosity, break into substeps
+        """
+        violations = []
+        mastery_level = profile.get("overall_mastery", 0.5)
+        
+        # Max length guidelines (words)
+        max_words_low = 150
+        max_words_medium = 300
+        max_words_high = 500
+        
+        word_count = len(response.split())
+        
+        if mastery_level < 0.3:  # Low mastery
+            max_words = max_words_low
+        elif mastery_level < 0.7:  # Medium
+            max_words = max_words_medium
+        else:  # High
+            max_words = max_words_high
+        
+        if word_count > max_words:
+            violations.append("COGNITIVE_LOAD")
+            # Truncate and simplify
+            sentences = response.split(". ")
+            response = ". ".join(sentences[: max(2, len(sentences) // 2)]) + "."
+        
+        # Check for overwhelming complexity (e.g., too many technical terms)
+        complex_terms = len(re.findall(r"\b[A-Z][a-z]+[A-Z][a-z]+\b", response))  # CamelCase
+        if complex_terms > 5:
+            violations.append("COGNITIVE_LOAD")
+            # Note: Could auto-simplify, but risky
+        
+        return response, violations
+    
+    def _enforce_scaffolding(self, response: str, profile: Dict) -> tuple:
+        """
+        Principle 3: Go step-by-step (scaffolding)
+        
+        CHECK: Response has clear step progression
+        ACTION: If not, restructure into numbered steps
+        """
+        violations = []
+        
+        # Heuristic: Does response have numbered/bulleted steps?
+        has_steps = bool(re.search(r"(^|\n)[\d\-\*]\.", response, re.MULTILINE))
+        
+        if not has_steps:
+            violations.append("SCAFFOLDING")
+            # Restructure response into steps
+            # This is simplified; real version would use LLM to restructure
+            lines = response.split(". ")
+            if len(lines) > 1:
+                response = "\n".join(f"{i+1}. {line}" for i, line in enumerate(lines[:5]))
+        
+        return response, violations
+    
+    def _enforce_reflection(self, response: str) -> tuple:
+        """
+        Principle 4: Encourage reflection
+        
+        CHECK: Response encourages learner to think, not just gives answer
+        ACTION: Ask reflective questions like "Why?" "How?" "What do you notice?"
+        """
+        violations = []
+        
+        # Heuristic: Does response ask learner to think/reflect?
+        reflection_words = ["Why", "How", "What do you notice", "What would happen", "Think about"]
+        has_reflection = any(word in response for word in reflection_words)
+        
+        if not has_reflection:
+            violations.append("REFLECTION")
+            response += "\n\nWhat do you notice about [key insight]? Why might that be?"
+        
+        return response, violations
+    
+    def _enforce_growth_mindset(self, response: str) -> tuple:
+        """
+        Principle 5: Cultivate growth mindset
+        
+        CHECK: Response emphasizes effort, learning, improvement (not innate ability)
+        ACTION: Replace fixed mindset language with growth mindset language
+        """
+        violations = []
+        
+        # Fixed mindset phrases to replace
+        fixed_phrases = {
+            "you can't": "you haven't learned how to yet",
+            "you're not good at": "you're developing skill in",
+            "it's too hard": "it's challenging, which helps you learn",
+            "you'll never": "with practice, you can",
+        }
+        
+        original = response
+        for fixed, growth in fixed_phrases.items():
+            response = re.sub(fixed, growth, response, flags=re.IGNORECASE)
+        
+        if response != original:
+            # Replaced at least one phrase
+            pass
+        else:
+            # Check if response mentions effort/improvement/learning
+            growth_words = ["effort", "practice", "learn", "improve", "progress", "develop"]
+            has_growth = any(word in response.lower() for word in growth_words)
+            
+            if not has_growth:
+                violations.append("GROWTH_MINDSET")
+                response += "\n\nWith continued practice and effort, you'll improve on this concept."
+        
+        return response, violations
+    
+    def _enforce_personalized_feedback(self, response: str, profile: Dict) -> tuple:
+        """
+        Principle 6: Give personalized feedback
+        
+        CHECK: Response addresses learner's specific context/errors
+        ACTION: Ensure feedback isn't generic
+        """
+        violations = []
+        
+        # Heuristic: Does response include learner-specific info?
+        # (This is hard to check without the original query context)
+        # For now, just check if it's not too generic
+        
+        generic_phrases = ["in general", "typically", "usually", "for most people"]
+        too_generic = sum(1 for phrase in generic_phrases if phrase in response.lower())
+        
+        # Some generic OK, but shouldn't dominate
+        if too_generic > 2:
+            violations.append("PERSONALIZED_FEEDBACK")
+        
+        return response, violations
+    
+    def _enforce_misconception_handling(
+        self,
+        response: str,
+        error_type: str,
+        profile: Dict
+    ) -> tuple:
+        """
+        Principle 7: Manage misconceptions
+        
+        CHECK: Response directly addresses the learner's specific error
+        ACTION: Provide targeted correction + explanation
+        
+        Args:
+            error_type: e.g., "CONCEPTUAL", "COMPUTATIONAL", "PROCEDURAL"
+        """
+        violations = []
+        
+        if error_type == "CONCEPTUAL":
+            # Should explain core concept, not just method
+            if "concept" not in response.lower() and "definition" not in response.lower():
+                violations.append("MISCONCEPTION_HANDLING")
+                response = f"I notice a conceptual confusion. Let me clarify:\n\n{response}"
+        
+        elif error_type == "COMPUTATIONAL":
+            # Should show correct calculation step-by-step
+            if "step" not in response.lower() and "=" not in response:
+                violations.append("MISCONCEPTION_HANDLING")
+                response = f"Let me show you the correct steps:\n\n{response}"
+        
+        elif error_type == "PROCEDURAL":
+            # Should explain correct method
+            if "method" not in response.lower() and "process" not in response.lower():
+                violations.append("MISCONCEPTION_HANDLING")
+                response = f"Here's the correct procedure:\n\n{response}"
+        
+        return response, violations
+    
+    # ============ TESTING ============
+    
+    def test_harvard7_score(self, response: str, learner_profile: Dict):
+        """Run all 7 checks on a response"""
+        result = self.enforce_all_principles(response, learner_profile)
+        logger.info(f"Harvard 7 Compliance Score: {result['score']:.2f}/1.0")
+        if result['violations']:
+            logger.warning(f"Violations: {', '.join(result['violations'])}")
+        return result

@@ -1,0 +1,19 @@
+
+============================================================
+Running Condition: FULL_APLO (Treatment)
+  Treatment Mean Gain: 0.9682
+
+============================================================
+Running Condition: NO_DUAL_KG
+  Mean Gain: 0.9602
+  d(Full vs This): 0.155 (Lower = This condition effectively reduces gain)
+
+============================================================
+Running Condition: NO_HARVARD7
+  Mean Gain: 0.9694
+  d(Full vs This): -0.026 (Lower = This condition effectively reduces gain)
+
+============================================================
+Running Condition: BASELINE_RAG
+  Mean Gain: 0.5364
+  d(Full vs This): 3.050 (Lower = This condition effectively reduces gain)

@@ -1,0 +1,41 @@
+{
+  "test_id": "binary_search_post",
+  "test_name": "Binary Search Post-Test",
+  "difficulty": "medium",
+  "time_limit_minutes": 20,
+  "questions": [
+    {
+      "id": "q1",
+      "type": "coding",
+      "question": "Implement binary_search() cho sorted array. Xử lý edge cases.",
+      "template": "def binary_search(arr, target):\n    pass",
+      "test_cases": [
+        {
+          "input": { "arr": [1, 3, 5, 7, 9, 11, 13], "target": 7 },
+          "expected": 3
+        },
+        { "input": { "arr": [2, 4, 6, 8], "target": 5 }, "expected": -1 },
+        { "input": { "arr": [], "target": 1 }, "expected": -1 },
+        { "input": { "arr": [10, 20, 30], "target": 15 }, "expected": -1 }
+      ],
+      "points": 50
+    },
+    {
+      "id": "q2",
+      "type": "application",
+      "question": "Bạn có 1 triệu số điện thoại đã sắp xếp. Dùng binary search, cần khoảng bao nhiêu lần tra cứu để tìm một số? (Chọn đáp án gần nhất)",
+      "options": ["~20", "~500,000", "~1,000,000", "~10"],
+      "correct_answer": "~20",
+      "explanation": "log2(1,000,000) ≈ 20",
+      "points": 30
+    },
+    {
+      "id": "q3",
+      "type": "debugging",
+      "question": "Code này có bug. Tìm và giải thích:\nwhile left < right:\n    mid = (left + right) // 2\n    if arr[mid] == target: return mid\n    elif arr[mid] < target: left = mid\n    else: right = mid - 1",
+      "correct_answer": "Khi arr[mid] < target, phải set left = mid + 1 (không phải mid). Nếu không sẽ bị infinite loop.",
+      "points": 20
+    }
+  ],
+  "total_points": 100
+}

@@ -593,12 +593,29 @@ class TutorAgent(BaseAgent):
             )
         return self.dialogue_states[key]
     
+    
     def enforce_harvard_principles(self, response: str, learning_style: str, 
                                    phase: str) -> str:
         """Apply Harvard 7 Principles to response using enforcer"""
-        return self.harvard_enforcer.enforce(
+        # Create full learner profile context
+        learner_profile = {
+            'learning_style': learning_style,
+            'phase': phase,
+            # Add defaults if missing, to avoid key errors in strict checks
+            'overall_mastery': 0.5 
+        }
+        
+        # Call full enforcer
+        result = self.harvard_enforcer.enforce_all_principles(
             response=response,
-            learner_context={'learning_style': learning_style},
-            phase=phase
+            learner_profile=learner_profile,
+            recent_error=None # Could pass this if state tracks it
         )
+        
+        # Log compliance score
+        self.logger.info(f"Harvard 7 Compliance Score: {result['score']:.2f}")
+        if result['violations']:
+            self.logger.warning(f"Principles Violated: {result['violations']}")
+            
+        return result['response']
 

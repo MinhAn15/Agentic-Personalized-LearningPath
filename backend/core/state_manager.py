@@ -139,3 +139,41 @@ class CentralStateManager:
         except Exception as e:
             self.logger.error(f"Failed to update progress: {e}")
             return False
+            return False
+
+    # ============ DUAL-KG SYNC INTEGRATION ============
+    
+    def init_dual_kg(self, config=None):
+        """Initialize Dual KG Manager if Neo4j is available"""
+        from backend.core.dual_kg_manager import DualKGManager
+        
+        # Assumption: self.postgres and self.neo4j are available
+        # But StateManager currently only takes postgres_client in __init__
+        # We need to inject Neo4j client separately or change __init__
+        if hasattr(self, 'neo4j') and self.neo4j:
+            self.dual_kg = DualKGManager(self.neo4j, self.neo4j, config) # Using Neo4j driver for both for now
+            self.logger.info("✅ DualKGManager initialized")
+        else:
+            self.logger.warning("⚠️ DualKGManager NOT initialized (Neo4j missing)")
+            self.dual_kg = None
+
+    async def on_learner_session_start(self, learner_id: str, course_id: str):
+        """Called when learner starts a session"""
+        if self.dual_kg:
+            # Sync first thing
+            sync_ok = await self.dual_kg.sync_learner_state(learner_id, course_id)
+            if not sync_ok:
+                self.logger.error(f"Failed to sync for {learner_id}, falling back to cache")
+
+    async def on_agent_update_mastery(self, learner_id: str, concept_id: str, new_mastery: float, course_id: str = "unknown"):
+        """Called when Evaluator updates mastery"""
+        # Update in database/cache
+        await self.update_learner_progress(learner_id, concept_id, new_mastery)
+        
+        # Trigger async sync if DualKG is active
+        if self.dual_kg:
+            import asyncio
+            # Fire and forget sync
+            asyncio.create_task(
+                self.dual_kg.sync_learner_state(learner_id, course_id)
+            )

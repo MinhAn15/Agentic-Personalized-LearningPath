@@ -1,0 +1,1234 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agentic Learning Path API",
+    "description": "Multi-Agent AI system for personalized learning paths",
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/api/v1/agents/knowledge-extraction": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Extract Knowledge",
+        "description": "Extract learning concepts from an educational document.\n\nThis endpoint:\n1. Parses the document\n2. Extracts key concepts using LLM\n3. Identifies prerequisites\n4. Creates nodes/relationships in Neo4j Course KG\n\nExample request:\n{\n    \"content\": \"SQL tutorial content...\",\n    \"document_type\": \"LECTURE\",\n    \"title\": \"SQL Basics\"\n}\n\nExample response:\n{\n    \"success\": true,\n    \"agent_type\": \"knowledge_extraction\",\n    \"execution_time_ms\": 2345.5,\n    \"result\": {\n        \"document_id\": \"doc_123\",\n        \"concepts_extracted\": 8,\n        \"concepts_created\": 8,\n        \"relationships_created\": 5\n    }\n}",
+        "operationId": "extract_knowledge_api_v1_agents_knowledge_extraction_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentExecutionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/profiler": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Profile Learner",
+        "description": "Create a learner profile from natural language input.\n\nThis endpoint:\n1. Parses learner's message\n2. Extracts goal, timeline, learning style\n3. Creates learner profile\n4. Initializes Personal KG\n5. Saves to PostgreSQL\n\nExample request:\n{\n    \"message\": \"I want to learn SQL JOINs in 2 weeks. Already know SELECT/FROM.\",\n    \"learner_name\": \"John\"\n}\n\nExample response:\n{\n    \"success\": true,\n    \"agent_type\": \"profiler\",\n    \"execution_time_ms\": 1234.5,\n    \"result\": {\n        \"learner_id\": \"user_abc123\",\n        \"goal\": \"Master SQL JOINs\",\n        \"time_available\": 14,\n        \"learning_style\": \"VISUAL\"\n    }\n}",
+        "operationId": "profile_learner_api_v1_agents_profiler_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearnerInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentExecutionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/health": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Agents Health",
+        "description": "Check health of all agents",
+        "operationId": "agents_health_api_v1_agents_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paths/plan": {
+      "post": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Plan Learning Path",
+        "description": "Plan optimal learning path for a learner.\n\nThis endpoint:\n1. Gets learner profile\n2. Gets Course KG from Neo4j\n3. Uses RL to select optimal concept sequence\n4. Generates day-by-day path with resource recommendations\n\nExample request:\n{\n    \"learner_id\": \"user_123\",\n    \"goal\": \"Master SQL JOINs\"\n}\n\nExample response:\n{\n    \"success\": true,\n    \"learner_id\": \"user_123\",\n    \"learning_path\": [\n        {\n            \"day\": 1,\n            \"concept\": \"SQL_WHERE\",\n            \"difficulty\": 2,\n            \"estimated_hours\": 4\n        },\n        ...\n    ],\n    \"pacing\": \"MODERATE\",\n    \"success_probability\": 0.92\n}",
+        "operationId": "plan_learning_path_api_v1_paths_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanPathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paths/learner/{learner_id}": {
+      "get": {
+        "tags": [
+          "paths"
+        ],
+        "summary": "Get Learner Path",
+        "description": "Get previously planned learning path for a learner.\n\nReturns cached path if available.",
+        "operationId": "get_learner_path_api_v1_paths_learner__learner_id__get",
+        "parameters": [
+          {
+            "name": "learner_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Learner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tutoring/ask": {
+      "post": {
+        "tags": [
+          "tutoring"
+        ],
+        "summary": "Ask Tutor",
+        "description": "Ask tutor for help with a concept.\n\nThis endpoint:\n1. Retrieves concept details from KG\n2. Gets learner's current mastery\n3. Retrieves relevant course materials (RAG)\n4. Generates Socratic guidance (no direct answers)\n5. Returns guidance following Harvard 7 Principles\n\nExample request:\n{\n    \"learner_id\": \"user_123\",\n    \"question\": \"What does WHERE do in SQL?\",\n    \"concept_id\": \"SQL_WHERE\",\n    \"hint_level\": 1,\n    \"force_real\": false\n}\n\nExample response:\n{\n    \"success\": true,\n    \"guidance\": \"Great question! Think about it this way:\n                Imagine you have 1000 records but only want \n                people over 21. What would you do first?\",\n    \"hint_level\": 1,\n    \"follow_up_question\": \"What do you think WHERE does then?\",\n    \"source\": \"Course Materials\",\n    \"execution_time_ms\": 1234.5\n}",
+        "operationId": "ask_tutor_api_v1_tutoring_ask_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TutorInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TutorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tutoring/concept/{concept_id}": {
+      "get": {
+        "tags": [
+          "tutoring"
+        ],
+        "summary": "Get Concept Help",
+        "description": "Get general help on a concept (no specific question).\n\nReturns overview + learning suggestions.",
+        "operationId": "get_concept_help_api_v1_tutoring_concept__concept_id__get",
+        "parameters": [
+          {
+            "name": "concept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Concept Id"
+            }
+          },
+          {
+            "name": "learner_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Learner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tutoring/increase-hint": {
+      "post": {
+        "tags": [
+          "tutoring"
+        ],
+        "summary": "Increase Hint",
+        "description": "Request more detailed guidance (increase hint level).\n\nUse this if Socratic guidance is too vague.",
+        "operationId": "increase_hint_api_v1_tutoring_increase_hint_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TutorInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tutoring/decrease-hint": {
+      "post": {
+        "tags": [
+          "tutoring"
+        ],
+        "summary": "Decrease Hint",
+        "description": "Request less guidance (decrease hint level).\n\nUse this if you want to struggle more and learn better.",
+        "operationId": "decrease_hint_api_v1_tutoring_decrease_hint_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TutorInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tutoring/principles": {
+      "get": {
+        "tags": [
+          "tutoring"
+        ],
+        "summary": "Get Principles",
+        "description": "Get the Harvard 7 Pedagogical Principles this tutor follows.",
+        "operationId": "get_principles_api_v1_tutoring_principles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evaluation/evaluate": {
+      "post": {
+        "tags": [
+          "evaluation"
+        ],
+        "summary": "Evaluate Response",
+        "description": "Evaluate learner response.\n\nThis endpoint:\n1. Scores response (0-1)\n2. Classifies error type (CORRECT, CARELESS, INCOMPLETE, PROCEDURAL, CONCEPTUAL)\n3. Detects misconceptions\n4. Generates personalized feedback\n5. Makes path decision (PROCEED/REMEDIATE/ALTERNATE/MASTERED)\n6. Updates learner progress\n\nExample request:\n{\n    \"learner_id\": \"user_123\",\n    \"concept_id\": \"SQL_WHERE\",\n    \"learner_response\": \"WHERE combines two tables\",\n    \"expected_answer\": \"WHERE filters rows\",\n    \"correct_answer_explanation\": \"WHERE filters rows based on conditions\",\n    \"force_real\": false\n}\n\nExample response:\n{\n    \"success\": true,\n    \"score\": 0.2,\n    \"error_type\": \"CONCEPTUAL\",\n    \"misconception\": \"Confuses WHERE with JOIN\",\n    \"feedback\": \"I see the confusion - WHERE filters, JOIN combines...\",\n    \"decision\": \"REMEDIATE\",\n    \"new_mastery\": 0.35\n}",
+        "operationId": "evaluate_response_api_v1_evaluation_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evaluation/error-types": {
+      "get": {
+        "tags": [
+          "evaluation"
+        ],
+        "summary": "Get Error Types",
+        "description": "Get supported error classifications",
+        "operationId": "get_error_types_api_v1_evaluation_error_types_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analysis/analyze": {
+      "post": {
+        "tags": [
+          "analysis"
+        ],
+        "summary": "Analyze Patterns",
+        "description": "Analyze aggregated learner patterns via KAG Agent (MemGPT).",
+        "operationId": "analyze_patterns_api_v1_analysis_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KAGInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Analyze Patterns Api V1 Analysis Analyze Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analysis/statistics": {
+      "get": {
+        "tags": [
+          "analysis"
+        ],
+        "summary": "Get Aggregated Statistics",
+        "description": "Get aggregated statistics across all learners.\n\nReturns overall mastery statistics, difficulty ratings, etc.",
+        "operationId": "get_aggregated_statistics_api_v1_analysis_statistics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/stats/learners": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get Learner Roster",
+        "description": "Get list of all learners and their current status.",
+        "operationId": "get_learner_roster_api_v1_admin_stats_learners_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/stats/cohort-comparison": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get Cohort Stats",
+        "description": "Compare Treatment vs Control performance (Real-time).",
+        "operationId": "get_cohort_stats_api_v1_admin_stats_cohort_comparison_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/stats/agent-health": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get Agent Health",
+        "description": "Monitor Agent performance and error rates.",
+        "operationId": "get_agent_health_api_v1_admin_stats_agent_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/learners/signup": {
+      "post": {
+        "tags": [
+          "Learners"
+        ],
+        "summary": "Signup Learner",
+        "description": "Register a new learner for the pilot.\nAssign to COHORT (A/B testing) automatically.",
+        "operationId": "signup_learner_api_v1_learners_signup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearnerSignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/learners/pre-test": {
+      "post": {
+        "tags": [
+          "Learners"
+        ],
+        "summary": "Submit Pre Test",
+        "description": "Submit pre-test answers. Calculates score and updates profile.",
+        "operationId": "submit_pre_test_api_v1_learners_pre_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreTestSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "System health check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Root",
+        "description": "Root endpoint",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/status": {
+      "get": {
+        "summary": "System Status",
+        "description": "Detailed system status",
+        "operationId": "system_status_api_v1_system_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentExecutionResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "agent_type": {
+            "type": "string",
+            "title": "Agent Type"
+          },
+          "execution_time_ms": {
+            "type": "number",
+            "title": "Execution Time Ms"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "agent_type",
+          "execution_time_ms",
+          "result"
+        ],
+        "title": "AgentExecutionResponse",
+        "description": "Response from agent execution"
+      },
+      "DocumentInput": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/DocumentType",
+            "default": "LECTURE"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "force_real": {
+            "type": "boolean",
+            "title": "Force Real",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "DocumentInput",
+        "description": "Input document for knowledge extraction"
+      },
+      "DocumentType": {
+        "type": "string",
+        "enum": [
+          "LECTURE",
+          "TUTORIAL",
+          "TEXTBOOK",
+          "EXERCISE",
+          "REFERENCE"
+        ],
+        "title": "DocumentType",
+        "description": "Types of learning documents"
+      },
+      "EvaluationInput": {
+        "properties": {
+          "learner_id": {
+            "type": "string",
+            "title": "Learner Id"
+          },
+          "concept_id": {
+            "type": "string",
+            "title": "Concept Id"
+          },
+          "learner_response": {
+            "type": "string",
+            "title": "Learner Response"
+          },
+          "expected_answer": {
+            "type": "string",
+            "title": "Expected Answer"
+          },
+          "correct_answer_explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correct Answer Explanation"
+          },
+          "force_real": {
+            "type": "boolean",
+            "title": "Force Real",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "learner_id",
+          "concept_id",
+          "learner_response",
+          "expected_answer"
+        ],
+        "title": "EvaluationInput",
+        "description": "Input for Evaluator Agent"
+      },
+      "EvaluationResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "learner_id": {
+            "type": "string",
+            "title": "Learner Id"
+          },
+          "concept_id": {
+            "type": "string",
+            "title": "Concept Id"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "error_type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "misconception": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Misconception"
+          },
+          "feedback": {
+            "type": "string",
+            "title": "Feedback"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "new_mastery": {
+            "type": "number",
+            "title": "New Mastery"
+          },
+          "execution_time_ms": {
+            "type": "number",
+            "title": "Execution Time Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "learner_id",
+          "concept_id",
+          "score",
+          "error_type",
+          "misconception",
+          "feedback",
+          "decision",
+          "new_mastery",
+          "execution_time_ms"
+        ],
+        "title": "EvaluationResponse",
+        "description": "Evaluation result"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "KAGInput": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "default": "kag_agent"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "default": "analyze"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "force_real": {
+            "type": "boolean",
+            "title": "Force Real",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "payload"
+        ],
+        "title": "KAGInput",
+        "description": "Input for KAG Agent"
+      },
+      "LearnerInput": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "learner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learner Name"
+          },
+          "age": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "LearnerInput",
+        "description": "Input from learner describing their learning goal"
+      },
+      "LearnerProfileResponse": {
+        "properties": {
+          "learner_id": {
+            "type": "string",
+            "title": "Learner Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "cohort": {
+            "type": "string",
+            "title": "Cohort"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "learner_id",
+          "name",
+          "cohort",
+          "created_at"
+        ],
+        "title": "LearnerProfileResponse"
+      },
+      "LearnerSignupRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "age": {
+            "type": "integer",
+            "title": "Age"
+          },
+          "background": {
+            "type": "string",
+            "title": "Background"
+          },
+          "consent_agreed": {
+            "type": "boolean",
+            "title": "Consent Agreed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "email",
+          "age",
+          "background",
+          "consent_agreed"
+        ],
+        "title": "LearnerSignupRequest"
+      },
+      "PlanPathRequest": {
+        "properties": {
+          "learner_id": {
+            "type": "string",
+            "title": "Learner Id"
+          },
+          "goal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "learner_id"
+        ],
+        "title": "PlanPathRequest",
+        "description": "Request to plan learning path"
+      },
+      "PreTestSubmission": {
+        "properties": {
+          "learner_id": {
+            "type": "string",
+            "title": "Learner Id"
+          },
+          "answers": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Answers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "learner_id",
+          "answers"
+        ],
+        "title": "PreTestSubmission"
+      },
+      "TutorInput": {
+        "properties": {
+          "learner_id": {
+            "type": "string",
+            "title": "Learner Id"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "concept_id": {
+            "type": "string",
+            "title": "Concept Id"
+          },
+          "hint_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Level",
+            "default": 1
+          },
+          "conversation_history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation History"
+          },
+          "force_real": {
+            "type": "boolean",
+            "title": "Force Real",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "learner_id",
+          "question",
+          "concept_id"
+        ],
+        "title": "TutorInput",
+        "description": "Input for Tutor Agent"
+      },
+      "TutorResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "guidance": {
+            "type": "string",
+            "title": "Guidance"
+          },
+          "hint_level": {
+            "type": "integer",
+            "title": "Hint Level"
+          },
+          "follow_up_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Question"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "execution_time_ms": {
+            "type": "number",
+            "title": "Execution Time Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "guidance",
+          "hint_level",
+          "follow_up_question",
+          "source",
+          "execution_time_ms"
+        ],
+        "title": "TutorResponse",
+        "description": "Tutor's response to learner question"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
