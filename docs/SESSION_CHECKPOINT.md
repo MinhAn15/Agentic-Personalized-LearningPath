@@ -20,8 +20,14 @@
 - **Frontend**: Accessible at `http://localhost:3000`.
 
 ## ⏭️ Next Actions (When you return)
-1.  **Record Demo Video** (15 mins): Follow `DEFENSE_PREP_KIT.md` Part 2.
-2.  **Create PowerPoint**: Use content from `DEFENSE_SLIDES_CONTENT.md`.
-3.  **Print**: Thesis & Paper for the 26/01 meeting.
+1.  **RESTART ENVIRONMENT** (Critical):
+    - Open terminal in project root.
+    - Run: `docker-compose up -d`
+    - Wait 30s for Neo4j to warm up.
+    - Verify: `docker-compose ps` (All services Up).
+
+2.  **Record Demo Video** (15 mins): Follow `DEFENSE_PREP_KIT.md` Part 2.
+3.  **Create PowerPoint**: Use content from `DEFENSE_SLIDES_CONTENT.md`.
+4.  **Print**: Thesis & Paper for the 26/01 meeting.
 
 *System is primed for recording. Just hit 'Record'.*
