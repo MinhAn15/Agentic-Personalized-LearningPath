@@ -133,6 +133,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Exception Handlers
+from fastapi.exceptions import RequestValidationError
+from backend.middleware.error_handler import global_exception_handler, validation_exception_handler
+
+app.add_exception_handler(Exception, global_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+
 # Include routers
 app.include_router(agents_router)
 app.include_router(paths_router)

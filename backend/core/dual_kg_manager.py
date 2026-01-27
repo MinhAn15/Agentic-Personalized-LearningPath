@@ -154,7 +154,7 @@ class DualKGManager:
         """Fetch all concept nodes for a course from Course KG"""
         # This assumes Neo4j or similar. course_kg_driver must implement execute_query or arun
         query = """
-        MATCH (course:Course {id: $course_id})-[:HAS_CONCEPT*]->(concept:Concept)
+        MATCH (course:Course {id: $course_id})-[:HAS_CONCEPT*1..5]->(concept:Concept)
         RETURN DISTINCT concept.id as id, concept.name as name, concept.definition as definition
         """
         try:
