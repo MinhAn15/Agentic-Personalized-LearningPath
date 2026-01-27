@@ -1,612 +1,210 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>APLO Thesis Defense</title>
-    <style>
-        body {
-            background-color: #ffffff;
-            color: #36454f;
-            font-family: 'DejaVu Sans', sans-serif;
-            margin: 0;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-        .slide-container {
-            flex: 1;
-            display: flex;
-            align_items: center;
-            justify_content: center;
-            position: relative;
-        }
-        .slide {
-            display: none;
-            width: 80%;
-            max-width: 1000px;
-            padding: 40px;
-            text-align: left;
-            border: 2px solid #708090;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-            background: rgba(0, 0, 0, 0.02);
-            border-radius: 10px;
-            animation: fadeIn 0.5s ease-in-out;
-        }
-        .slide.active {
-            display: block;
-        }
-        h2 {
-            color: #2c3e50;
-            font-family: 'DejaVu Sans Bold', sans-serif;
-            border-bottom: 2px solid #708090;
-            padding-bottom: 10px;
-            margin-top: 0;
-        }
-        p {
-            font-size: 1.2em;
-            line-height: 1.6;
-        }
-        li {
-            margin-bottom: 10px;
-            font-size: 1.1em;
-        }
-        strong, b {
-            color: #2c3e50;
-        }
-        .controls {
-            height: 60px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0,0,0,0.5);
-            gap: 20px;
-        }
-        button {
-            background-color: #708090;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            border-radius: 5px;
-            font-family: 'DejaVu Sans Bold', sans-serif;
-        }
-        button:hover {
-            background-color: #2c3e50;
-            color: #ffffff;
-        }
-        button:disabled {
-            background-color: gray;
-            cursor: not-allowed;
-        }
-        .progress-bar {
-            position: absolute;
-            bottom: 60px;
-            left: 0;
-            height: 5px;
-            background-color: #2c3e50;
-            width: 0%;
-            transition: width 0.3s;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-    </style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>APLO - Thesis Defense</title>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reset.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/theme/dracula.min.css">
+
+    <!-- Theme used for syntax highlighted code -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/plugin/highlight/monokai.min.css">
 </head>
 <body>
+    <div class="reveal">
+        <div class="slides">
+            <section>
+                <h1>APLO</h1>
+                <h3>Agentic Personalized Learning Path Orchestration</h3>
+                <p>
+                    <small>Presenter: [Your Name] | Supervisor: [Supervisor Name]</small>
+                </p>
+                <p style="font-size: 0.6em; color: #8be9fd;">Master of Management Information Systems (MIS) Thesis</p>
+            </section>
 
-<div class="slide-container">
+            <section>
+                <section>
+                    <h2>The Crisis in Online Education</h2>
+                    <p class="fragment fade-in">Why do <span style="color: #ff79c6;">90%</span> of MOOC learners drop out?</p>
+                </section>
+                <section>
+                    <h3>The "One-Size-Fits-All" Problem</h3>
+                    <div style="display: flex; justify-content: Space-around; align-items: center;">
+                        <div style="width: 45%;">
+                            <h4>Standard MOOCs</h4>
+                            <ul>
+                                <li class="fragment">Linear Curriculum</li>
+                                <li class="fragment">No Memory of History</li>
+                                <li class="fragment">Passive Content Consumption</li>
+                            </ul>
+                        </div>
+                        <div style="width: 10%; font-size: 3em;">👉</div>
+                        <div style="width: 45%;">
+                            <h4 style="color: #50fa7b;">APLO Solution</h4>
+                            <ul>
+                                <li class="fragment">Dynamic Pathing</li>
+                                <li class="fragment">Deep Contextual Memory</li>
+                                <li class="fragment">Socratic Dialogue</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+            </section>
 
-    <div class="slide active" id="slide-0">
-        <h2>Title Slide</h2>
-        <div class="content"><p><b>Title</b>: Agentic Personalized Learning Path Orchestration (APLO)</p>
-<p><b>Subtitle</b>: A Dual-Knowledge Graph, Multi-Agent Framework for Adaptive Education</p>
-<p><b>Presenter</b>: [Your Name]</p>
-<p><b>Supervisor</b>: [Supervisor Name]</p>
-<p><b>Context</b>: Master of Management Information Systems (MIS) Thesis</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 1 / 30
-        </div>
-    </div>
+            <section>
+                <section>
+                    <h2>System Architecture</h2>
+                    <p>6 Agents. 2 Knowledge Graphs. 1 Goal.</p>
+                </section>
+                <section>
+                    <h3>Dual-KG Framework</h3>
+                    <div class="mermaid">
+                        graph LR
+                        subgraph "Static Knowledge"
+                            C[Course KG] -- Prerequisite --> C2[Concept A]
+                            C2 -- Prerequisite --> C3[Concept B]
+                        end
+                        subgraph "Dynamic Context"
+                            L[Learner KG] -- HasMastery --> M1(Mastery: 0.8)
+                            L -- HasMastery --> M2(Mastery: 0.2)
+                        end
+                        C <--> L
+                        style C fill:#bd93f9,stroke:#333,stroke-width:2px
+                        style L fill:#ff79c6,stroke:#333,stroke-width:2px
+                    </div>
+                    <p style="font-size: 0.6em;">Course Structure provides the MAP. Learner Context provides the LOCATION.</p>
+                </section>
+                <section>
+                    <h3>The 6-Agent Ecosystem</h3>
+                    <div class="mermaid">
+                        graph TD
+                        User((Learner)) <--> API[API Gateway]
+                        API <--> Profiler[Agent 2: Profiler]
+                        API <--> Tutor[Agent 4: Tutor]
+                        
+                        subgraph "Decision Core"
+                            Profiler --> Planner[Agent 3: Planner]
+                            Planner -->|Selects Topic| Tutor
+                            Tutor --> Evaluator[Agent 5: Evaluator]
+                            Evaluator -->|Updates| KG[(Neo4j Dual-KG)]
+                        end
+                        
+                        subgraph "Background"
+                            Curator[Agent 1: Curator] -->|Ingests| KG
+                            Monitor[Agent 6: KAG] -->|Analyzes| KG
+                        end
 
-    <div class="slide" id="slide-1">
-        <h2>The "One-Size-Fits-All" Crisis</h2>
-        <div class="content"><p><b>Visual</b>: Image of a lecture hall vs. distinct individual puzzle pieces.</p>
-<p><b>Key Points</b>:</p>
-<ul>
-<li><b>Problem</b>: Traditional MOOCs (Coursera, Udemy) force linear progression.</li>
-<li><b>Statistic</b>: Average MOOC completion rate is < 10% (Jordan, 2015).</li>
-<li><b>Pain Point</b>: Learners waste time on known concepts (Boredom) or hit prerequisite gaps (Frustration).</li>
-<li><b>Impact</b>: High dropout rates, inefficient knowledge acquisition.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 2 / 30
-        </div>
-    </div>
+                        style User fill:#fff,stroke:#333
+                        style Profiler fill:#f1fa8c,color:#000
+                        style Planner fill:#8be9fd,color:#000
+                        style Tutor fill:#50fa7b,color:#000
+                        style Evaluator fill:#ff5555,color:#fff
+                    </div>
+                </section>
+            </section>
 
-    <div class="slide" id="slide-2">
-        <h2>Limitations of Existing AI Tutors</h2>
-        <div class="content"><p><b>Visual</b>: Comparison table (Chatbots vs. APLO).</p>
-<p><b>Key Points</b>:</p>
-<ul>
-<li><b>Statelessness</b>: ChatGPT/Claude treat every session as new; vague memory of user's deep history.</li>
-<li><b>Hallucination</b>: LLMs optimize for plausibility, not pedagogical accuracy.</li>
-<li><b>Lack of Structure</b>: They don't "see" the dependency map (e.g., Recursion → Binary Search).</li>
-<li><b>Result</b>: "Conversational" but not "Structural" learning.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 3 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-3">
-        <h2>Research Goal & Question</h2>
-        <div class="content"><p><b>Visual</b>: A target icon.</p>
-<p><b>Research Question</b>: </p>
-<p><i>"How can we combine Knowledge Graphs (Structure) with Agentic AI (Reasoning) to create a truly adaptive learning system?"</i></p>
-<p><b>Objectives</b>:</p>
-<ul>
-<li>Model domain structure explicitly (Course KG).</li>
-<li>Track learner state dynamically (Learner KG).</li>
-<li>Automate pedagogical decision-making (Agents).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 4 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-4">
-        <h2>The Solution: APLO</h2>
-        <div class="content"><p><b>Visual</b>: High-level block diagram (User <-> Agents <-> Dual KG).</p>
-<p><b>Core Innovation</b>:</p>
-<ul>
-<li><b>Dual Knowledge Graphs</b>: Co-evolution of Course & Learner graphs.</li>
-<li><b>Multi-Agent Orchestration</b>: Specialized roles (Profiler, Planner, Tutor).</li>
-<li><b>Pedagogical Grounding</b>: Harvard 7 Principles of Learning.</li>
-</ul>
-<p>---</p>
-<p>## Section 2: Technical Architecture (Slides 6-15)</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 5 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-5">
-        <h2>High-Level Architecture</h2>
-        <div class="content"><p><b>Visual</b>: The 4-Layer Diagram (Frontend, Backend, Agent Layer, Data Layer).</p>
-<p><b>Layers</b>:</p>
-<ul>
-<li><b>Interface</b>: Next.js (React) - Interactive Chat & Dashboard.</li>
-<li><b>API Gateway</b>: FastAPI - Async, WebSocket support.</li>
-<li><b>Orchestration</b>: LlamaIndex Workflows - Event-driven agent coordination.</li>
-<li><b>Data Core</b>: Neo4j (Graph) + Milvus (Vector) + Postgres (Relational).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 6 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-6">
-        <h2>Innovation 1 - Dual Knowledge Graphs</h2>
-        <div class="content"><p><b>Visual</b>: Side-by-side nodes.</p>
-<p><b>Course KG (Static)</b>:</p>
-<ul>
-<li>Concepts (Nodes) + Prerequisites (Edges).</li>
-<li>Source: Ingested from textbooks via Agent 1.</li>
-</ul>
-<p><b>Learner KG (Dynamic)</b>:</p>
-<ul>
-<li>User History + Mastery States.</li>
-<li>Personalized connections (e.g., "Learner A struggles with Recursion").</li>
-</ul>
-<p><b>Mechanism</b>: Bidirectional Querying (Planner checks both to decide path).</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 7 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-7">
-        <h2>Innovation 2 - Multi-Agent System (MAS)</h2>
-        <div class="content"><p><b>Visual</b>: Hexagon diagram of 6 Agents.</p>
-<p><b>The Team</b>:</p>
-<ul>
-<li><b>Curator</b>: Builds the world (Course KG).</li>
-<li><b>Profiler</b>: Understands the user (Pre-test).</li>
-<li><b>Planner</b>: The Architect (Decides <i>what</i> to teach).</li>
-<li><b>Tutor</b>: The Teacher (Decides <i>how</i> to teach).</li>
-<li><b>Evaluator</b>: The Judge (Updates mastery).</li>
-<li><b>Monitor</b>: The Safety Net (Detects stuck users).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 8 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-8">
-        <h2>Agent 3 - The Planner (Tree of Thoughts)</h2>
-        <div class="content"><p><b>Visual</b>: Flowchart of Decision Process.</p>
-<p><b>Algorithm</b>:</p>
-<ul>
-<li><b>Scan</b>: Identify all "unlockable" concepts.</li>
-<li><b>Filter</b>: Remove mastered concepts.</li>
-<li><b>Rank</b>: Score based on Pedagogical Value (Gap filling > New territory).</li>
-<li><b>Select</b>: ToT simulation to predict success probability.</li>
-</ul>
-<p><b>Result</b>: Optimal next step, not just random suggestion.</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 9 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-9">
-        <h2>Agent 4 - The Tutor (Harvard 7 Principles)</h2>
-        <div class="content"><p><b>Visual</b>: Prompt Template snapshot.</p>
-<p><b>Pedagogy</b>:</p>
-<ul>
-<li>Not just "Generating text".</li>
-<li><b>Principle 1</b>: Connect to prior knowledge (Query Learner KG).</li>
-<li><b>Principle 4</b>: Stretch Challenge (Adjust difficulty +0.2 above mastery).</li>
-<li><b>Principle 6</b>: Horizontal Connections (Relate to other concepts).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 10 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-10">
-        <h2>Agent 5 - The Evaluator (JudgeLM)</h2>
-        <div class="content"><p><b>Visual</b>: Comparison of Student Answer vs. Reference.</p>
-<p><b>Process</b>:</p>
-<ul>
-<li><b>Rubric-based Grading</b>: Correctness (0.6), Completeness (0.2), Clarity (0.2).</li>
-<li><b>Feedback Loop</b>: Score updates `MasteryNode` in Neo4j.</li>
-<li><b>Threshold</b>: Mastery >= 0.7 triggers "Concept Unlocked".</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 11 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-11">
-        <h2>GraphRAG Retrieval Pipeline</h2>
-        <div class="content"><p><b>Visual</b>: Pipeline diagram (Query -> Graph Search + Vector Search -> Context -> LLM).</p>
-<p><b>Why GraphRAG?</b>:</p>
-<ul>
-<li>Vector alone misses structure (Relationships).</li>
-<li>Graph alone misses semantics (Nuance).</li>
-<li><b>Hybrid</b>: Retrieves <i>Prerequisite Chains</i> (Graph) + <i>Content Chunks</i> (Vector).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 12 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-12">
-        <h2>Technology Stack</h2>
-        <div class="content"><p><b>Visual</b>: Logos of tech used.</p>
-<ul>
-<li><b>Core</b>: Python 3.11, FastAPI.</li>
-<li><b>AI</b>: LangChain, LlamaIndex, OpenAI GPT-4.</li>
-<li><b>Database</b>: Neo4j (Graph), Milvus (Vector), Redis (Queue).</li>
-<li><b>DevOps</b>: Docker Compose, Kubernetes (Ready).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 13 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-13">
-        <h2>Data Flow Sequence</h2>
-        <div class="content"><p><b>Visual</b>: Sequence Diagram (User -> API -> Planner -> Tutor -> User).</p>
-<p><b>Walkthrough</b>:</p>
-<ul>
-<li>User requests "Start Learning".</li>
-<li>Planner queries KGs -> Selects "Binary Search".</li>
-<li>Tutor retrieves Context -> Generates Lesson.</li>
-<li>User responds -> Evaluator grades -> Graph Updates.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 14 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-14">
-        <h2>Scalability & Production Readiness</h2>
-        <div class="content"><p><b>Visual</b>: Kubernetes Cluster Diagram.</p>
-<p><b>Features</b>:</p>
-<ul>
-<li>StatefulSet for Neo4j.</li>
-<li>Horizontal Autoscaling for Backend.</li>
-<li>Asynchronous Processing (Event Bus) for non-blocking UI.</li>
-</ul>
-<p>---</p>
-<p>## Section 3: Evaluation & Results (Slides 16-25)</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 15 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-15">
-        <h2>Evaluation Methodology</h2>
-        <div class="content"><p><b>Visual</b>: Study Design Flowchart.</p>
-<ul>
-<li><b>Type</b>: Simulation-based Ablation Study.</li>
-<li><b>Subjects</b>: N=125 Simulated Learners (LLM Agents with distinct profiles).</li>
-<li><b>Conditions</b>:</li>
-<li>Full APLO</li>
-<li>No Dual-KG</li>
-<li>No Harvard-7</li>
-<li>No Multi-Agent</li>
-<li>Baseline RAG</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 16 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-16">
-        <h2>Primary Outcome - Learning Gains</h2>
-        <div class="content"><p><b>Visual</b>: <b>Figure 2 (Box Plot)</b>.</p>
-<p><b>Key Finding</b>:</p>
-<ul>
-<li><b>APLO</b>: Mean Gain = 84.5%</li>
-<li><b>Baseline</b>: Mean Gain = 28.4%</li>
-<li><b>Effect Size</b>: Cohen's d = 3.144 (Very Large).</li>
-</ul>
-<p><b>Interpretation</b>: Structural guidance dramatically improves consistency.</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 17 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-17">
-        <h2>Secondary Outcome - Time to Mastery</h2>
-        <div class="content"><p><b>Visual</b>: <b>Figure 3 (Bar Chart)</b>.</p>
-<p><b>Key Finding</b>:</p>
-<ul>
-<li>APLO learners reach 70% mastery in <b>7.6 sessions</b>.</li>
-<li>Baseline learners take <b>12.1 sessions</b>.</li>
-<li><b>Efficiency</b>: 37% faster learning curve due to targeted gap-filling.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 18 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-18">
-        <h2>Why it Works? (Factor Analysis)</h2>
-        <div class="content"><p><b>Visual</b>: Pie chart or List.</p>
-<p><b>Contributors to Success</b>:</p>
-<ul>
-<li><b>Agent Specialization</b> (28% contribution): Modules don't conflict.</li>
-<li><b>Dual-KG</b> (20% contribution): Prerequisite enforcement prevents "flailing".</li>
-<li><b>Harvard 7</b> (14% contribution): Better quality explanations.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 19 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-19">
-        <h2>Ablation Study Insights</h2>
-        <div class="content"><p><b>Visual</b>: Table of Delta-d values.</p>
-<p><b>Insight</b>: Removing "Dual-KG" causes the biggest drop in efficiency.</p>
-<p><b>Conclusion</b>: "Knowing what the learner knows" is more important than "Smart explanations".</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 20 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-20">
-        <h2>Results Contextualization</h2>
-        <div class="content"><p><b>Visual</b>: Table 4 (Comparison with Real-world).</p>
-<ul>
-<li><b>Simulated d</b>: 3.144 (Optimistic).</li>
-<li><b>Projected Real-world d</b>: 0.8 - 1.2.</li>
-<li><b>Benchmark</b>: Human Tutoring (0.8), Traditional Adaptive (0.35).</li>
-<li><b>Takeaway</b>: Even with degradation, APLO outperforms existing systems.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 21 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-21">
-        <h2>Simulation vs. Reality Gap</h2>
-        <div class="content"><p><b>Visual</b>: Scales/Balance graphic.</p>
-<p><b>Factors</b>:</p>
-<ul>
-<li><b>Motivation</b>: Simulated learners don't get bored or distracted.</li>
-<li><b>Compliance</b>: Simulated learners strictly follow the path.</li>
-<li><b>Consistency</b>: AI Agents engage perfectly every time.</li>
-</ul>
-<p><b>Mitigation</b>: Phase 3 Pilot will calibrate this gap.</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 22 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-22">
-        <h2>Technical Performance Metrics</h2>
-        <div class="content"><p><b>Visual</b>: Latency/Throughput Charts (optional).</p>
-<ul>
-<li><b>Average Response Time</b>: 1.2s (Cached), 4.5s (Full Chain).</li>
-<li><b>Graph Query Time</b>: < 50ms (Optimized with Indexes).</li>
-<li><b>Concurrent Users</b>: Tested up to 50 concurrent sessions locally.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 23 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-23">
-        <h2>Limitation Analysis</h2>
-        <div class="content"><p><b>Visual</b>: SWOT Analysis.</p>
-<ul>
-<li><b>Strengths</b>: Architecture, Rigor, Code Quality.</li>
-<li><b>Weaknesses</b>: Dependency on GPT-4 (Cost), Lack of Real Humans (Phase 1).</li>
-<li><b>Opportunities</b>: Multi-modal (Voice/Video), Open Source.</li>
-<li><b>Threats</b>: LLM Hallucination (Mitigated by GraphRAG).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 24 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-24">
-        <h2>Summary of Contributions</h2>
-        <div class="content"><p><b>Visual</b>: Checklist.</p>
-<ul>
-<li><b>Theoretical</b>: A novel Dual-KG framework for personalization.</li>
-<li><b>Technical</b>: First open-source implementation of GraphRAG for Education.</li>
-<li><b>Empirical</b>: Quantified impact of architectural components.</li>
-</ul>
-<p>---</p>
-<p>## Section 4: Conclusion & Roadmap (Slides 26-30)</p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 25 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-25">
-        <h2>Thesis Roadmap</h2>
-        <div class="content"><p><b>Visual</b>: Timeline.</p>
-<ul>
-<li><b>Phase 1 (Completed)</b>: Architecture, Implementation, Simulation.</li>
-<li><b>Phase 2 (Current)</b>: Defense Preparation.</li>
-<li><b>Phase 3 (Next)</b>: Real Learner Pilot (Feb 2026).</li>
-<li><b>Phase 4</b>: Q1 Paper Submission (March 2026).</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 26 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-26">
-        <h2>Pilot Plan (Phase 3)</h2>
-        <div class="content"><p><b>Visual</b>: Process Flow.</p>
-<ul>
-<li><b>Target</b>: 30 MIS Students.</li>
-<li><b>Topic</b>: "Data Structures & Algorithms".</li>
-<li><b>Duration</b>: 2 weeks.</li>
-<li><b>Goal</b>: Validate Cohen's d > 0.8 in real setting.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 27 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-27">
-        <h2>Future Work</h2>
-        <div class="content"><p><b>Visual</b>: Roadmap Road.</p>
-<ul>
-<li><b>Q2 2026</b>: Multi-modal Tutor (Voice Interaction).</li>
-<li><b>Q3 2026</b>: Collaborative Learning (Group KGs).</li>
-<li><b>Q4 2026</b>: Deployment as SaaS for Universities.</li>
-</ul>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 28 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-28">
-        <h2>Conclusion</h2>
-        <div class="content"><p><b>Visual</b>: Hero Image / Summary Quote.</p>
-<p><i>"APLO represents a shift from 'Static Content Delivery' to 'Dynamic Knowledge Orchestration'. By giving AI structural memory (KG) and pedagogical rules (Agents), we bridge the gap between mass education and personal tutoring."</i></p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 29 / 30
-        </div>
-    </div>
-
-    <div class="slide" id="slide-29">
-        <h2>Q&A</h2>
-        <div class="content"><p><b>Visual</b>: contact info (email/github).</p>
-<p><b>Thank You!</b></p>
-<p><b>Questions?</b></p>
-</div>
-        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.8em; color: gray;">
-            Slide 30 / 30
-        </div>
-    </div>
-
-    <div class="progress-bar" id="progress"></div>
-</div>
-
-<div class="controls">
-    <button id="prevBtn" onclick="changeSlide(-1)">Previous</button>
-    <button id="nextBtn" onclick="changeSlide(1)">Next</button>
-</div>
-
-<script>
-    let currentSlide = 0;
-    const totalSlides = 30;
+            <section>
+                <section>
+                    <h2>Key Innovations</h2>
+                </section>
+                <section>
+                    <h3>1. Tree of Thoughts Planning (Agent 3)</h3>
+                    <p>Instead of guessing, the Planner simulates future paths.</p>
+                    <pre><code class="language-python" data-trim data-noescape>
+def plan_path(learner_state, course_graph):
+    candidates = get_unlockable_concepts()
     
-    function updateSlide() {
-        document.querySelectorAll('.slide').forEach((s, index) => {
-            s.classList.remove('active');
-            if (index === currentSlide) {
-                s.classList.add('active');
-            }
+    # Simulate possible futures
+    for concept in candidates:
+        prob_success = simulate_mastery(concept, learner_state)
+        score = pedagogical_value(concept) * prob_success
+        
+    return max(candidates, key=lambda x: x.score)
+                    </code></pre>
+                </section>
+                <section>
+                    <h3>2. Socratic Pedagogical Enforcer (Agent 4)</h3>
+                    <p>Strict adherence to Harvard's 7 Principles.</p>
+                    <blockquote>
+                        "Do not give the answer. Guide the learner to discover it by connecting to what they already know (Learner KG)."
+                    </blockquote>
+                </section>
+            </section>
+
+            <section>
+                <section>
+                    <h2>Results & Evaluation</h2>
+                    <p>Evidence from Ablation Study (N=125 Simulated Learners)</p>
+                </section>
+                <section>
+                    <h3>Learning Gain Comparison</h3>
+                    <div class="mermaid">
+                        %%{init: { 'theme': 'dark' } }%%
+                        xychart-beta
+                            title "Average Learning Gain (%)"
+                            x-axis [Baseline RAG, No-Critic, Full APLO]
+                            y-axis "Percentage" 0 --> 100
+                            bar [28.4, 65.2, 84.5]
+                    </div>
+                    <p style="color: #50fa7b; font-weight: bold;">Effect Size (Cohen's d): 3.144</p>
+                </section>
+                 <section>
+                    <h3>Efficiency: Sessions to Mastery</h3>
+                    <div class="mermaid">
+                        %%{init: { 'theme': 'dark' } }%%
+                        xychart-beta
+                            title "Sessions to Reach 70% Mastery"
+                            x-axis [Baseline, APLO]
+                            y-axis "Sessions" 0 --> 15
+                            bar [12.1, 7.6]
+                    </div>
+                    <p>APLO learners reach goals <span style="color: #ff79c6;">37% faster</span> due to optimized pathing.</p>
+                </section>
+            </section>
+
+            <section>
+                <h2>Future Work</h2>
+                <ul>
+                    <li><b>Phase 3 Pilot</b>: Real-world validation (Feb 2026)</li>
+                    <li><b>Multi-modal</b>: Voice-based Socratic Tutoring</li>
+                    <li><b>Collaborative</b>: Group Learning Knowledge Graphs</li>
+                </ul>
+            </section>
+
+            <section>
+                <h1>Thank You</h1>
+                <p>Questions?</p>
+                <p><small>[Your Contact Info] | [GitHub Repo Link]</small></p>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/plugin/notes/notes.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/plugin/markdown/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/plugin/highlight/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <script>
+        // More info about initialization & config:
+        // - https://revealjs.com/initialization/
+        // - https://revealjs.com/config/
+        Reveal.initialize({
+            hash: true,
+            slideNumber: true,
+            transition: 'convex', // none/fade/slide/convex/concave/zoom
+
+            // Learn about plugins: https://revealjs.com/plugins/
+            plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
         });
-        
-        const progress = ((currentSlide + 1) / totalSlides) * 100;
-        document.getElementById('progress').style.width = progress + '%';
-        
-        document.getElementById('prevBtn').disabled = currentSlide === 0;
-        document.getElementById('nextBtn').disabled = currentSlide === totalSlides - 1;
-    }
 
-    function changeSlide(direction) {
-        const next = currentSlide + direction;
-        if (next >= 0 && next < totalSlides) {
-            currentSlide = next;
-            updateSlide();
-        }
-    }
-    
-    // Keyboard navigation
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
-            changeSlide(1);
-        } else if (e.key === 'ArrowLeft') {
-            changeSlide(-1);
-        }
-    });
-
-    updateSlide();
-</script>
-
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            securityLevel: 'loose',
+        });
+    </script>
 </body>
 </html>

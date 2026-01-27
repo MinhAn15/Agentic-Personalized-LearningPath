@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, EmailStr
 from typing import Dict, Any, Optional
 from datetime import datetime
 import uuid
 import logging
+import random
 
 from backend.core.state_manager import CentralStateManager
 from backend.database.database_factory import get_factory
@@ -22,7 +23,7 @@ class LearnerSignupRequest(BaseModel):
 class LearnerProfileResponse(BaseModel):
     learner_id: str
     name: str
-    cohort: str  # "TREATMENT" or "CONTROL"
+    cohort: str  # "pilot_treatment" or "pilot_control"
     created_at: datetime
 
 class PreTestSubmission(BaseModel):
@@ -39,6 +40,7 @@ async def get_state_manager():
 @router.post("/signup", response_model=LearnerProfileResponse)
 async def signup_learner(
     request: LearnerSignupRequest,
+    req: Request, # For IP address
     state_manager: CentralStateManager = Depends(get_state_manager)
 ):
     """
@@ -51,9 +53,8 @@ async def signup_learner(
     learner_id = str(uuid.uuid4())
     
     # Assign Cohort (Simple Random Assignment)
-    # In production, use ExperimentManager for proper balance
-    import random
-    cohort = "TREATMENT" if random.random() < 0.5 else "CONTROL"
+    # Using specific group names from schema
+    cohort_group = "pilot_treatment" if random.random() < 0.5 else "pilot_control"
     
     profile = {
         "learner_id": learner_id,
@@ -61,33 +62,43 @@ async def signup_learner(
         "email": request.email,
         "age": request.age,
         "background": request.background,
-        "cohort": cohort,
+        "cohort": cohort_group,
         "created_at": datetime.now().isoformat(),
         "status": "ONBOARDING"
     }
     
-    # Save to Redis/DB (via StateManager)
-    # Note: StateManager needs a method to save generic profile. 
-    # For now we use the postgres client directly if available or extend state manager.
-    # Assuming state_manager has access to underlying DB.
     try:
-        # Save to Postgres via wrapper (mocked here if method missing)
+        # 1. Create Learner Record
         if hasattr(state_manager.postgres, "create_learner"):
-            await state_manager.postgres.create_learner(profile)
+            # Fix: Pass learner_id and profile
+            await state_manager.postgres.create_learner(learner_id, profile)
         
-        # Cache profile
+        # 2. Record Consent (Audit Log)
+        if hasattr(state_manager.postgres, "record_consent"):
+            client_ip = req.client.host if req.client else "unknown"
+            user_agent = req.headers.get("user-agent", "unknown")
+            await state_manager.postgres.record_consent(
+                learner_id, "v1.0", request.consent_agreed, client_ip, user_agent
+            )
+            
+        # 3. Assign Experiment Group
+        if hasattr(state_manager.postgres, "assign_experiment_group"):
+            await state_manager.postgres.assign_experiment_group(learner_id, cohort_group)
+            
+        # 4. Cache profile
         await state_manager.set(f"profile:{learner_id}", profile)
         
-        logger.info(f"Learner {learner_id} signed up. Cohort: {cohort}")
+        logger.info(f"Learner {learner_id} signed up. Cohort: {cohort_group}")
         
     except Exception as e:
         logger.error(f"Signup failed: {e}")
-        raise HTTPException(status_code=500, detail="Signup failed")
+        # In production, we might want to rollback here
+        raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
     
     return LearnerProfileResponse(
         learner_id=learner_id,
         name=request.name,
-        cohort=cohort,
+        cohort=cohort_group,
         created_at=profile["created_at"]
     )
 

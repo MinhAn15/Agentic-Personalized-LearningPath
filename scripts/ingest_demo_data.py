@@ -39,8 +39,10 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "testpassword")
 async def setup_neo4j_driver():
     return AsyncGraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
+import time
+
 async def ingest_to_vector_store(documents: List[Document]):
-    """Ingest documents into Vector Store."""
+    """Ingest documents into Vector Store with Rate Limiting."""
     logger.info(f"📚 Processing {len(documents)} documents for Vector Store...")
     
     settings = get_settings()
@@ -52,23 +54,48 @@ async def ingest_to_vector_store(documents: List[Document]):
     except Exception as e:
         logger.warning(f"Failed to load embedding model via Factory: {e}. LlamaIndex might default to OpenAI.")
 
-    # Check if storage exists
+    # Always initialize index first
     if not VECTOR_STORE_DIR.exists():
-        logger.info("Initializing new Vector Store...")
-        index = VectorStoreIndex.from_documents(documents)
+        logger.info("Initializing new Vector Store (Empty)...")
+        # Create empty index first to avoid massive initial embedding call
+        index = VectorStoreIndex.from_documents([], show_progress=True)
         index.storage_context.persist(persist_dir=str(VECTOR_STORE_DIR))
     else:
-        logger.info("Updating existing Vector Store...")
+        logger.info("Loading existing Vector Store...")
         storage_context = StorageContext.from_defaults(persist_dir=str(VECTOR_STORE_DIR))
         index = load_index_from_storage(storage_context)
+
+    # Process documents in small batches with delay
+    BATCH_SIZE = 1
+    DELAY_SECONDS = 2
+    
+    total_docs = len(documents)
+    logger.info(f"Insering {total_docs} docs in batches of {BATCH_SIZE} with {DELAY_SECONDS}s delay...")
+    
+    for i in range(0, total_docs, BATCH_SIZE):
+        batch = documents[i:i + BATCH_SIZE]
+        logger.info(f"  Embedding batch {i//BATCH_SIZE + 1}/{(total_docs + BATCH_SIZE - 1)//BATCH_SIZE}...")
         
-        # Determine which docs are new (simple check by filename in metadata)
-        # For simplicity in this script, we just insert all. LlamaIndex handles some dedup if ids match,
-        # but we'll trust the user runs this on a fresh env or accepts dupes for now.
-        for doc in documents:
-            index.insert(doc)
-        
-        index.storage_context.persist(persist_dir=str(VECTOR_STORE_DIR))
+        try:
+            for doc in batch:
+                index.insert(doc)
+            
+            # Save progress periodically
+            if (i + BATCH_SIZE) % 5 == 0:
+                 index.storage_context.persist(persist_dir=str(VECTOR_STORE_DIR))
+                 
+            time.sleep(DELAY_SECONDS)
+            
+        except Exception as e:
+            logger.error(f"  ❌ Failed to insert batch starting at index {i}: {e}")
+            # Continue to next batch? Maybe stop? Let's verify connection first.
+            if "quota" in str(e).lower():
+                logger.warning("  ⚠️ Quota exceeded. Waiting 60 seconds...")
+                time.sleep(60)
+                # Retry current batch logic would be better, but keeping it simple for now: skip
+    
+    # Final Persist
+    index.storage_context.persist(persist_dir=str(VECTOR_STORE_DIR))
         
     logger.info("✅ Vector Store Updated.")
 
@@ -144,11 +171,16 @@ async def main():
     print("Starting Data Ingestion...")
     
     # 1. Load Documents
-    if not DEMO_DATA_DIR.exists():
-        logger.error(f"demo_data directory not found at {DEMO_DATA_DIR.absolute()}")
+    target_dir = DEMO_DATA_DIR
+    if len(sys.argv) > 1:
+        target_dir = Path(sys.argv[1])
+        
+    if not target_dir.exists():
+        logger.error(f"Target directory not found at {target_dir.absolute()}")
         return
 
-    reader = SimpleDirectoryReader(str(DEMO_DATA_DIR), recursive=True)
+    logger.info(f"📂 Loading documents from: {target_dir}")
+    reader = SimpleDirectoryReader(str(target_dir), recursive=True)
     documents = reader.load_data()
     logger.info(f"Loaded {len(documents)} document chunks.")
     

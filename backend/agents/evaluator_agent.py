@@ -107,11 +107,31 @@ class EvaluatorAgent(BaseAgent):
         
         # Event subscriptions
         
-        # Event subscriptions
         if event_bus and hasattr(event_bus, 'subscribe'):
             event_bus.subscribe('TUTOR_ASSESSMENT_READY', self._on_assessment_ready)
             self.logger.info("Subscribed to TUTOR_ASSESSMENT_READY")
     
+    def _sanitize_input(self, text: str) -> str:
+        """
+        Sanitize input to prevent Prompt Injection via delimiter spoofing.
+        Removes critical system tags used in the prompt template.
+        """
+        if not text:
+            return ""
+        
+        # Critical tags to strip
+        forbidden_tags = [
+            "[System]", "[Rubric]", 
+            "[The Start of Assistant", "[The End of Assistant",
+            "[Question]", "[User]"
+        ]
+        
+        sanitized = text
+        for tag in forbidden_tags:
+            sanitized = sanitized.replace(tag, "(REDACTED_TAG)")
+            
+        return sanitized
+
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """
         Main execution method - evaluate learner response.
@@ -141,7 +161,10 @@ class EvaluatorAgent(BaseAgent):
                 # FIX Issue 4: Strip all IDs for consistency
                 learner_id = (kwargs.get("learner_id") or "").strip()
                 concept_id = (kwargs.get("concept_id") or "").strip()
-                learner_response = (kwargs.get("learner_response") or "").strip()
+                # Security: Sanitize input
+                raw_response = (kwargs.get("learner_response") or "").strip()
+                learner_response = self._sanitize_input(raw_response)
+                
                 expected_answer = (kwargs.get("expected_answer") or "").strip()
                 correct_answer_explanation = kwargs.get("correct_answer_explanation", "")
                 force_real = kwargs.get("force_real", False)

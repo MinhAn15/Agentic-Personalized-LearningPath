@@ -115,6 +115,55 @@ class PostgreSQLClient:
                     timestamp TIMESTAMP DEFAULT NOW()
                 )
             """)
+
+            # --- EXPERIMENT & CONSENT TABLES (Added for Phase 3 Pilot) ---
+            
+            # Experiment Groups
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS experiment_groups (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(50) NOT NULL UNIQUE,
+                    description TEXT,
+                    config JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    is_active BOOLEAN DEFAULT TRUE
+                )
+            """)
+            
+            # User Experiment Assignments
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_experiments (
+                    id SERIAL PRIMARY KEY,
+                    learner_id VARCHAR(255) NOT NULL REFERENCES learners(learner_id) ON DELETE CASCADE,
+                    group_id INTEGER NOT NULL REFERENCES experiment_groups(id),
+                    assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    status VARCHAR(20) DEFAULT 'ACTIVE',
+                    CONSTRAINT uq_learner_experiment UNIQUE (learner_id, group_id) 
+                )
+            """)
+            
+            # User Consents
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_consents (
+                    id SERIAL PRIMARY KEY,
+                    learner_id VARCHAR(255) NOT NULL REFERENCES learners(learner_id) ON DELETE CASCADE,
+                    consent_version VARCHAR(20) NOT NULL, 
+                    granted BOOLEAN NOT NULL,             
+                    ip_address VARCHAR(45),               
+                    user_agent TEXT,
+                    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_learner_consent_version UNIQUE (learner_id, consent_version, timestamp)
+                )
+            """)
+            
+            # Seed Pilot Groups
+            await conn.execute("""
+                INSERT INTO experiment_groups (name, description, config)
+                VALUES 
+                    ('pilot_control', 'Standard Linear Path', '{"adaptive_enabled": false}'),
+                    ('pilot_treatment', 'Full Agentic Adaptation', '{"adaptive_enabled": true, "planner_model": "gpt-4"}')
+                ON CONFLICT (name) DO NOTHING
+            """)
             
             self.logger.info("✅ Schema initialized")
     
@@ -266,6 +315,60 @@ class PostgreSQLClient:
         except Exception as e:
             self.logger.error(f"❌ Get evaluations failed: {e}")
             return []
+    
+    # ============= EXPERIMENT & CONSENT OPERATIONS =============
+
+    async def record_consent(
+        self, 
+        learner_id: str, 
+        version: str, 
+        granted: bool, 
+        ip: str = None, 
+        user_agent: str = None
+    ) -> bool:
+        """Record user consent (Immutable Audit Log)"""
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO user_consents 
+                    (learner_id, consent_version, granted, ip_address, user_agent)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    learner_id, version, granted, ip, user_agent
+                )
+            self.logger.debug(f"✅ Recorded consent for {learner_id}")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ Record consent failed: {e}")
+            return False
+
+    async def assign_experiment_group(self, learner_id: str, group_name: str) -> bool:
+        """Assign learner to an experiment group by name"""
+        try:
+            async with self.pool.acquire() as conn:
+                # Get Group ID
+                group_id = await conn.fetchval(
+                    "SELECT id FROM experiment_groups WHERE name = $1", group_name
+                )
+                if not group_id:
+                    self.logger.warning(f"⚠️ Experiment group '{group_name}' not found")
+                    return False
+                
+                # Assign
+                await conn.execute(
+                    """
+                    INSERT INTO user_experiments (learner_id, group_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (learner_id, group_id) DO NOTHING
+                    """,
+                    learner_id, group_id
+                )
+            self.logger.debug(f"✅ Assigned {learner_id} to {group_name}")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ Assign experiment failed: {e}")
+            return False
     
     # ============= GENERIC OPERATIONS =============
     
