@@ -11,12 +11,29 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Mock llama_index before importing agent
+# Mock llama_index before importing agent
+# Mock llama_index before importing agent
 sys.modules['llama_index'] = MagicMock()
 sys.modules['llama_index.llms'] = MagicMock()
-sys.modules['llama_index.llms.gemini'] = MagicMock()
-sys.modules['llama_index.embeddings'] = MagicMock()
-sys.modules['llama_index.embeddings.gemini'] = MagicMock()
 sys.modules['llama_index.core'] = MagicMock()
+
+# 1. Mock 'llama_index.core.base' hierarchy to support llm_factory imports
+mock_base = MagicMock()
+sys.modules['llama_index.core.base'] = mock_base
+sys.modules['llama_index.core.base.llms'] = MagicMock()
+sys.modules['llama_index.core.base.llms.types'] = MagicMock()
+
+# 2. Mock specific classes imported from types
+mock_types = sys.modules['llama_index.core.base.llms.types']
+mock_types.ChatMessage = MagicMock
+mock_types.MessageRole = MagicMock
+
+# 3. Ensure other submodules are available
+sys.modules['llama_index.core.llms'] = MagicMock()
+sys.modules['llama_index.core.embeddings'] = MagicMock()
+sys.modules['llama_index.embeddings'] = MagicMock()
+sys.modules['llama_index.llms.gemini'] = MagicMock()
+sys.modules['llama_index.embeddings.gemini'] = MagicMock()
 
 from backend.agents.evaluator_agent import EvaluatorAgent, ErrorType, PathDecision
 from backend.core.constants import (
@@ -66,12 +83,13 @@ class MockLLM:
         # Determine behavior based on prompt content
         prompt_lower = prompt.lower()
         
-        if "score this learner response" in prompt_lower:
+        if "score this learner response" in prompt_lower or "[judge]" in prompt_lower or "checking the quality of the answer" in prompt_lower:
             # Logic for scoring
-            if "where combines" in prompt_lower: return MagicMock(text='{"score": 0.2}')
-            if "where filters" in prompt_lower: return MagicMock(text='{"score": 1.0}')
-            if "almost right" in prompt_lower: return MagicMock(text='{"score": 0.7}')
-            return MagicMock(text='{"score": 0.5}')
+            if "where combines" in prompt_lower: return MagicMock(text='10.0 2.0\nExplanation: Wrong.\n```json\n{"correctness": 2, "completeness": 2, "clarity": 5}\n```')
+            if "where filters" in prompt_lower: return MagicMock(text='10.0 10.0\nExplanation: Perfect.\n```json\n{"correctness": 10, "completeness": 10, "clarity": 10}\n```')
+            if "almost right" in prompt_lower: return MagicMock(text='10.0 7.0\nExplanation: Good.\n```json\n{"correctness": 8, "completeness": 6, "clarity": 8}\n```')
+            # Fallback
+            return MagicMock(text='10.0 5.0\nExplanation: Okay.\n```json\n{"correctness": 5, "completeness": 5, "clarity": 5}\n```')
             
         if "classify this error" in prompt_lower:
             if "where combines" in prompt_lower: return MagicMock(text='CONCEPTUAL')
@@ -96,6 +114,10 @@ async def run_mock_mode():
     llm = MockLLM()
     
     agent = EvaluatorAgent("mock_evaluator", state_manager, event_bus, llm=llm)
+    
+    # IMPORTANT: Disable the agent's internal "lazy mock" short-circuit
+    # so it actually calls our sophisticated MockLLM logic.
+    agent.settings.MOCK_LLM = False
     
     # Mock Neo4j Concept Retrieval
     state_manager.neo4j.run_query = AsyncMock(return_value=[{

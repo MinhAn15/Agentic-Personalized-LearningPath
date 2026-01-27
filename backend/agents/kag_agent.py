@@ -110,6 +110,7 @@ class KAGAgent(BaseAgent):
         
         # Store references
         self.course_kg = course_kg
+        self.embedding_model = embedding_model or LLMFactory.get_embedding_model()
         
         # Initialize core modules
         self.note_generator = AtomicNoteGenerator(
@@ -349,32 +350,80 @@ If you receive a "System Alert: Memory Pressure", you MUST save important detail
         return "Saved to Archival Storage."
 
     async def _archival_memory_search(self, query: str, page: int = 0):
-        """Tool: Read from Long-Term Storage (Disk)."""
+        """Tool: Read from Long-Term Storage (Disk) using Hybrid Search."""
         if not self.state_manager.neo4j:
             return "Error: Archival Storage offline."
             
-        # Hybrid Search: Vector + Keyword (simulated with Cypher contains for now)
         limit = 5
         skip = page * limit
         
-        results = await self.state_manager.neo4j.run_query(
+        try:
+            # 1. Vector Search (Semantic)
+            # Embed the query
+            query_embedding = await self.embedding_model.aget_text_embedding(query)
+            
+            # Cypher for Vector Search
+            # Assuming 'note_node_index' exists on NoteNode(embedding)
+            vector_query = """
+            CALL db.index.vector.queryNodes('note_node_index', 10, $embedding)
+            YIELD node, score
+            WHERE score > 0.7  // Relevance Threshold
+            RETURN node.content as content, node.created_at as date, score, 'vector' as source
             """
+            
+            # 2. Keyword Search (Lexical)
+            keyword_query = """
             MATCH (n:NoteNode)
             WHERE n.content CONTAINS $query OR n.key_insight CONTAINS $query
-            RETURN n.content as content, n.created_at as date
+            RETURN n.content as content, n.created_at as date, 1.0 as score, 'keyword' as source
             ORDER BY n.created_at DESC
-            SKIP $skip LIMIT $limit
-            """,
-            query=query,
-            skip=skip,
-            limit=limit
-        )
-        
-        if not results:
-            return f"No results found in Archival Storage for '{query}' (Page {page})."
+            LIMIT 10
+            """
             
-        formatted = "\n".join([f"- [{r['date']}] {r['content'][:200]}..." for r in results])
-        return f"Archival Search Results (Page {page}):\n{formatted}\n(Use page={page+1} for more)"
+            # Execute both in parallel
+            results_vector = await self.state_manager.neo4j.run_query(vector_query, embedding=query_embedding)
+            results_keyword = await self.state_manager.neo4j.run_query(keyword_query, query=query)
+            
+            # 3. Hybrid Fusion (Simple De-duplication & Interleaving)
+            # We prioritize Vector results, but add Keyword results if unique.
+            combined = []
+            seen_content = set()
+            
+            # Add Vector results first
+            if results_vector:
+                for r in results_vector:
+                    h = hash(r['content'])
+                    if h not in seen_content:
+                        clean_content = r['content']
+                        # Annotate
+                        r['display'] = f"[VECTOR {r['score']:.2f}] {clean_content[:150]}..."
+                        combined.append(r)
+                        seen_content.add(h)
+            
+            # Add Keyword results
+            if results_keyword:
+                for r in results_keyword:
+                    h = hash(r['content'])
+                    if h not in seen_content:
+                        clean_content = r['content']
+                        r['display'] = f"[KEYWORD] {clean_content[:150]}..."
+                        combined.append(r)
+                        seen_content.add(h)
+            
+            # Pagination
+            start = skip
+            end = skip + limit
+            page_results = combined[start:end]
+            
+            if not page_results:
+                return f"No results found in Archival Storage for '{query}' (Page {page})."
+                
+            formatted = "\n".join([f"- [{r.get('date', 'N/A')}] {r['display']}" for r in page_results])
+            return f"Archival Search Results (Page {page}):\n{formatted}\n(Use page={page+1} for more)"
+
+        except Exception as e:
+            self.logger.error(f"Hybrid Search Failed: {e}")
+            return f"Search Error: {e}"
 
     
     # ==========================================

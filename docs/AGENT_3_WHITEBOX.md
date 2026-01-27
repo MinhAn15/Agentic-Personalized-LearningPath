@@ -2,16 +2,58 @@
 
 ## 1. Kiến trúc Nội tại (Internal Architecture)
 
-Agent 3 là "người điều hướng" (navigator) của hệ thống, chịu trách nhiệm tạo ra chuỗi khái niệm học tập tối ưu. Khác với các bộ lập kế hoạch dựa trên luật tĩnh (static rule-based), nó sử dụng phương pháp lai kết hợp giữa **Graph Traversal (Adaptive Chaining)** và **Reinforcement Learning (LinUCB)**.
+Agent 3 là "người điều hướng" (navigator) của hệ thống, chịu trách nhiệm tạo ra chuỗi khái niệm học tập tối ưu.
 
-### 1.1 Quy trình Xử lý (6 Pha)
+> [!NOTE]
+> **ARCHITECTURAL UPDATE (2026-01-27)**: Tài liệu này mô tả phiên bản cơ sở. Kiến trúc đầy đủ đã được nâng cấp lên **Dual-System Architecture (System 1 + System 2)**. Vui lòng xem chi tiết tại `docs/WHITEBOX_DEEP_DIVE.md` để có thông tin chính xác nhất và các trích dẫn mã nguồn thực tế.
 
-1.  **Input & Context Loading**:
-    -   Nhận `learner_id`, `goal`, và `last_result`.
-    -   Tải Learner Profile mạnh mẽ (vector + phong cách ưu tiên).
-    -   Truy vấn Personal Knowledge Graph (Neo4j) để xác định các ứng viên (candidates).
+Khác với các bộ lập kế hoạch dựa trên luật tĩnh (static rule-based), nó sử dụng phương pháp lai kết hợp giữa **Tree of Thoughts (System 2)** và **Reinforcement Learning (System 1)**.
 
-2.  **Smart Filtering (Lọc thông minh)**:
+### 1.1 Dual-System Architecture (Kiến trúc Hệ thống Kép)
+
+Agent 3 không chỉ là một bộ lập kế hoạch đơn lẻ mà là sự kết hợp giữa **System 2 (Tư duy chậm - Deliberative)** và **System 1 (Tư duy nhanh - Intuitive)**, lấy cảm hứng từ lý thuyết của Daniel Kahneman.
+
+#### **System 2: Tree of Thoughts (ToT)**
+*   **Vai trò**: Lập kế hoạch chiến lược, khám phá các chuỗi hành động phức tạp với khả năng "Lookahead".
+*   **Cơ chế**: Sử dụng Beam Search để duyệt qua các trạng thái tương lai, đánh giá tính khả thi thông qua "Mental Simulation".
+*   **Triển khai**: `backend/agents/path_planner_agent.py` (Lines 627-645).
+    *   Gọi `_explore_learning_paths` để kích hoạt Beam Search.
+    *   Sử dụng LLM để sinh "Thoughts" (các bước đi tiềm năng) và đánh giá chúng.
+*   **Ưu điểm**: Chất lượng tối ưu, tránh các bẫy cục bộ (local optima).
+
+#### **System 1: Contextual Bandits (LinUCB)**
+*   **Vai trò**: Phản ứng nhanh, thích ứng thời gian thực dựa trên phản hồi của người học.
+*   **Cơ chế**: Sử dụng thuật toán LinUCB với Ridge Regression để chọn hành động tốt nhất dựa trên ngữ cảnh (Learner Profile Vector).
+*   **Triển khai**: `backend/core/rl_engine.py` (Lines 335-360).
+    *   `LinUCBArm` duy trì ma trận hiệp phương sai `A` và vector `b`.
+    *   `_linucb` tính toán UCB score: $score = \theta^T x + \alpha \sqrt{x^T A^{-1} x}$.
+*   **Ưu điểm**: Tốc độ cực nhanh (~100ms), học tăng cường liên tục.
+
+#### **Cơ chế Fallback (Safety Net)**
+Hệ thống ưu tiên System 2. Nếu System 2 thất bại (do LLM lỗi, timeout, hoặc không tìm thấy đường đi), hệ thống tự động chuyển sang System 1 (LinUCB) để đảm bảo luôn có output cho người học.
+*   **Code Reference**: `path_planner_agent.py` (Line 647-654):
+    ```python
+    # Fallback to LinUCB (System 1) if ToT failed or returned empty
+    if not learning_path.get("success"):
+        logger.info("⚠️ ToT Planner fallback -> Switching to LinUCB (System 1)")
+        learning_path = await self._generate_adaptive_path(...)
+    ```
+
+### 1.2 Quy trình Xử lý Kết hợp (Workflow)
+
+1.  **Context Construction**: Tvector hóa profile người học ($\mathbf{x}_t$).
+2.  **System 2 Activation**:
+    *   Kích hoạt `_explore_learning_paths`.
+    *   Nếu thành công -> Trả về `Detailed Path`.
+3.  **System 1 Activation (Fallback)**:
+    *   Nếu System 2 fail, kích hoạt `_generate_adaptive_path`.
+    *   Sử dụng `rl_engine.select_concept` để chọn ứng viên tốt nhất.
+4.  **Verification**: Kiểm tra các ràng buộc cứng (Prerequisites).
+
+### ✅ Ground Truth Verification
+- [x] **ToT Logic Verified**: `backend/agents/path_planner_agent.py` (Lines 627-645) implements Beam Search & Thought Generation.
+- [x] **LinUCB Logic Verified**: `backend/core/rl_engine.py` (Lines 335-360) implements Li et al. (2010) algorithm with Ridge Regression.
+- [x] **Fallback Mechanism Verified**: `backend/agents/path_planner_agent.py` (Line 647) correctly catches ToT failure and delegates to LinUCB.
     -   **Personal Subgraph Expansion**: Thay vì quét toàn bộ KG, phương pháp bắt đầu từ các khái niệm đã biết (`:MasteryNode` trong Neo4j) và mở rộng sang các lân cận trực tiếp (`NEXT`, `REQUIRES`). Điều này đảm bảo khả năng mở rộng O(1) so với kích thước đồ thị.
 
 3.  **Probabilistic Mastery Gate (Nâng cấp Khoa học)**:

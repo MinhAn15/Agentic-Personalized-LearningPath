@@ -74,6 +74,7 @@ class PathPlannerAgent(BaseAgent):
     
     def __init__(self, agent_id: str, state_manager, event_bus, llm=None):
         super().__init__(agent_id, AgentType.PATH_PLANNER, state_manager, event_bus)
+        self.llm = llm  # Store LLM reference for ToT
         
         self.settings = get_settings()
 
@@ -236,36 +237,81 @@ class PathPlannerAgent(BaseAgent):
         """
         State Evaluator: Evaluate path feasibility (0.0 - 1.0).
         Uses "Mental Simulation" to predict learner's future state.
+        
+        Rigor Upgrade: Injects Affective State (Engagement) and Interaction Log.
         """
         if not self.llm:
             return 0.5 
 
         path_str = " -> ".join(path)
         
-        # Get Learner Profile for context (Assuming it's cached or we fetch it)
-        # For efficiency, we might pass it down, but here we'll fetch just strictly necessary info
-        # or rely on the agent's state manager if needed. 
-        # For now, we'll keep the prompt focused on the path logic itself to save tokens,
-        # unless we want to inject the mastery vector.
+        # 1. Fetch Learner State (Affective + Cognitive)
+        profile = await self.state_manager.get_learner_profile(learner_id)
+        engagement = 0.8 # Default
+        history_summary = "No recent history."
+        
+        if profile:
+            # Dimension 17: engagement_score
+            engagement = profile.get("engagement_score", 0.8)
+            # Dimension 13: interaction_log (last 3 interactions for context)
+            log = profile.get("interaction_log", [])
+            if log:
+                recent = log[-3:]
+                history_summary = "\n".join([f"- {i.get('role')}: {i.get('content')[:100]}..." for i in recent])
+
+        # 2. Hard Constraint: Prerequisite Check (The "Gatekeeper")
+        # ---------------------------------------------------------
+        if path and len(path) >= 1:
+            target_node = path[-1]
+            try:
+                query = """
+                MATCH (target:CourseConcept {concept_id: $target})<-[:REQUIRES]-(prereq:CourseConcept)
+                WHERE NOT EXISTS {
+                    MATCH (l:Learner {learner_id: $learner_id})-[:HAS_MASTERY]->(m:MasteryNode {concept_id: prereq.concept_id})
+                    WHERE m.level >= $threshold
+                }
+                RETURN count(prereq) as missing_count
+                """
+                results = await self.state_manager.neo4j.run_query(
+                    query, 
+                    learner_id=learner_id, 
+                    target=target_node,
+                    threshold=MASTERY_PREREQUISITE_THRESHOLD
+                )
+                
+                if results and results[0]['missing_count'] > 0:
+                    missing = results[0]['missing_count']
+                    self.logger.warning(f"🛑 Hard Constraint Blocking: {target_node} has {missing} unmet prerequisites.")
+                    return 0.0 # REJECT IMMEDIATE (Constraint)
+                    
+            except Exception as e:
+                self.logger.error(f"Constraint check failed: {e}")
+                return 0.0
+
+        # 3. LLM Evaluation (Mental Simulation)
+        # ---------------------------------------------------------
+        # We simulate the "Affective State" (Boredom/Frustration) based on engagement
+        boredom_risk = "HIGH" if engagement < 0.4 else "LOW"
         
         prompt = f"""
-        Input:
-        Proposed Path: {path_str}
-        
-        Instruction:
-        Evaluate this teaching step. Perform a mental simulation of the student learning this concept.
-        Consider:
-        1. Prerequisites: Does the student have the required background?
-        2. Scaffolding Value: Will learning this make future concepts easier?
-        3. Frustration Risk: Is the gap too wide?
+        Learner ID: {learner_id}
+        Engagement Score (Affective State): {engagement:.2f} (Boredom Risk: {boredom_risk})
+        Recent History:
+        {history_summary}
 
-        Assign a "Strategic Value" score (1-10) considering LONG-TERM benefit.
-        - 1: Impossible/Harmful.
-        - 5: Neutral/Safe.
-        - 10: High Leverage.
+        Proposed Learning Path: {path_str}
+        
+        Task:
+        Perform a mental simulation of the student learning this path. 
+        Predict the learner's reaction considering their recent history and engagement level.
+
+        Criteria:
+        1. Frustration Risk: Is the step too large given their state?
+        2. Boredom Risk: Is the path too repetitive?
+        3. Scaffolding: Does this logically build on the 'Recent History'?
 
         Output format JSON:
-        {{"simulation_reasoning": "...", "value_score": 8}}
+        {{"simulation_reasoning": "...", "affective_prediction": "bored/frustrated/engaged", "value_score": 8}}
         """
         try:
             response = await self.llm.acomplete(prompt)
@@ -274,7 +320,7 @@ class PathPlannerAgent(BaseAgent):
             # Normalize 1-10 to 0.0-1.0
             return max(0.0, min(1.0, score / 10.0))
         except Exception as e:
-            self.logger.warning(f"ToT Evaluation failed: {e}")
+            self.logger.warning(f"ToT Simulation failed: {e}")
             return 0.5
 
     async def _thought_generator(self, learner_id: str, current_concept: str, target_concept: str = None) -> List[Dict[str, Any]]:
@@ -370,10 +416,28 @@ class PathPlannerAgent(BaseAgent):
 
             try:
                 # Calculate Reward
-                completion_reward = 1.0 if passed else 0.0
-                dropout_penalty = 0.0  # TODO: detect dropout from behavior signals
+                # Calculate Reward (The Rigorous Math)
+                # Formula: R_t = (alpha * mastery) + (beta * completion) - (gamma * dropout_risk)
                 
-                reward = (0.6 * score) + (0.4 * completion_reward) - dropout_penalty
+                # 1. Extract Components
+                completion_reward = 1.0 if passed else 0.0
+                
+                # 2. Get Dropout Risk (from Event or Profiler)
+                # If not in event, assume low risk (0.1) unless repeated failure
+                dropout_risk = event.get('dropout_risk', 0.0)
+                if not dropout_risk and not passed:
+                    dropout_risk = 0.2  # Heuristic: Failure increases risk
+                
+                # 3. Define Constants (from Thesis)
+                ALPHA = 0.6  # Mastery Weight
+                BETA = 0.4   # Completion Weight
+                GAMMA = 0.5  # Dropout Penalty Weight
+                
+                reward = (ALPHA * score) + (BETA * completion_reward) - (GAMMA * dropout_risk)
+                
+                # Log for Socratic Audit
+                self.logger.info(f"💰 Reward Calc: {reward:.4f} = ({ALPHA}*{score:.2f}) + ({BETA}*{completion_reward}) - ({GAMMA}*{dropout_risk:.2f})")
+
                 
                 # --- UPDATE MAB STATS (with retry) ---
                 redis = self.state_manager.redis

@@ -138,12 +138,25 @@ class TutorAgent(BaseAgent):
                     "action": "HANDOFF_TO_EVALUATOR"
                 }
 
+            # RETRIEVAL AUGMENTED GENERATION (KAG) - Fix Dead Code
+            course_context, course_score = await self._course_kg_retrieve(concept_id)
+            personal_context, personal_score = await self._personal_kg_retrieve(learner_id, concept_id)
+            
+            # Log retrieval
+            if course_score > 0:
+                self.logger.info(f"[KAG] Retrieved course context for {concept_id} (Score: {course_score:.2f})")
+            if personal_score > 0:
+                self.logger.info(f"[KAG] Retrieved personal context for {learner_id} (Score: {personal_score:.2f})")
+
             # 3. Determine Response Strategy based on Phase (Method Ontology)
             # Source: Chandrasekaran et al. (1999) "Ontologies for Task Method Structures"
             response_text = await self._determine_socratic_state(
                 state=state,
                 question=question,
                 conversation_history=conversation_history,
+                course_context=course_context,
+                personal_context=personal_context,
+                hint_level=hint_level,
                 force_real=force_real
             )
             
@@ -176,6 +189,9 @@ class TutorAgent(BaseAgent):
         state: DialogueState,
         question: str,
         conversation_history: List[Dict] = None,
+        course_context: Dict = None,
+        personal_context: Dict = None,
+        hint_level: int = 1,
         force_real: bool = False
     ) -> str:
         """
@@ -204,7 +220,10 @@ class TutorAgent(BaseAgent):
         if state.phase == DialoguePhase.EXPLANATION:
             # PHASE 1: Lightweight prompting for initial understanding
             response_text = await self._generate_probing_question(
-                question, state, force_real=force_real
+                question, state, 
+                course_context=course_context, 
+                personal_context=personal_context, 
+                force_real=force_real
             )
             
         elif state.phase == DialoguePhase.QUESTIONING:
@@ -216,6 +235,9 @@ class TutorAgent(BaseAgent):
                     question, 
                     conversation_history or [],
                     state.concept_id,
+                    course_context=course_context,
+                    personal_context=personal_context,
+                    hint_level=hint_level,
                     force_real=force_real
                 )
                 best_trace = self._check_consensus(traces)
@@ -248,10 +270,17 @@ class TutorAgent(BaseAgent):
             
         return response_text
 
-    async def _generate_probing_question(self, question: str, state: DialogueState, force_real: bool = False) -> str:
+    async def _generate_probing_question(self, question: str, state: DialogueState, 
+                                       course_context: Dict = None, personal_context: Dict = None,
+                                       force_real: bool = False) -> str:
         """Lightweight prompt for Intro/Probing phases"""
         if self.settings.MOCK_LLM and not force_real:
              return f"Create a probing question about {state.concept_id} based on '{question}'? (Mock)"
+
+        # Prepare Context String
+        context_str = ""
+        if course_context:
+            context_str += f"\n[Confirmed Knowledge]\nDefinition: {course_context.get('definition')}\nMisconceptions: {course_context.get('misconceptions')}"
 
         prompt = f"""
         Act as a Socratic Tutor.
@@ -259,13 +288,19 @@ class TutorAgent(BaseAgent):
         Phase: {state.phase.value}
         Student Question: {question}
         
+        ### CONTEXT FROM KNOWLEDGE GRAPH
+        {context_str}
+        
         Goal: Ask a guiding question to check understanding without giving the answer.
         Keep it short (1-2 sentences).
         """
         response = await self.llm.acomplete(prompt)
         return response.text
 
-    async def _generate_cot_traces(self, question: str, history: List[Dict], concept_id: str, n: int = TUTOR_COT_TRACES, force_real: bool = False) -> List[str]:
+    async def _generate_cot_traces(self, question: str, history: List[Dict], concept_id: str, 
+                                   course_context: Dict = None, personal_context: Dict = None, 
+                                   hint_level: int = 1,
+                                   n: int = TUTOR_COT_TRACES, force_real: bool = False) -> List[str]:
         """
         Generate n internal reasoning traces (Internal Monologue).
         Uses Exemplars from Wei et al. (2022) to elicit reasoning.
@@ -278,25 +313,37 @@ class TutorAgent(BaseAgent):
         if not self.llm:
             return []
             
+        # Determine Scaffolding Strategy based on Hint Level (1-3)
+        strategy_instruction = ""
+        if hint_level == 1:
+            strategy_instruction = "Scaffolding Strategy: MINIMAL GUIDANCE. Give a vague nudge. Do not reveal steps."
+        elif hint_level == 2:
+            strategy_instruction = "Scaffolding Strategy: FIRST STEP. Break it down and give ONLY the first step."
+        elif hint_level >= 3:
+            strategy_instruction = "Scaffolding Strategy: DETAILED BREAKDOWN. Explicitly guide the student through the logic."
+            
+        # Prepare Context String
+        context_str = ""
+        if course_context:
+            context_str += f"\n[Confirmed Knowledge]\nDefinition: {course_context.get('definition')}\nMisconceptions: {course_context.get('misconceptions')}"
+        if personal_context:
+            context_str += f"\n[Learner Profile]\nStyle: {personal_context.get('learning_style')}\nKnown Weaknesses: {personal_context.get('past_errors')}"
+
         # SOTA PROMPTING STRATEGY via NotebookLM Audit
         prompt = f"""
         Instruction: You are a Tutor. Solve the problem step-by-step to identify the logic, but DO NOT reveal the answer to the student yet.
+        
+        ### CONTEXT FROM KNOWLEDGE GRAPH
+        {context_str}
+        
+        ### SCAFFOLDING STRATEGY (Level {hint_level})
+        {strategy_instruction}
 
         [Exemplar 1: Math/Logic]
         Q: Roger has 5 tennis balls. He buys 2 more cans of tennis balls. Each can has 3 tennis balls. How many tennis balls does he have now?
         CoT: Roger started with 5 balls. 2 cans of 3 tennis balls each is 6 tennis balls. 5 + 6 = 11.
         Student Hint: First, calculate how many balls are in the new cans.
-
-        [Exemplar 2: Commonsense]
-        Q: Would a pear sink in water?
-        CoT: The density of a pear is about 0.6 g/cm^3, which is less than water. Objects less dense than water float. Thus, a pear would float.
-        Student Hint: Think about the density of the pear compared to water.
-
-        [Exemplar 3: Coding]
-        Q: My recursion function errors with 'maximum depth exceeded'.
-        CoT: Recursion requires a base case to stop. Infinite recursion happens if the base case is missing or unreachable. The student likely forgot the base case.
-        Student Hint: Check your function for a stop condition. Does it handle the simplest case?
-
+        
         [Current Interaction]
         Q: {question}
         Concept Context: {concept_id}
@@ -305,7 +352,7 @@ class TutorAgent(BaseAgent):
         Task: Diagnose the student's misunderstanding.
         Output Format:
         CoT: [Internal reasoning trace about the error]
-        Student Hint: [The first scaffolding step]
+        Student Hint: [The scaffolding step based on strategy]
         """
         try:
              # Simulation of multiple calls (in production, run in parallel)
