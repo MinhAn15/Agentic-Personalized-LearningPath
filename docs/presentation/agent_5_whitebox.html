@@ -250,16 +250,16 @@ Input Format:
                     <details class="deep-dive">
                         <summary>Deep Dive: Logic Tree</summary>
                         <div class="dive-content">
-                            <pre><code>IF Score >= 0.8:
+                            <pre><code>IF Score >= 0.9:
     RETURN "MASTERED"
-ELIF Score >= 0.6:
+ELIF Score >= 0.8:
     RETURN "PROCEED"
-ELIF ErrorType == "MISCONCEPTION":
+ELIF Score >= 0.6:
+    RETURN "ALTERNATE" (Easier Problem)
+ELIF ErrorType == "CONCEPTUAL":
     RETURN "REMEDIATE" (Concept Review)
-ELIF ErrorType == "CARELESS":
-    RETURN "RETRY" (Same Problem)
 ELSE:
-    RETURN "ALTERNATE" (Easier Problem)</code></pre>
+    RETURN "RETRY" (Same Problem)</code></pre>
                         </div>
                     </details>
                     
@@ -329,7 +329,7 @@ ELSE:
     </div>
 
     <script>
-        const NODE_DETAILS = {"Judge": {"title": "JudgeLM Scoring", "desc": "Evaluates answer quality using 'Reference-as-Prior' technique.", "logic": "1. Compare Student vs Golden Answer.\n2. Score on Rubric (Correctness 60%, Completeness 20%, Clarity 20%).", "specs": "Model: Gemini 1.5 Zero-shot\nOutput: 0.0 - 10.0", "source": "backend/agents/evaluator_agent.py"}, "Classify": {"title": "Error Classifier", "desc": "Categorizes the type of error for pedagogical response.", "logic": "Matches inputs to 4 categories:\n- Conceptual (Deep misunderstanding)\n- Procedural (Wrong steps)\n- Incomplete (Missing info)\n- Careless (Typo/Calc)", "specs": "Taxonomy: 4 Classes", "source": "backend/agents/evaluator_agent.py"}, "Decision": {"title": "5-Path Decision Engine", "desc": "Determines the next learning action based on Score + Error.", "logic": "- Mastered (>9.0)\n- Proceed (>8.0)\n- Alternate (>6.0)\n- Remediate (<6.0 + Conceptual)\n- Retry (<6.0 + Other)", "specs": "Paths: 5 Branch Logic", "source": "backend/agents/evaluator_agent.py"}, "Update": {"title": "Mastery Update (WMA)", "desc": "Updates the learner's knowledge state.", "logic": "Hybrid Update:\nNew = (Current * 0.4) + (Score * 0.6)\nUpdates Personal Knowledge Graph.", "specs": "Algorithm: Weighted Moving Average", "source": "backend/agents/evaluator_agent.py"}, "Input": {"title": "Student Input", "desc": "The raw answer provided by the learner.", "logic": "Input text stream.", "specs": "Type: String", "source": "Frontend"}, "Ref": {"title": "Golden Answer", "desc": "The ground truth answer from the curriculum.", "logic": "Retrieved from Vector Store or Concept Node.", "specs": "Source: RAG/KG", "source": "backend/agents/evaluator_agent.py"}, "Mastered": {"title": "Path: Mastered", "desc": "Outcome when score is high (>8-9).", "logic": "Confidence High -> Mark Concept as Learned.", "specs": "Threshold: > 0.8", "source": "backend/agents/evaluator_agent.py"}, "Proceed": {"title": "Path: Proceed", "desc": "Outcome when score is passing (5-8).", "logic": "Good enough to move on, but maybe review later.", "specs": "Threshold: 0.5 - 0.8", "source": "backend/agents/evaluator_agent.py"}, "Remediate": {"title": "Path: Remediate", "desc": "Outcome when score is low (<5).", "logic": "Needs review or alternative material.", "specs": "Threshold: < 0.5", "source": "backend/agents/evaluator_agent.py"}};
+        const NODE_DETAILS = {"Judge": {"title": "JudgeLM Scoring", "desc": "Evaluates answer quality using 'Reference-as-Prior' technique.", "logic": "1. Compare Student vs Golden Answer.\n2. Score on Rubric (Correctness 60%, Completeness 20%, Clarity 20%).", "specs": "Model: Gemini 1.5 Zero-shot\nOutput: 0.0 - 10.0", "source": "backend/agents/evaluator_agent.py"}, "Classify": {"title": "Error Classifier", "desc": "Categorizes the type of error for pedagogical response.", "logic": "Matches inputs to 4 categories:\n- Conceptual (Deep misunderstanding)\n- Procedural (Wrong steps)\n- Incomplete (Missing info)\n- Careless (Typo/Calc)", "specs": "Taxonomy: 4 Classes", "source": "backend/agents/evaluator_agent.py"}, "Decision": {"title": "5-Path Decision Engine", "desc": "Determines the next learning action based on Score + Error.", "logic": "- Mastered (>= 9.0)\n- Proceed (>= 8.0)\n- Alternate (>= 6.0)\n- Remediate (<6.0 + Conceptual)\n- Retry (<6.0 + Other)", "specs": "Paths: 5 Branch Logic", "source": "backend/agents/evaluator_agent.py"}, "Update": {"title": "Mastery Update (WMA)", "desc": "Updates the learner's knowledge state.", "logic": "Hybrid Update:\nNew = (Current * 0.4) + (Score * 0.6)\nUpdates Personal Knowledge Graph.", "specs": "Algorithm: Weighted Moving Average", "source": "backend/agents/evaluator_agent.py"}, "Input": {"title": "Student Input", "desc": "The raw answer provided by the learner.", "logic": "Input text stream.", "specs": "Type: String", "source": "Frontend"}, "Ref": {"title": "Golden Answer", "desc": "The ground truth answer from the curriculum.", "logic": "Retrieved from Vector Store or Concept Node.", "specs": "Source: RAG/KG", "source": "backend/agents/evaluator_agent.py"}, "Mastered": {"title": "Path: Mastered", "desc": "Outcome when score is high (>= 9.0).", "logic": "Confidence High -> Mark Concept as Learned.", "specs": "Threshold: >= 0.9", "source": "backend/agents/evaluator_agent.py"}, "Proceed": {"title": "Path: Proceed", "desc": "Outcome when score is passing (8.0-9.0).", "logic": "Good enough to move on, but maybe review later.", "specs": "Threshold: 0.8 - 0.9", "source": "backend/agents/evaluator_agent.py"}, "Remediate": {"title": "Path: Remediate/Alternate", "desc": "Outcome when score is low (< 6.0) or mixed.", "logic": "Needs review or alternative material.", "specs": "Threshold: < 0.6 (or < 0.8 for Alternate)", "source": "backend/agents/evaluator_agent.py"}};
 
         function showDetails(nodeId) {
             const data = NODE_DETAILS[nodeId];

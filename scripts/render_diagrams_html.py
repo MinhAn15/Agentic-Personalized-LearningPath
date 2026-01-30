@@ -86,5 +86,10 @@ def generate_html(diagrams):
     print(f"[OK] Dashboard generated: {os.path.abspath(OUTPUT_FILE)}")
 
 if __name__ == "__main__":
-    diagrams = parse_markdown(MARKDOWN_FILE)
-    generate_html(diagrams)
+    files = ["docs/DEMO_WORKFLOWS.md", "docs/SYSTEM_ARCHITECTURE.md"]
+    all_diagrams = []
+    
+    for f in files:
+        all_diagrams.extend(parse_markdown(f))
+        
+    generate_html(all_diagrams)
